@@ -101,6 +101,24 @@ class AudioRouteTest {
 }
 
 @RunWith(AndroidJUnit4::class)
+class PcmPlayerTest {
+  // The shadow track takes every write at once and counts it as played, so stopping midway is checked on the device.
+  @Test
+  fun a_recording_is_played_to_the_end_and_can_be_played_again(): Unit = kotlinx.coroutines.runBlocking {
+    val player = PcmPlayer()
+    kotlinx.coroutines.withTimeout(5_000) {
+      player.play(ByteArray(3_200))
+      player.play(ByteArray(3_200))
+    }
+  }
+
+  @Test
+  fun stopping_when_nothing_plays_is_harmless() {
+    PcmPlayer().stop()
+  }
+}
+
+@RunWith(AndroidJUnit4::class)
 class TtsSpeechTest {
   @Test
   fun a_new_message_releases_the_one_it_flushes(): Unit = kotlinx.coroutines.runBlocking {
