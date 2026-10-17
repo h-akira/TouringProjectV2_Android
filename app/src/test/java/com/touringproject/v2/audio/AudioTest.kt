@@ -32,6 +32,24 @@ class StallWatchTest {
   }
 }
 
+class ClipSequenceTest {
+  @Test
+  fun a_stop_between_two_clips_keeps_the_next_one_silent() = runTest {
+    val sequence = ClipSequence()
+    val played = mutableListOf<String>()
+    // The stop arrives after the first clip has ended and before the second one starts.
+    sequence.play(listOf("1", "2", "3")) { url -> played += url; if (url == "1") sequence.stop() }
+    assertEquals(listOf("1"), played)
+  }
+
+  @Test
+  fun without_a_stop_every_clip_plays_in_order() = runTest {
+    val played = mutableListOf<String>()
+    ClipSequence().play(listOf("1", "2")) { played += it }
+    assertEquals(listOf("1", "2"), played)
+  }
+}
+
 class CueTest {
   @Test
   fun the_start_cue_is_long_and_heard_on_the_call_stream() {
