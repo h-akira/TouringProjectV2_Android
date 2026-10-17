@@ -216,7 +216,13 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       return null
     }
     d.route.stop()
-    d.recordings.saved(RecordingMeta(stopped.name, startedAt, pcmDurationMs(stopped.pcm.size), phoneMic, device, null))
+    // A microphone held by another app can start without delivering anything; sending nothing would be heard as "no speech".
+    if (stopped.pcm.isEmpty()) {
+      d.location.end()
+      fail(FailureReason.MIC, run)
+      return null
+    }
+    d.recordings.saved(RecordingMeta(stopped.name, startedAt, pcmDurationMs(stopped.pcm.size), phoneMic, device, null), stopped.pcm)
     val (currentFix, fixes) = d.location.end()
     return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, currentFix, fixes)
   }

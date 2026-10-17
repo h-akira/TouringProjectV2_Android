@@ -67,7 +67,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       recorder = PcmRecorder(),
       // Recordings are kept for SC-12 from plan 2 of the migration.
       recordings = object : RecordingSink {
-        override fun saved(meta: RecordingMeta) = Unit
+        override fun saved(meta: RecordingMeta, pcm: ByteArray) = Unit
         override fun transcribed(name: String, transcript: String) = Unit
       },
       location = PositionTracker(FusedPositionSource(context)),

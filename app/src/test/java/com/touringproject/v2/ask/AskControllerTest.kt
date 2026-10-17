@@ -55,11 +55,13 @@ private class Harness(
   val sayGate: CompletableDeferred<Unit>? = null,
   val serviceError: Exception? = null,
   val device: InputDevice? = InputDevice(InputDevice.Type.BLUETOOTH, "M1-S PRO"),
+  val pcm: ByteArray = byteArrayOf(1, 2, 3),
 ) {
   val log = mutableListOf<String>()
   val states = mutableListOf<FlowState>()
   val bodies = mutableListOf<AskBody>()
   val metas = mutableListOf<RecordingMeta>()
+  val keptPcm = mutableListOf<ByteArray>()
   val transcripts = mutableListOf<Pair<String, String>>()
   private val results = answers.toMutableList()
   fun now() = scope.testScheduler.currentTime
@@ -99,11 +101,11 @@ private class Harness(
     },
     recorder = object : Recorder {
       override suspend fun start() { log += "rec:start" }
-      override suspend fun stop(): Recorded { log += "rec:stop"; return Recorded(byteArrayOf(1, 2, 3), "rec-0.pcm") }
+      override suspend fun stop(): Recorded { log += "rec:stop"; return Recorded(pcm, "rec-0.pcm") }
       override suspend fun cancel() { log += "rec:cancel" }
     },
     recordings = object : RecordingSink {
-      override fun saved(meta: RecordingMeta) { metas += meta }
+      override fun saved(meta: RecordingMeta, pcm: ByteArray) { metas += meta; keptPcm += pcm }
       override fun transcribed(name: String, transcript: String) { transcripts += name to transcript }
     },
     location = object : Positions {
@@ -420,7 +422,20 @@ class AskControllerTest {
     h.controller.run(Source.HANDSFREE)
     // 3 bytes of PCM is shorter than a millisecond.
     assertEquals(listOf(RecordingMeta("rec-0.pcm", 0, 0, false, InputDevice(InputDevice.Type.BLUETOOTH, "M1-S PRO"), null)), h.metas)
+    assertEquals(listOf(listOf<Byte>(1, 2, 3)), h.keptPcm.map { it.toList() })
     assertEquals(listOf("rec-0.pcm" to "Q"), h.transcripts)
+  }
+
+  @Test
+  fun a_recording_with_nothing_in_it_fails_as_a_microphone_problem() = runTest {
+    // e.g. another app holds the microphone (issue #1): "録音できませんでした", not "聞き取れませんでした".
+    val h = Harness(this, pcm = ByteArray(0))
+    h.controller.run(Source.HANDSFREE)
+    assertFalse("post" in h.log)
+    assertTrue(h.states.any { it.phase == Phase.FAILED && it.failure == FailureReason.MIC })
+    assertTrue("say:録音できませんでした。" in h.log)
+    assertTrue(h.metas.isEmpty())
+    assertEquals(Phase.IDLE, h.phase)
   }
 
   @Test
