@@ -1,0 +1,314 @@
+package com.touringproject.v2.ask
+
+import com.touringproject.v2.api.ApiError
+import com.touringproject.v2.api.ApiErrorKind
+import com.touringproject.v2.api.AskAccepted
+import com.touringproject.v2.api.AskApi
+import com.touringproject.v2.api.AskBody
+import com.touringproject.v2.api.AskResult
+import com.touringproject.v2.api.Point
+import com.touringproject.v2.location.Fix
+import com.touringproject.v2.location.pickHeadingSample
+import com.touringproject.v2.settings.ReturnTiming
+import com.touringproject.v2.settings.Settings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import java.util.Base64
+
+const val RECORD_LIMIT_MS = 20_000L
+const val TICK_MS = 250L
+const val WAITING_CUE_MS = 5_000L
+const val FAILED_SCREEN_MS = 5_000L
+
+/** 16 kHz mono 16-bit PCM: 32 bytes per millisecond. */
+fun pcmDurationMs(bytes: Int): Long = bytes / 32L
+
+private fun reasonFor(error: Throwable): FailureReason = when ((error as? ApiError)?.kind) {
+  ApiErrorKind.INVALID_KEY -> FailureReason.INVALID_KEY
+  ApiErrorKind.BAD_REQUEST -> FailureReason.NO_SPEECH
+  else -> FailureReason.NETWORK
+}
+
+/**
+ * Orchestrates one ask: record -> send -> (return to nav) -> wait -> speak. Call it from one thread only (the main
+ * thread in the app): the state is not guarded. A cancel or a newer ask does not interrupt the older one's awaits;
+ * the older one notices it is no longer current when they return and does nothing more.
+ */
+class AskController(private val deps: AskDeps, private val scope: CoroutineScope) {
+  var state: FlowState = IDLE
+    private set
+
+  /** How many asks were started; read by tests to check that one press starts exactly one ask. */
+  var runsStarted = 0
+    private set
+
+  private var runId = 0
+  private var current: Run? = null
+  private var serviceRunning = false
+  // "いま応答中です…" being said; the answer waits for it so the two never overlap.
+  private var busySpeech: Deferred<Unit>? = null
+
+  // Per-ask state: an older ask that is still unwinding must not read or change the newer one's.
+  private class Run(val id: Int, val source: Source, var returned: Boolean = false)
+
+  private class Recording(val audio: String, val name: String, val current: Fix?, val fixes: List<Fix>)
+
+  /** The intercom button: start, stop the recording, or say that an answer is on its way. */
+  fun press() {
+    when {
+      state.phase == Phase.RECORDING -> stopRecording()
+      // The answer is already being heard; a spoken notice would only talk over it.
+      state.phase == Phase.SPEAKING -> Unit
+      isBusy(state) -> sayBusy()
+      else -> scope.launch { run(Source.HANDSFREE) }
+    }
+  }
+
+  fun tapToTalk() {
+    if (!isBusy(state)) scope.launch { run(Source.SCREEN) }
+  }
+
+  fun stopRecording() {
+    if (state.phase == Phase.RECORDING) dispatch(FlowEvent.StopRecording(deps.now()))
+  }
+
+  /** The big button: end the current ask now; whatever it is awaiting is ignored when it returns. */
+  fun cancel() {
+    if (state.phase == Phase.IDLE) return
+    runId += 1
+    current = null
+    deps.player.stop()
+    deps.speech.stop()
+    dispatch(FlowEvent.Dismiss(deps.now()))
+    stopService()
+  }
+
+  fun resetConversation() = deps.conversation.reset()
+
+  suspend fun run(source: Source) {
+    val d = deps
+    // A previous ask may still be reading its failure message; the new ask takes over the audio.
+    if (state.phase == Phase.FAILED) d.speech.stop()
+    val run = Run(++runId, source)
+    current = run
+    runsStarted += 1
+    dispatch(FlowEvent.Start(source, d.now(), d.mediaVolume()))
+    try {
+      val apiKey = d.apiKey()
+      if (apiKey == null) {
+        fail(FailureReason.NO_KEY, run)
+        return
+      }
+      if (!d.micAllowed()) {
+        fail(FailureReason.MIC, run)
+        return
+      }
+      if (!isCurrent(run)) return
+      val settings = d.settings()
+      val api = d.api(apiKey, settings.userName)
+      try {
+        d.service.start()
+      } catch (e: Exception) {
+        // Without the foreground service the ask would stall once the screen is off; say so instead.
+        d.log("service_failed", mapOf("error" to e.toString()))
+        fail(FailureReason.SERVICE, run)
+        return
+      }
+      serviceRunning = true
+      val recording = record(run) ?: return
+      val accepted = send(recording, api, run) ?: return
+      maybeReturn(ReturnTiming.SENT, settings, run)
+      val result = waitForAnswer(accepted.askId, recording.name, api, run) ?: return
+      speak(result, settings, run)
+    } finally {
+      // A newer ask (or a cancel) owns the screen state and the foreground service; leave both to it.
+      if (isCurrent(run)) {
+        current = null
+        dispatch(FlowEvent.Dismiss(d.now()))
+        stopService()
+      }
+    }
+  }
+
+  private fun stopService() {
+    if (!serviceRunning) return
+    serviceRunning = false
+    deps.service.stop()
+  }
+
+  private fun dispatch(event: FlowEvent) {
+    val next = reduce(state, event)
+    if (next == state) return
+    state = next
+    deps.onState(next)
+  }
+
+  private fun isCurrent(run: Run) = run.id == runId
+
+  // The press itself brought this app over the nav app, so go back once the rider has heard the message.
+  private fun sayBusy() {
+    val d = deps
+    val run = current
+    val said = scope.async { d.speech.say(BUSY_MESSAGE) }
+    busySpeech = said
+    scope.launch {
+      said.await()
+      if (busySpeech === said) busySpeech = null
+      if (run == null || !isCurrent(run) || run.source != Source.HANDSFREE || !run.returned) return@launch
+      val settings = d.settings()
+      val app = settings.returnApp
+      if (settings.returnEnabled && app != null) d.nav.returnTo(app.packageName)
+    }
+  }
+
+  private suspend fun record(run: Run): Recording? {
+    val d = deps
+    d.location.begin()
+    val routed = d.route.start(run.source)
+    if (!routed) dispatch(FlowEvent.PhoneMic(d.now()))
+    try {
+      d.recorder.start()
+    } catch (e: Exception) {
+      d.route.stop()
+      d.location.end()
+      fail(FailureReason.MIC, run)
+      return null
+    }
+    // After the recorder is running: the rider starts talking on this cue, so nothing said after it is lost.
+    d.cues.start()
+    val startedAt = d.now()
+    while (state.phase == Phase.RECORDING && isCurrent(run) && d.now() - startedAt < RECORD_LIMIT_MS) {
+      d.sleep(TICK_MS)
+    }
+    if (!isCurrent(run)) {
+      d.recorder.cancel()
+      d.route.stop()
+      d.location.end()
+      return null
+    }
+    // Read while the recorder still runs: the system only reports the input device of an active recording.
+    val device = d.route.inputDevice()
+    val phoneMic = state.phoneMic
+    stopRecording()
+    val stopped = try {
+      d.recorder.stop()
+    } catch (e: Exception) {
+      d.route.stop()
+      d.location.end()
+      fail(FailureReason.MIC, run)
+      return null
+    }
+    d.route.stop()
+    d.recordings.saved(RecordingMeta(stopped.name, startedAt, pcmDurationMs(stopped.pcm.size), phoneMic, device, null))
+    val (currentFix, fixes) = d.location.end()
+    return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, currentFix, fixes)
+  }
+
+  private suspend fun send(recording: Recording, api: AskApi, run: Run): AskAccepted? {
+    val d = deps
+    val here = recording.current
+    val body = AskBody(
+      volumeDb = d.settings().answerVolumeDb,
+      audio = recording.audio,
+      location = here?.let { Point(it.latitude, it.longitude) },
+      headingSample = here?.let { pickHeadingSample(recording.fixes, it) },
+      conversationId = d.conversation.current(d.now()),
+    )
+    val accepted = try {
+      api.postAsk(body)
+    } catch (e: Exception) {
+      d.log("post_failed", mapOf("kind" to ((e as? ApiError)?.kind?.name ?: "unknown")))
+      fail(reasonFor(e), run)
+      return null
+    }
+    // The ask exists on the Backend either way, so keep the conversation going even if it was cancelled.
+    d.conversation.update(accepted.conversationId, accepted.conversationExpiresAt)
+    if (!isCurrent(run)) return null
+    dispatch(FlowEvent.Sent(accepted.askId, d.now()))
+    d.cues.sent()
+    return accepted
+  }
+
+  private suspend fun waitForAnswer(askId: String, recordingName: String, api: AskApi, run: Run): AskResult? {
+    val d = deps
+    var sinceCue = 0L
+    val sleep: suspend (Long) -> Unit = { ms ->
+      d.sleep(ms)
+      sinceCue += ms
+      if (sinceCue >= WAITING_CUE_MS && isCurrent(run)) {
+        sinceCue = 0
+        d.cues.waiting()
+      }
+    }
+    val outcome = try {
+      pollUntilDone({ api.getAsk(askId) }, sleep, d.now) { !isCurrent(run) }
+    } catch (e: Exception) {
+      fail(reasonFor(e), run)
+      return null
+    }
+    if (outcome is PollOutcome.Done) outcome.result.transcript?.let { d.recordings.transcribed(recordingName, it) }
+    if (outcome is PollOutcome.Cancelled || !isCurrent(run)) return null
+    if (outcome is PollOutcome.Timeout) {
+      fail(FailureReason.TIMEOUT, run)
+      return null
+    }
+    val result = (outcome as PollOutcome.Done).result
+    val readable = result.status == "completed" || (result.error == "tts_failed" && !result.answer.isNullOrEmpty())
+    if (!readable) {
+      fail(failureFromServer(result.error), run)
+      return null
+    }
+    return result
+  }
+
+  private suspend fun speak(result: AskResult, settings: Settings, run: Run) {
+    val d = deps
+    dispatch(FlowEvent.Answered(result.answer ?: "", d.now()))
+    maybeReturn(ReturnTiming.ANSWERED, settings, run)
+    val urls = result.audio.sortedBy { it.seq }.map { it.url }
+    busySpeech?.await()
+    var played = false
+    if (urls.isNotEmpty() && isCurrent(run)) {
+      try {
+        d.player.play(urls)
+        played = true
+      } catch (e: Exception) {
+        d.log("play_failed", mapOf("error" to e.toString()))
+      }
+    }
+    if (!played && isCurrent(run) && !result.answer.isNullOrEmpty()) d.speech.say(result.answer)
+    maybeReturn(ReturnTiming.SPOKEN, settings, run)
+  }
+
+  private suspend fun maybeReturn(moment: ReturnTiming, settings: Settings, run: Run) {
+    if (run.returned || !isCurrent(run) || !shouldReturnNow(run.source, settings, moment)) return
+    run.returned = true
+    deps.nav.returnTo(settings.returnApp!!.packageName)
+  }
+
+  private suspend fun fail(reason: FailureReason, run: Run) {
+    val d = deps
+    if (!isCurrent(run)) return
+    dispatch(FlowEvent.Fail(reason, d.now()))
+    d.cues.failure()
+    d.speech.say(spokenMessage(reason))
+    if (!isCurrent(run)) return
+    val settings = d.settings()
+    if (run.source == Source.HANDSFREE) {
+      // US-B-04.006: a failed answer still ends with the nav app in front.
+      val app = settings.returnApp
+      if (!run.returned && settings.returnEnabled && app != null) {
+        run.returned = true
+        d.nav.returnTo(app.packageName)
+      }
+      return
+    }
+    var waited = 0L
+    while (waited < FAILED_SCREEN_MS && isCurrent(run) && state.phase == Phase.FAILED) {
+      d.sleep(TICK_MS)
+      waited += TICK_MS
+    }
+  }
+}
