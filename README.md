@@ -34,6 +34,18 @@ TouringProjectV2 の Android アプリ（Kotlin・Jetpack Compose）。
 
 Robolectric は SDK 35 で動かす（`app/src/test/resources/robolectric.properties`。SDK 36 には Java 21 が要る）。
 
+## エミュレーター
+
+```sh
+SDK=$HOME/Library/Android/sdk
+$SDK/cmdline-tools/latest/bin/android --no-metrics emulator create medium_phone   # 初回だけ
+$SDK/cmdline-tools/latest/bin/android --no-metrics emulator start medium_phone
+./gradlew connectedDebugAndroidTest
+$SDK/cmdline-tools/latest/bin/android --no-metrics emulator stop medium_phone
+```
+
+インカムの合図は `adb shell am start -a android.intent.action.VOICE_COMMAND -n com.touringproject.v2/.MainActivity` で送れる。
+
 ## 実機で動かす
 
 `local.properties`（追跡しない）に API の URL を書く。
