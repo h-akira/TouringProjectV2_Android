@@ -63,6 +63,14 @@ class LabelsTest {
   }
 
   @Test
+  fun a_key_the_http_header_cannot_carry_is_refused_without_crashing() = runTest {
+    val saved = mutableListOf<String>()
+    assertEquals(KeyCheck.INVALID, checkAndSave("ｋｅｙ", { throw IllegalArgumentException("Unexpected char") }, { saved += it }))
+    assertEquals(KeyCheck.UNREACHABLE, checkAndSave("x", {}, { throw java.security.GeneralSecurityException("keystore") }))
+    assertEquals(emptyList<String>(), saved)
+  }
+
+  @Test
   fun apps_are_filtered_by_label_or_package_name() {
     val apps = listOf(LaunchableApp("com.google.android.apps.maps", "マップ"), LaunchableApp("jp.co.yahoo.carnavi", "カーナビ"))
     assertEquals(apps, filterApps(apps, "  "))

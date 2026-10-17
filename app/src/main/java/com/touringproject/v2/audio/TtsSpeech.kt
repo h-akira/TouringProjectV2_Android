@@ -34,6 +34,8 @@ class TtsSpeech(context: Context) : Speech {
   override suspend fun say(text: String) {
     if (!ready.await()) return
     tts.language = Locale.JAPAN
+    // QUEUE_FLUSH drops whatever is still being said; release its caller even if the engine reports nothing for it.
+    pending.keys.toList().forEach { settle(it) }
     val id = "u${ids.incrementAndGet()}"
     val done = CompletableDeferred<Unit>()
     pending[id] = done

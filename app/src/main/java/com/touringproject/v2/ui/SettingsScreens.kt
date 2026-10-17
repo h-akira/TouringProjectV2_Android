@@ -81,6 +81,13 @@ suspend fun checkAndSave(key: String, check: suspend (String) -> Unit, save: sus
   KeyCheck.SAVED
 } catch (e: ApiError) {
   if (e.kind == ApiErrorKind.INVALID_KEY) KeyCheck.INVALID else KeyCheck.UNREACHABLE
+} catch (e: IllegalArgumentException) {
+  // OkHttp refuses header values it cannot send (e.g. full-width characters pasted into the key).
+  KeyCheck.INVALID
+} catch (e: kotlinx.coroutines.CancellationException) {
+  throw e
+} catch (e: Exception) {
+  KeyCheck.UNREACHABLE
 }
 
 // SC-13

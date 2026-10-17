@@ -48,6 +48,7 @@ private class Harness(
   var post: suspend () -> AskAccepted = { ACCEPTED },
   answers: List<Any> = listOf(done()),
   val routeOk: Boolean = true,
+  var routeStart: (suspend () -> Boolean)? = null,
   var play: suspend (List<String>) -> Unit = {},
   val stopAfterMs: Long? = 3_000,
   val micAllowed: Boolean = true,
@@ -92,7 +93,7 @@ private class Harness(
     api = { _, _ -> api },
     conversation = ConversationState(),
     route = object : RouteControl {
-      override suspend fun start(source: Source): Boolean { log += "route:${source.name.lowercase()}"; return routeOk }
+      override suspend fun start(source: Source): Boolean { log += "route:${source.name.lowercase()}"; return routeStart?.invoke() ?: routeOk }
       override suspend fun stop() { log += "route:stop" }
       override fun inputDevice() = device
     },
@@ -486,5 +487,27 @@ class AskControllerTest {
     h.controller.press()
     testScheduler.advanceUntilIdle()
     assertEquals(1, h.controller.runsStarted)
+  }
+
+  @Test
+  fun a_cancel_during_route_setup_does_not_start_the_recording() = runTest {
+    val gate = CompletableDeferred<Boolean>()
+    val h = Harness(this, stopAfterMs = null, routeStart = { gate.await() })
+    val running = launch { h.controller.run(Source.SCREEN) }
+    h.until { "route:screen" in h.log }
+    h.controller.cancel()
+    gate.complete(true)
+    running.join()
+    assertFalse("rec:start" in h.log)
+    assertFalse("cue:start" in h.log)
+    assertTrue("route:stop" in h.log)
+  }
+
+  @Test
+  fun a_route_that_throws_falls_back_to_the_phone_mic() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000, routeStart = { throw SecurityException("BLUETOOTH_CONNECT") })
+    h.controller.run(Source.HANDSFREE)
+    assertTrue(h.states.any { it.phase == Phase.RECORDING && it.phoneMic })
+    assertTrue("post" in h.log)
   }
 }

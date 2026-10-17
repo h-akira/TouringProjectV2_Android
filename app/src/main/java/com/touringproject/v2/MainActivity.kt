@@ -19,7 +19,7 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    handleVoiceCommand(intent)
+    handleVoiceCommand(intent, restored = savedInstanceState != null)
     if (savedInstanceState == null) {
       permissions.launch(
         arrayOf(
@@ -37,13 +37,15 @@ class MainActivity : ComponentActivity() {
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
-    handleVoiceCommand(intent)
+    handleVoiceCommand(intent, restored = false)
   }
 
   // The intercom's assistant button. The action is rewritten so a recreated activity does not count the same press again.
-  private fun handleVoiceCommand(intent: Intent?) {
+  // A restored activity (after process death) and a task reopened from Recents carry the original intent: not a new press.
+  private fun handleVoiceCommand(intent: Intent?, restored: Boolean) {
     if (intent?.action != Intent.ACTION_VOICE_COMMAND) return
     intent.action = Intent.ACTION_MAIN
+    if (restored || intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
     val now = System.currentTimeMillis()
     graph.presses.offer(now, now)
   }

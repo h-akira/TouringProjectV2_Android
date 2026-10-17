@@ -38,4 +38,16 @@ class MainActivityTest {
       assertEquals(1, graph.controller.runsStarted)
     }
   }
+
+  @Test
+  fun reopening_from_recents_does_not_count_the_old_press_again() {
+    val graph = app.graph
+    val fromRecents = voiceCommand().addFlags(Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY)
+    ActivityScenario.launch<MainActivity>(fromRecents).use {
+      graph.permissionsAnswered()
+      waitUntil { graph.isReady.value }
+      repeat(20) { shadowOf(Looper.getMainLooper()).idle() }
+      assertEquals(0, graph.controller.runsStarted)
+    }
+  }
 }

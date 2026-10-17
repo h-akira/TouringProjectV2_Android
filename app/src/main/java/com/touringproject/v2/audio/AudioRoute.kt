@@ -118,7 +118,12 @@ class AudioRoute(private val context: Context) {
         done(false, "no headset proxy")
         return@withHeadset
       }
-      val device = pickDevice(h)
+      val device = try {
+        pickDevice(h)
+      } catch (e: SecurityException) {
+        done(false, "no Bluetooth permission")
+        return@withHeadset
+      }
       if (device == null) {
         done(false, "no HFP device connected")
         return@withHeadset
@@ -207,7 +212,9 @@ class AudioRoute(private val context: Context) {
   // Prefer the HFP device that is the current SCO sink when several are connected.
   private fun pickDevice(h: BluetoothHeadset): BluetoothDevice? {
     val devices = h.connectedDevices
-    val activeAddress = audioManager.availableCommunicationDevices.firstOrNull { it.type == SCO_TYPE }?.address
+    val activeAddress = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      audioManager.availableCommunicationDevices.firstOrNull { it.type == SCO_TYPE }?.address
+    } else null
     return devices.firstOrNull { it.address == activeAddress } ?: devices.firstOrNull()
   }
 
@@ -278,6 +285,11 @@ class AudioRoute(private val context: Context) {
   // ---------------- screen button: virtual call ----------------
 
   private fun acquireSco(timeoutMs: Long, done: (Boolean, String) -> Unit) {
+    // The communication-device API is Android 12+; before that the screen button records from the phone's microphone.
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+      done(false, "needs Android 12")
+      return
+    }
     val am = audioManager
     am.communicationDevice?.let { if (it.type == SCO_TYPE) { done(true, "already SCO"); return } }
     am.mode = AudioManager.MODE_IN_COMMUNICATION

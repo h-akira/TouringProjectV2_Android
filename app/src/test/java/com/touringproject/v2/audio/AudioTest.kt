@@ -11,6 +11,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runTest
 
 class StallWatchTest {
   @Test
@@ -60,5 +63,38 @@ class AudioRouteTest {
     audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
     assertNull(AudioRoute(context).mediaVolume())
     audioManager.mode = AudioManager.MODE_NORMAL
+  }
+
+  @Test
+  @Config(sdk = [30])
+  fun before_android_12_the_screen_route_reports_no_intercom_instead_of_crashing() {
+    // acquireSco switches to the main thread, so it is called from another thread while this one runs the main looper.
+    var result: RouteResult? = null
+    val route = AudioRoute(context)
+    Thread { result = kotlinx.coroutines.runBlocking { route.acquireSco(1_000) } }.start()
+    repeat(400) {
+      if (result == null) {
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        Thread.sleep(5)
+      }
+    }
+    assertFalse(result!!.ok)
+  }
+}
+
+@RunWith(AndroidJUnit4::class)
+class TtsSpeechTest {
+  @Test
+  fun a_new_message_releases_the_one_it_flushes(): Unit = kotlinx.coroutines.runBlocking {
+    val speech = TtsSpeech(ApplicationProvider.getApplicationContext())
+    val tts = org.robolectric.shadows.ShadowTextToSpeech.getLastTextToSpeechInstance()
+    org.robolectric.Shadows.shadowOf(tts).onInitListener.onInit(android.speech.tts.TextToSpeech.SUCCESS)
+    val first = async(kotlinx.coroutines.Dispatchers.Default) { speech.say("いま応答中です") }
+    var waited = 0
+    while (org.robolectric.Shadows.shadowOf(tts).lastSpokenText != "いま応答中です" && waited++ < 200) Thread.sleep(10)
+    // QUEUE_FLUSH drops the first utterance; some engines never report onStop for it.
+    val second = async(kotlinx.coroutines.Dispatchers.Default) { speech.say("録音できませんでした。") }
+    kotlinx.coroutines.withTimeout(5_000) { first.await() }
+    second.cancel()
   }
 }

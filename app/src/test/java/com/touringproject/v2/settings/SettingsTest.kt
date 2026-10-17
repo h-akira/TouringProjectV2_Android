@@ -63,6 +63,21 @@ class SettingsTest {
   }
 
   @Test
+  fun a_store_that_cannot_be_read_falls_back_to_defaults() = runTest {
+    val broken = object : KeyValueStore {
+      override suspend fun get(key: String): String? = throw java.io.IOException("corrupt")
+      override suspend fun set(key: String, value: String?) = throw java.io.IOException("read-only")
+    }
+    val errors = mutableListOf<String>()
+    val repo = SettingsRepository(broken, Random(4)) { message, _ -> errors += message }
+    val loaded = repo.load()
+    assertEquals(Settings(userName = loaded.userName), loaded)
+    repo.update(loaded.copy(returnEnabled = false))
+    assertFalse(repo.current().returnEnabled)
+    assertEquals(3, errors.size)
+  }
+
+  @Test
   fun recent_apps_keep_the_latest_five_without_duplicates() {
     val apps = (1..6).map { LaunchableApp("p$it", "A$it") }
     var recent = emptyList<LaunchableApp>()

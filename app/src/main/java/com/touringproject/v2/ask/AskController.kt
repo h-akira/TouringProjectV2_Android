@@ -11,6 +11,7 @@ import com.touringproject.v2.location.Fix
 import com.touringproject.v2.location.pickHeadingSample
 import com.touringproject.v2.settings.ReturnTiming
 import com.touringproject.v2.settings.Settings
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -166,7 +167,21 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   private suspend fun record(run: Run): Recording? {
     val d = deps
     d.location.begin()
-    val routed = d.route.start(run.source)
+    val routed = try {
+      d.route.start(run.source)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      // e.g. the Bluetooth permission was denied: record from the phone's microphone instead of failing the ask.
+      d.log("route_failed", mapOf("error" to e.toString()))
+      false
+    }
+    // Setting up the route can take seconds; a cancel or a newer ask meanwhile owns the recorder and the route.
+    if (!isCurrent(run)) {
+      d.route.stop()
+      d.location.end()
+      return null
+    }
     if (!routed) dispatch(FlowEvent.PhoneMic(d.now()))
     try {
       d.recorder.start()
