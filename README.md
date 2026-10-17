@@ -1,0 +1,50 @@
+# TouringProjectV2_Android
+
+TouringProjectV2 の Android アプリ（Kotlin・Jetpack Compose）。
+インカムのボタンで質問を始め、回答を背面で待って読み上げ、ナビのアプリへ戻る。
+プロジェクト全体の要件・方針・契約は [docs-parent/](docs-parent/README.md)（親リポジトリの写し。編集しない）。
+
+## 構成
+
+| 場所 | 中身 |
+|---|---|
+| `app/src/main/java/com/touringproject/v2/ask/` | 一巡の状態機械（`Flow.kt`）・司令塔（`AskController.kt`）・外との窓口（`AskPorts.kt`）・ポーリング・会話・失敗の読み上げ文 |
+| `.../api/` | Backend の API（`Backend/openapi.yaml`） |
+| `.../audio/` | インカムの経路・録音・再生・端末の音声・合図 |
+| `.../location/` | 位置の監視と方位の材料の選び方 |
+| `.../handsfree/` | 押下の重複・古い合図の除外 |
+| `.../service/`・`.../nav/` | 前面サービス・ナビを開く |
+| `.../settings/` | 設定（DataStore）と接続キー（Keystore で暗号化） |
+| `.../ui/` | 画面（Compose） |
+
+## 大事な決まり
+
+- 一巡のあいだは前面サービスを動かす（無いと、画面を消したあと通信と再生が止まる）。
+- インカムは音の出だしを落とす。合図は長さを指定できる音（`TONE_SUP_DIAL`・`TONE_DTMF_*`）で長めに鳴らし、開始の合図は録音が始まってから鳴らす。`TONE_PROP_*` は、長さを指定しても約0.16秒で止まる。
+- インカムのボタンの経路では `setCommunicationDevice()` を呼ばない（`AudioRoute.kt` の冒頭のコメント）。
+- 回答は音声の焦点（audio focus）を取らずに鳴らす（ナビの案内と重ねる）。
+- `MainActivity` は `singleTask`。`ActivityScenario` はこれを追えないので、エミュレーターのテストは Activity を直接起動する。
+
+## テスト
+
+```sh
+./gradlew testDebugUnitTest            # JVM（JUnit・Robolectric・Compose）。端末は要らない
+./gradlew connectedDebugAndroidTest    # エミュレーター（下の「エミュレーター」）
+```
+
+Robolectric は SDK 35 で動かす（`app/src/test/resources/robolectric.properties`。SDK 36 には Java 21 が要る）。
+
+## 実機で動かす
+
+`local.properties`（追跡しない）に API の URL を書く。
+
+```sh
+URL=$(AWS_PROFILE=touring aws cloudformation describe-stacks --region ap-northeast-1 --stack-name stack-trv2-dev-backend \
+  --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
+printf 'trv2.apiBaseUrl=%s\n' "$URL" >> local.properties
+./gradlew installDebug
+```
+
+接続キーは、アプリの「設定 → 接続の設定」で入れる（Backend の README の手順で読む）。キーをどこにも表示せずに入れるときは、入力欄を開いた状態で `adb shell input text "$KEY"` で打ち込む。
+
+ログは `adb logcat -s trv2.ask trv2.route trv2.ride`。
