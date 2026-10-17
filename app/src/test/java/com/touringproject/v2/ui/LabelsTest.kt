@@ -6,10 +6,17 @@ import com.touringproject.v2.api.ApiErrorKind
 import com.touringproject.v2.ask.FailureReason
 import com.touringproject.v2.ask.FlowState
 import com.touringproject.v2.ask.Phase
+import com.touringproject.v2.audio.InputDevice
+import com.touringproject.v2.audio.MediaVolume
+import com.touringproject.v2.recordings.TRIAL_IDLE
+import com.touringproject.v2.recordings.TrialPhase
+import com.touringproject.v2.recordings.TrialState
 import com.touringproject.v2.settings.LaunchableApp
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 
@@ -43,6 +50,61 @@ class LabelsTest {
   }
 
   @Test
+  fun the_low_volume_band_comes_last() {
+    assertEquals(Banner.NO_RETURN_APP, homeBanner(hasKey = true, returnAppMissing = true, volumeLow = true))
+    assertEquals(Banner.LOW_VOLUME, homeBanner(hasKey = true, returnAppMissing = false, volumeLow = true))
+  }
+
+  @Test
+  fun the_media_volume_is_low_below_a_third_of_the_maximum() {
+    assertTrue(mediaVolumeLow(MediaVolume(4, 15)))
+    assertFalse(mediaVolumeLow(MediaVolume(5, 15)))
+    assertFalse(mediaVolumeLow(MediaVolume(0, 0)))
+    assertFalse(mediaVolumeLow(null))
+  }
+
+  @Test
+  fun the_volume_is_only_read_while_no_ask_holds_the_route() {
+    assertTrue(volumeReadable(Phase.IDLE))
+    assertTrue(volumeReadable(Phase.FAILED))
+    assertFalse(volumeReadable(Phase.RECORDING))
+    assertFalse(volumeReadable(Phase.SPEAKING))
+  }
+
+  @Test
+  fun a_withheld_reading_keeps_the_last_good_one() {
+    // AudioRoute.mediaVolume() is null while media still routes to the intercom's call link.
+    assertEquals(MediaVolume(10, 15), nextVolume(MediaVolume(10, 15), null))
+    assertEquals(MediaVolume(3, 15), nextVolume(MediaVolume(10, 15), MediaVolume(3, 15)))
+  }
+
+  @Test
+  fun a_dismissed_warning_stays_closed_until_the_volume_changes() {
+    assertTrue(volumeWarning(MediaVolume(3, 15), null))
+    assertFalse(volumeWarning(MediaVolume(3, 15), 3))
+    assertTrue(volumeWarning(MediaVolume(2, 15), 3))
+    assertFalse(volumeWarning(MediaVolume(10, 15), null))
+  }
+
+  @Test
+  fun kept_recordings_are_described_in_japan_time() {
+    assertEquals("10/17 10:35:07", recordedAtLabel(Instant.parse("2026-10-17T01:35:07Z").toEpochMilli()))
+    assertEquals("1.5秒", durationLabel(1_500))
+    assertEquals(Heard("（聞き取られた文はまだありません）", false), transcriptLabel(null))
+    assertEquals(Heard("聞き取れませんでした", true), transcriptLabel(""))
+    assertEquals("インカム（M1-S PRO）", micLabel(false, InputDevice(InputDevice.Type.BLUETOOTH, "M1-S PRO")))
+    assertEquals("本体のマイク", micLabel(true, null))
+  }
+
+  @Test
+  fun the_trial_text_follows_the_trial() {
+    assertEquals("試し録り", trialText(TRIAL_IDLE).button)
+    assertEquals("止めて聞く", trialText(TrialState(phase = TrialPhase.RECORDING)).button)
+    assertEquals("再生中: インカム（M1-S PRO）", trialText(TrialState(phase = TrialPhase.PLAYING, device = InputDevice(InputDevice.Type.BLUETOOTH, "M1-S PRO"))).status)
+    assertEquals("録ったマイク: 本体のマイク", trialText(TrialState(phoneMic = true)).status)
+  }
+
+  @Test
   fun overlay_text_per_phase() {
     val recording = overlayText(FlowState(phase = Phase.RECORDING), seconds = 3)
     assertEquals("17", recording.big)
@@ -66,7 +128,7 @@ class LabelsTest {
   fun a_key_the_http_header_cannot_carry_is_refused_without_crashing() = runTest {
     val saved = mutableListOf<String>()
     assertEquals(KeyCheck.INVALID, checkAndSave("ｋｅｙ", { throw IllegalArgumentException("Unexpected char") }, { saved += it }))
-    assertEquals(KeyCheck.UNREACHABLE, checkAndSave("x", {}, { throw java.security.GeneralSecurityException("keystore") }))
+    assertEquals(KeyCheck.SAVE_FAILED, checkAndSave("x", {}, { throw java.security.GeneralSecurityException("keystore") }))
     assertEquals(emptyList<String>(), saved)
   }
 

@@ -30,6 +30,9 @@ android {
   buildTypes {
     release {
       isMinifyEnabled = false
+      // The riding build only goes onto our own phones, so it is signed with the debug key: installing it over the
+      // debug build keeps the settings, the connection key and the recordings (migration plan 2).
+      signingConfig = signingConfigs.getByName("debug")
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
   }
@@ -77,6 +80,8 @@ dependencies {
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.okhttp)
   implementation(libs.play.services.location)
+  // Play services bring Fragment 1.1.0, which the release lint rejects next to the Activity Result API; the app uses no fragments.
+  implementation(libs.androidx.fragment)
   debugImplementation(libs.androidx.compose.ui.tooling)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
 

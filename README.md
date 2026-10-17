@@ -12,7 +12,8 @@ TouringProjectV2 の Android アプリ（Kotlin・Jetpack Compose）。
 | `.../api/` | Backend の API（`Backend/openapi.yaml`） |
 | `.../audio/` | インカムの経路・録音・再生・端末の音声・合図 |
 | `.../location/` | 位置の監視と方位の材料の選び方 |
-| `.../handsfree/` | 押下の重複・古い合図の除外 |
+| `.../handsfree/` | 押下の重複・古い合図の除外・押下の行き先（試し録り中は試し録りへ） |
+| `.../recordings/` | 録音の置き場（直近10件と付随情報）・試し録りの司令塔・録音の確認（SC-12）の状態 |
 | `.../service/`・`.../nav/` | 前面サービス・ナビを開く |
 | `.../settings/` | 設定（DataStore）と接続キー（Keystore で暗号化） |
 | `.../ui/` | 画面（Compose） |
@@ -24,6 +25,8 @@ TouringProjectV2 の Android アプリ（Kotlin・Jetpack Compose）。
 - インカムのボタンの経路では `setCommunicationDevice()` を呼ばない（`AudioRoute.kt` の冒頭のコメント）。
 - 回答は音声の焦点（audio focus）を取らずに鳴らす（ナビの案内と重ねる）。
 - `MainActivity` は `singleTask`。`ActivityScenario` はこれを追えないので、エミュレーターのテストは Activity を直接起動する。
+- 録音の確認（SC-12）は、質問とは別の経路の切り替え・録音・再生を持つ。画面を離れても、読み上げ中の回答は止めない。
+- 録音は `filesDir/recordings/` に `rec-<時刻>.pcm` と `rec-<時刻>.json` の組で直近10件を残す。片方しか無い組と読めない JSON は、次に残すときに消す。
 
 ## テスト
 
@@ -33,6 +36,8 @@ TouringProjectV2 の Android アプリ（Kotlin・Jetpack Compose）。
 ```
 
 Robolectric は SDK 35 で動かす（`app/src/test/resources/robolectric.properties`。SDK 36 には Java 21 が要る）。
+
+`runTest` の `backgroundScope` で動かした処理は `advanceUntilIdle` で進まない。アプリの scope の代わりには `CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))` を使う（`RecordingCheckTest`）。実機が USB で繋がったままエミュレーターのテストを回すときは、`export ANDROID_SERIAL=emulator-5554` でエミュレーターだけを指す。
 
 ## エミュレーター
 
@@ -59,4 +64,16 @@ printf 'trv2.apiBaseUrl=%s\n' "$URL" >> local.properties
 
 接続キーは、アプリの「設定 → 接続の設定」で入れる（Backend の README の手順で読む）。キーをどこにも表示せずに入れるときは、入力欄を開いた状態で `adb shell input text "$KEY"` で打ち込む。
 
-ログは `adb logcat -s trv2.ask trv2.route trv2.ride`。
+ログは `adb logcat -s trv2.ask trv2.route trv2.ride trv2.recordings`。
+
+## 走行用のビルド
+
+開発用のビルドも USB を外して動くが、走行では release を入れる（最適化され、デバッグの印が付かない）。署名は開発用の鍵と同じなので、上書きしても設定・接続キー・録音は残る。
+
+```sh
+./gradlew assembleRelease
+scripts/check-release-permissions.sh            # 許した一覧の外の権限があれば失敗する
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+端末に2つのユーザーがあるときは、`adb install --user 0 -r ...` のようにユーザーを指す。

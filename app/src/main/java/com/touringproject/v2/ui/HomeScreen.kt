@@ -15,9 +15,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,8 +29,52 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import com.touringproject.v2.audio.MediaVolume
+import kotlinx.coroutines.delay
 
 data class HomeUi(val userName: String, val banner: Banner?, val conversation: String)
+
+const val VOLUME_CHECK_MS = 2_000L
+
+/**
+ * The media volume, read every 2 s while the caller is on screen and the app is in front (slice 1 spec §5.6).
+ * Reading stops while an ask holds the intercom route; a withheld reading keeps the last good one.
+ */
+@Composable
+fun rememberMediaVolume(readable: Boolean, read: () -> MediaVolume?): MediaVolume? {
+  var volume by remember { mutableStateOf<MediaVolume?>(null) }
+  val currentRead by rememberUpdatedState(read)
+  val lifecycle = LocalLifecycleOwner.current.lifecycle
+  LaunchedEffect(readable, lifecycle) {
+    if (!readable) return@LaunchedEffect
+    lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+      while (true) {
+        volume = nextVolume(volume, runCatching { currentRead() }.getOrNull())
+        delay(VOLUME_CHECK_MS)
+      }
+    }
+  }
+  return volume
+}
+
+/** The yellow warning band. The low-volume one leads nowhere and has a ✕ instead. */
+@Composable
+fun WarningBand(text: String, onClick: (() -> Unit)?, onClose: (() -> Unit)?, modifier: Modifier = Modifier) {
+  Row(modifier.fillMaxWidth().background(Color(0xFFF5C518), RoundedCornerShape(8.dp)), verticalAlignment = Alignment.CenterVertically) {
+    Text(
+      text,
+      Modifier.weight(1f).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(12.dp),
+      color = Color.Black,
+      fontSize = 16.sp,
+    )
+    if (onClose != null) {
+      Text("✕", Modifier.clickable(onClick = onClose).padding(horizontal = 16.dp, vertical = 12.dp).testTag("bandClose"), color = Color.Black, fontSize = 16.sp)
+    }
+  }
+}
 
 // SC-02 (slice 1 minimum). Glanced at while riding: it never scrolls.
 @Composable
@@ -40,6 +86,7 @@ fun HomeScreen(
   onBanner: (Banner) -> Unit,
   onNewConversation: () -> Unit,
   modifier: Modifier = Modifier,
+  onDismissVolume: () -> Unit = {},
 ) {
   var confirming by remember { mutableStateOf(false) }
   Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -51,12 +98,8 @@ fun HomeScreen(
       }
     }
     ui.banner?.let { banner ->
-      Text(
-        banner.text,
-        Modifier.fillMaxWidth().background(Color(0xFFF5C518), RoundedCornerShape(8.dp)).clickable { onBanner(banner) }.padding(12.dp).testTag("banner"),
-        color = Color.Black,
-        fontSize = 16.sp,
-      )
+      val low = banner == Banner.LOW_VOLUME
+      WarningBand(banner.text, if (low) null else ({ onBanner(banner) }), if (low) onDismissVolume else null, Modifier.testTag("banner"))
     }
     Text("インカムのボタンで話せます", color = Color(0xFF13804A), fontSize = 16.sp)
     Column(

@@ -32,6 +32,24 @@ class StallWatchTest {
   }
 }
 
+class ClipSequenceTest {
+  @Test
+  fun a_stop_between_two_clips_keeps_the_next_one_silent() = runTest {
+    val sequence = ClipSequence()
+    val played = mutableListOf<String>()
+    // The stop arrives after the first clip has ended and before the second one starts.
+    sequence.play(listOf("1", "2", "3")) { url -> played += url; if (url == "1") sequence.stop() }
+    assertEquals(listOf("1"), played)
+  }
+
+  @Test
+  fun without_a_stop_every_clip_plays_in_order() = runTest {
+    val played = mutableListOf<String>()
+    ClipSequence().play(listOf("1", "2")) { played += it }
+    assertEquals(listOf("1", "2"), played)
+  }
+}
+
 class CueTest {
   @Test
   fun the_start_cue_is_long_and_heard_on_the_call_stream() {
@@ -59,6 +77,17 @@ class AudioRouteTest {
   }
 
   @Test
+  fun a_low_media_volume_raises_the_warning() {
+    // 4b #2: a third of the maximum or more is fine, below it the band shows.
+    audioManager.mode = AudioManager.MODE_NORMAL
+    val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, max / 3 - 1, 0)
+    assertTrue(com.touringproject.v2.ui.volumeWarning(AudioRoute(context).mediaVolume(), null))
+    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, max, 0)
+    assertFalse(com.touringproject.v2.ui.volumeWarning(AudioRoute(context).mediaVolume(), null))
+  }
+
+  @Test
   fun media_volume_is_withheld_while_the_call_route_is_up() {
     audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
     assertNull(AudioRoute(context).mediaVolume())
@@ -79,6 +108,24 @@ class AudioRouteTest {
       }
     }
     assertFalse(result!!.ok)
+  }
+}
+
+@RunWith(AndroidJUnit4::class)
+class PcmPlayerTest {
+  // The shadow track takes every write at once and counts it as played, so stopping midway is checked on the device.
+  @Test
+  fun a_recording_is_played_to_the_end_and_can_be_played_again(): Unit = kotlinx.coroutines.runBlocking {
+    val player = PcmPlayer()
+    kotlinx.coroutines.withTimeout(5_000) {
+      player.play(ByteArray(3_200))
+      player.play(ByteArray(3_200))
+    }
+  }
+
+  @Test
+  fun stopping_when_nothing_plays_is_harmless() {
+    PcmPlayer().stop()
   }
 }
 

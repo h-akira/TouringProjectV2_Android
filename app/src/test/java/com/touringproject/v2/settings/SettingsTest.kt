@@ -130,4 +130,20 @@ class ApiKeyStoreTest {
     }
     assertNull(ApiKeyStore(store, broken).load())
   }
+
+  @Test
+  fun a_key_that_cannot_be_sealed_leaves_the_old_one_in_use() = runTest {
+    val store = FakeStore()
+    var failing = false
+    val cipher = object : SecretCipher {
+      override fun encrypt(plain: ByteArray): ByteArray = if (failing) throw java.security.KeyStoreException("no key") else plain.reversedArray()
+      override fun decrypt(sealed: ByteArray) = sealed.reversedArray()
+    }
+    val keys = ApiKeyStore(store, cipher)
+    keys.save("old-key")
+    failing = true
+    assertTrue(runCatching { keys.save("new-key") }.isFailure)
+    assertEquals("old-key", keys.current())
+    assertEquals("old-key", ApiKeyStore(store, cipher).load())
+  }
 }

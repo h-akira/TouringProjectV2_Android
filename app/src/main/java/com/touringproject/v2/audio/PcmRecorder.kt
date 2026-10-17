@@ -27,6 +27,11 @@ class PcmRecorder(private val now: () -> Long = System::currentTimeMillis) : Rec
     }
     val out = ByteArrayOutputStream()
     ar.startRecording()
+    // Another app holding the microphone leaves the recorder stopped (issue #1): say so instead of sending silence.
+    if (ar.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+      ar.release()
+      error("AudioRecord did not start")
+    }
     val thread = Thread {
       val chunk = ByteArray(minSize)
       while (ar.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
@@ -43,7 +48,13 @@ class PcmRecorder(private val now: () -> Long = System::currentTimeMillis) : Rec
 
   override suspend fun stop(): Recorded = withContext(Dispatchers.IO) {
     val ar = checkNotNull(record) { "not recording" }
+    // The system silences a recording when another app takes the microphone; what was recorded is then only zeros.
+    val silenced = runCatching { ar.activeRecordingConfiguration?.isClientSilenced == true }.getOrDefault(false)
     finish(ar)
+    if (silenced) {
+      name = null
+      error("recording was silenced")
+    }
     val pcm = synchronized(buffer) { buffer.toByteArray() }
     Recorded(pcm, checkNotNull(name)).also { name = null }
   }

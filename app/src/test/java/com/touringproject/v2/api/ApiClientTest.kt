@@ -1,6 +1,8 @@
 package com.touringproject.v2.api
 
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -10,6 +12,8 @@ import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ApiClientTest {
@@ -88,5 +92,14 @@ class ApiClientTest {
     repeat(3) { server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)) }
     val error = runCatching { client(timeoutMs = 200).getAsk("a1") }.exceptionOrNull() as ApiError
     assertEquals(ApiErrorKind.NETWORK, error.kind)
+  }
+
+  @Test
+  fun cancelling_a_waiting_request_cancels_the_call(): Unit = runBlocking {
+    server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+    val startedAt = System.nanoTime()
+    // The client would wait 15 s for this response; the poll limit cancels it much sooner.
+    assertNull(withTimeoutOrNull(300) { client().getAsk("a1") })
+    assertTrue((System.nanoTime() - startedAt) / 1_000_000 < 5_000)
   }
 }

@@ -1,16 +1,19 @@
 package com.touringproject.v2.api
 
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resumeWithException
 
 // Backend API (Backend/openapi.yaml). Errors are classified so the ask loop can pick the spoken message.
 enum class ApiErrorKind { INVALID_KEY, BAD_REQUEST, NOT_FOUND, RATE_LIMITED, SERVER, NETWORK }
@@ -105,20 +108,30 @@ class ApiClient(
     }
   }
 
-  private suspend fun once(method: String, path: String, body: String?): String = withContext(Dispatchers.IO) {
+  // Cancelling the coroutine cancels the HTTP call, so the poll limit can cut off a request that is still waiting.
+  private suspend fun once(method: String, path: String, body: String?): String = suspendCancellableCoroutine { cont ->
     val request = Request.Builder()
       .url("$baseUrl$path")
       .header("x-api-key", apiKey)
       .header("x-user-name", userName)
       .method(method, body?.toRequestBody("application/json".toMediaType()))
       .build()
-    try {
-      http.newCall(request).execute().use { response ->
-        kindFor(response.code)?.let { throw ApiError(it, "HTTP ${response.code}") }
-        response.body?.string() ?: throw ApiError(ApiErrorKind.NETWORK, "empty body")
+    val call = http.newCall(request)
+    cont.invokeOnCancellation { call.cancel() }
+    call.enqueue(object : Callback {
+      override fun onFailure(call: Call, e: IOException) {
+        cont.resumeWithException(ApiError(ApiErrorKind.NETWORK, e.toString()))
       }
-    } catch (e: IOException) {
-      throw ApiError(ApiErrorKind.NETWORK, e.toString())
-    }
+
+      override fun onResponse(call: Call, response: Response) {
+        val outcome = runCatching {
+          response.use {
+            kindFor(it.code)?.let { kind -> throw ApiError(kind, "HTTP ${it.code}") }
+            it.body?.string() ?: throw ApiError(ApiErrorKind.NETWORK, "empty body")
+          }
+        }.recoverCatching { e -> throw if (e is IOException) ApiError(ApiErrorKind.NETWORK, e.toString()) else e }
+        cont.resumeWith(outcome)
+      }
+    })
   }
 }

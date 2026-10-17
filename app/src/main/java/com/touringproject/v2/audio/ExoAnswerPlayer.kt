@@ -36,28 +36,46 @@ class StallWatch(private val stallMs: Long = CLIP_STALL_MS) {
   }
 }
 
+/** One answer's clips in order. A stop ends the clip playing now and every clip after it, also between two clips (issue #2). */
+class ClipSequence {
+  private var stopped = false
+
+  fun stop() {
+    stopped = true
+  }
+
+  suspend fun play(urls: List<String>, playOne: suspend (String) -> Unit) {
+    for (url in urls) {
+      if (stopped) return
+      playOne(url)
+    }
+  }
+}
+
 // Plays the answer clips one after another on the media stream, without taking audio focus (mix with the nav app).
 class ExoAnswerPlayer(private val context: Context) : AnswerPlayer {
   private val main = Handler(Looper.getMainLooper())
   private var stopCurrent: (() -> Unit)? = null
-
-  private class Session {
-    var stopped = false
-  }
+  private var sequence: ClipSequence? = null
 
   override suspend fun play(urls: List<String>) = withContext(Dispatchers.Main) {
-    val session = Session()
-    for (url in urls) {
-      if (session.stopped) return@withContext
-      playOne(url, session)
+    val next = ClipSequence()
+    sequence = next
+    try {
+      next.play(urls) { playOne(it) }
+    } finally {
+      if (sequence === next) sequence = null
     }
   }
 
   override fun stop() {
-    main.post { stopCurrent?.invoke() }
+    main.post {
+      sequence?.stop()
+      stopCurrent?.invoke()
+    }
   }
 
-  private suspend fun playOne(url: String, session: Session) = suspendCancellableCoroutine { cont ->
+  private suspend fun playOne(url: String) = suspendCancellableCoroutine { cont ->
     val attributes = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build()
     val player = ExoPlayer.Builder(context).setAudioAttributes(attributes, false).build()
     val watch = StallWatch()
@@ -76,10 +94,7 @@ class ExoAnswerPlayer(private val context: Context) : AnswerPlayer {
     check = Runnable {
       if (watch.tick(player.currentPosition, STALL_CHECK_MS)) finish(IllegalStateException("stalled")) else main.postDelayed(check, STALL_CHECK_MS)
     }
-    stop = {
-      session.stopped = true
-      finish(null)
-    }
+    stop = { finish(null) }
     player.addListener(object : Player.Listener {
       override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState == Player.STATE_ENDED) finish(null)

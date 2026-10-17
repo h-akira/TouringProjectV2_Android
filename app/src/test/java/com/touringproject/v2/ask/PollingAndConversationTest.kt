@@ -63,6 +63,21 @@ class PollingTest {
     assertEquals(PollOutcome.Cancelled, poll(Clock(), cancelled = { true }) { calls++; processing })
     assertEquals(0, calls)
   }
+
+  @Test
+  fun a_body_that_cannot_be_read_is_skipped() = runTest {
+    var calls = 0
+    val outcome = poll(Clock()) { if (++calls == 1) throw kotlinx.serialization.SerializationException("cut short") else completed }
+    assertEquals(PollOutcome.Done(completed), outcome)
+  }
+
+  @Test
+  fun a_slow_request_does_not_push_the_give_up_past_two_minutes() = runTest {
+    // One request can take three tries of 15 s; the limit still holds.
+    val outcome = pollUntilDone({ kotlinx.coroutines.delay(45_000); processing }, { kotlinx.coroutines.delay(it) }, { testScheduler.currentTime }, { false })
+    assertEquals(PollOutcome.Timeout, outcome)
+    assertEquals(POLL_TIMEOUT_MS, testScheduler.currentTime)
+  }
 }
 
 class ConversationTest {

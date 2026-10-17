@@ -5,6 +5,7 @@ import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.audio.MediaVolume
 import com.touringproject.v2.location.Fix
 import com.touringproject.v2.settings.Settings
+import kotlinx.serialization.Serializable
 
 // Everything the ask loop does to the outside world comes in through these interfaces, so the loop is testable on the JVM.
 
@@ -24,7 +25,8 @@ interface Recorder {
   suspend fun cancel()
 }
 
-/** What SC-12 shows about each kept recording (kept from plan 2 of the migration). */
+/** What SC-12 shows about each kept recording (slice 1 spec §5.4). Saved as JSON beside the PCM. */
+@Serializable
 data class RecordingMeta(
   val name: String,
   val recordedAt: Long,
@@ -36,7 +38,7 @@ data class RecordingMeta(
 
 /** Fire and forget: a failure here must not end the ask. */
 interface RecordingSink {
-  fun saved(meta: RecordingMeta)
+  fun saved(meta: RecordingMeta, pcm: ByteArray)
   fun transcribed(name: String, transcript: String)
 }
 
