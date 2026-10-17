@@ -77,6 +77,17 @@ class AudioRouteTest {
   }
 
   @Test
+  fun a_low_media_volume_raises_the_warning() {
+    // 4b #2: a third of the maximum or more is fine, below it the band shows.
+    audioManager.mode = AudioManager.MODE_NORMAL
+    val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, max / 3 - 1, 0)
+    assertTrue(com.touringproject.v2.ui.volumeWarning(AudioRoute(context).mediaVolume(), null))
+    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, max, 0)
+    assertFalse(com.touringproject.v2.ui.volumeWarning(AudioRoute(context).mediaVolume(), null))
+  }
+
+  @Test
   fun media_volume_is_withheld_while_the_call_route_is_up() {
     audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
     assertNull(AudioRoute(context).mediaVolume())

@@ -46,7 +46,14 @@ fun overlayText(state: FlowState, seconds: Long): OverlayText = when (state.phas
 
 // SC-03: covers the whole screen in the phase's colour while an ask runs.
 @Composable
-fun AskOverlay(state: FlowState, now: () -> Long, onStopRecording: () -> Unit, onCancel: () -> Unit) {
+fun AskOverlay(
+  state: FlowState,
+  now: () -> Long,
+  onStopRecording: () -> Unit,
+  onCancel: () -> Unit,
+  volumeDismissedAt: Int? = null,
+  onDismissVolume: (Int) -> Unit = {},
+) {
   if (state.phase == Phase.IDLE) return
   var clock by remember { mutableLongStateOf(now()) }
   // Display-only timer; the ask loop does not depend on it.
@@ -76,6 +83,11 @@ fun AskOverlay(state: FlowState, now: () -> Long, onStopRecording: () -> Unit, o
         color = Color.Black,
         fontSize = 18.sp,
       )
+    }
+    // The volume was read when the ask started, before the intercom route took over the music stream.
+    val volume = state.mediaVolume
+    if (state.phase == Phase.RECORDING && volume != null && volumeWarning(volume, volumeDismissedAt)) {
+      WarningBand(Banner.LOW_VOLUME.text, null, { onDismissVolume(volume.current) }, Modifier.testTag("overlayVolume"))
     }
     Column(
       Modifier.weight(1f).fillMaxWidth().clickable(onClick = onMain).testTag("overlayMain"),

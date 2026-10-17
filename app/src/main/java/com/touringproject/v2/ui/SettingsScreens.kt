@@ -40,6 +40,7 @@ import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.ReturnTiming
 import com.touringproject.v2.settings.Settings
 import com.touringproject.v2.settings.USER_NAME_RE
+import com.touringproject.v2.settings.VOLUME_DB_CHOICES
 import com.touringproject.v2.settings.maskKey
 import com.touringproject.v2.settings.withRecentApp
 import kotlinx.coroutines.launch
@@ -61,14 +62,45 @@ private fun SettingsRow(title: String, value: String, onClick: () -> Unit) {
   }
 }
 
-// SC-09 (plan 1: the screens the hands-free loop needs; the others are added in plan 2).
+// SC-09 (slice 1: the settings the slice needs).
 @Composable
-fun SettingsScreen(settings: Settings, apiKey: String?, onConnection: () -> Unit, onUser: () -> Unit, onReturnApp: () -> Unit, modifier: Modifier = Modifier) {
+fun SettingsScreen(
+  settings: Settings,
+  apiKey: String?,
+  onConnection: () -> Unit,
+  onUser: () -> Unit,
+  onReturnApp: () -> Unit,
+  onVolume: () -> Unit,
+  onRecordings: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
   val returnValue = if (!settings.returnEnabled) "戻らない" else settings.returnApp?.label ?: "未設定"
   Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
     SettingsRow("接続の設定", apiKey?.let(::maskKey) ?: "未設定", onConnection)
     SettingsRow("ユーザー名", settings.userName, onUser)
     SettingsRow("応答後に戻るアプリ", returnValue, onReturnApp)
+    SettingsRow("回答の音量", "+${settings.answerVolumeDb}dB", onVolume)
+    SettingsRow("録音の確認", "", onRecordings)
+  }
+}
+
+// SC-21: how much the Backend raises the answer audio. Takes effect from the next question.
+@Composable
+fun VolumeScreen(settings: Settings, onUpdate: (Settings) -> Unit, modifier: Modifier = Modifier) {
+  Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Text("回答の音声を上げる量", fontSize = 18.sp)
+    Text("ナビの案内や音楽より小さく聞こえるときに上げます。次の質問から変わります。", color = Color(0xFF666666), fontSize = 14.sp)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      VOLUME_DB_CHOICES.forEach { db ->
+        FilterChip(
+          selected = settings.answerVolumeDb == db,
+          onClick = { onUpdate(settings.copy(answerVolumeDb = db)) },
+          label = { Text("+$db", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+          modifier = Modifier.weight(1f).testTag("volume-$db"),
+        )
+      }
+    }
+    Text("単位は dB です。+6（最大）で、+0 のおよそ2倍の大きさです。それでも小さいときは、スマホのメディアの音量を上げてください。", color = Color(0xFF666666), fontSize = 14.sp)
   }
 }
 
