@@ -72,22 +72,36 @@ fun SettingsScreen(settings: Settings, apiKey: String?, onConnection: () -> Unit
   }
 }
 
-enum class KeyCheck { SAVED, INVALID, UNREACHABLE }
+enum class KeyCheck(val message: String) {
+  SAVED("保存しました"),
+  INVALID("キーが正しくありません。元のキーのままです。"),
+  UNREACHABLE("サーバーに繋がりません。元のキーのままです。"),
+  SAVE_FAILED("キーを保存できませんでした。元のキーのままです。"),
+}
 
-/** Checks the key against the Backend; the old key stays when the new one does not work. */
-suspend fun checkAndSave(key: String, check: suspend (String) -> Unit, save: suspend (String) -> Unit): KeyCheck = try {
-  check(key)
-  save(key)
-  KeyCheck.SAVED
-} catch (e: ApiError) {
-  if (e.kind == ApiErrorKind.INVALID_KEY) KeyCheck.INVALID else KeyCheck.UNREACHABLE
-} catch (e: IllegalArgumentException) {
-  // OkHttp refuses header values it cannot send (e.g. full-width characters pasted into the key).
-  KeyCheck.INVALID
-} catch (e: kotlinx.coroutines.CancellationException) {
-  throw e
-} catch (e: Exception) {
-  KeyCheck.UNREACHABLE
+/** Checks the key against the Backend, then saves it; the old key stays when either step fails. */
+suspend fun checkAndSave(key: String, check: suspend (String) -> Unit, save: suspend (String) -> Unit): KeyCheck {
+  try {
+    check(key)
+  } catch (e: ApiError) {
+    return if (e.kind == ApiErrorKind.INVALID_KEY) KeyCheck.INVALID else KeyCheck.UNREACHABLE
+  } catch (e: IllegalArgumentException) {
+    // OkHttp refuses header values it cannot send (e.g. full-width characters pasted into the key).
+    return KeyCheck.INVALID
+  } catch (e: kotlinx.coroutines.CancellationException) {
+    throw e
+  } catch (e: Exception) {
+    return KeyCheck.UNREACHABLE
+  }
+  return try {
+    save(key)
+    KeyCheck.SAVED
+  } catch (e: kotlinx.coroutines.CancellationException) {
+    throw e
+  } catch (e: Exception) {
+    // e.g. the Keystore refuses to seal it (issue #5): the server was reachable, so do not say it was not.
+    KeyCheck.SAVE_FAILED
+  }
 }
 
 // SC-13
@@ -115,11 +129,9 @@ fun ConnectionScreen(
         if (key.isEmpty()) return@Button
         checking = true
         scope.launch {
-          message = when (checkAndSave(key, check, save)) {
-            KeyCheck.SAVED -> { input = ""; "保存しました" }
-            KeyCheck.INVALID -> "キーが正しくありません。元のキーのままです。"
-            KeyCheck.UNREACHABLE -> "サーバーに繋がりません。元のキーのままです。"
-          }
+          val result = checkAndSave(key, check, save)
+          if (result == KeyCheck.SAVED) input = ""
+          message = result.message
           checking = false
         }
       },

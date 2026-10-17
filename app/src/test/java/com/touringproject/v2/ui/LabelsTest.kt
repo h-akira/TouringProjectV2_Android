@@ -66,7 +66,7 @@ class LabelsTest {
   fun a_key_the_http_header_cannot_carry_is_refused_without_crashing() = runTest {
     val saved = mutableListOf<String>()
     assertEquals(KeyCheck.INVALID, checkAndSave("ｋｅｙ", { throw IllegalArgumentException("Unexpected char") }, { saved += it }))
-    assertEquals(KeyCheck.UNREACHABLE, checkAndSave("x", {}, { throw java.security.GeneralSecurityException("keystore") }))
+    assertEquals(KeyCheck.SAVE_FAILED, checkAndSave("x", {}, { throw java.security.GeneralSecurityException("keystore") }))
     assertEquals(emptyList<String>(), saved)
   }
 

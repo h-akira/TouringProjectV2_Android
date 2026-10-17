@@ -66,8 +66,9 @@ class ApiKeyStore(private val store: KeyValueStore, private val cipher: SecretCi
 
   fun current(): String? = state.value
 
+  /** Throws when the key cannot be sealed or stored; the key in use then stays the old one. */
   suspend fun save(key: String?) {
-    state.value = key
     store.set(API_KEY_KEY, key?.let { Base64.getEncoder().encodeToString(cipher.encrypt(it.toByteArray(Charsets.UTF_8))) })
+    state.value = key
   }
 }
