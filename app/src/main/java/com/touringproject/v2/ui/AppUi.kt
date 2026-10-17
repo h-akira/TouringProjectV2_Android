@@ -70,7 +70,7 @@ fun AppUi(graph: AppGraph) {
               )
               HomeScreen(
                 ui = ui,
-                onTapToTalk = graph.controller::tapToTalk,
+                onTapToTalk = graph::tapToTalk,
                 onSettings = { backStack.add(SettingsKey) },
                 onUser = { backStack.add(UserKey) },
                 onBanner = { backStack.add(if (it == Banner.NO_KEY) ConnectionKey else ReturnAppKey) },

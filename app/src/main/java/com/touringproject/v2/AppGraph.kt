@@ -124,11 +124,16 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
 
   private val router = PressRouter(
     trialActive = { trial.active },
+    trialBusy = { trial.busy },
     stopTrial = trial::stop,
     stopCheckPlayback = recordingCheck::stopPlaying,
     askPress = controller::press,
     askStopRecording = controller::stopRecording,
+    askTap = controller::tapToTalk,
   )
+
+  /** The screen's "押して話す", routed like an intercom press so it waits for a left trial to unwind. */
+  fun tapToTalk() = router.tap()
 
   /** The intercom button presses wait here until settings are loaded and the permission prompt has been answered. */
   val presses = PressGate { router.press() }

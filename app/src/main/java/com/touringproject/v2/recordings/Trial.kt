@@ -55,6 +55,9 @@ class TrialController(private val deps: TrialDeps) {
   /** A trial is recording or playing: the intercom button ends it instead of starting a question (US-E-03.002). */
   val active: Boolean get() = state.phase != TrialPhase.IDLE
 
+  /** Also true while a left trial is still unwinding: it may set up or release SCO, so no ask may take the route yet. */
+  val busy: Boolean get() = active || running
+
   /** The screen button or the intercom button while a trial runs: end the recording, or the playback. */
   fun stop() {
     when (state.phase) {

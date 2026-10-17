@@ -131,6 +131,21 @@ class TrialTest {
   }
 
   @Test
+  fun a_trial_left_during_route_setup_stays_busy_until_it_has_unwound() = runTest {
+    // An ask must not take the route while the old trial can still set up or release SCO under it.
+    val gate = CompletableDeferred<Unit>()
+    val h = TrialHarness(this, routeGate = gate)
+    val job = h.launchStart()
+    h.until { "route:screen" in h.log }
+    h.trial.cancel()
+    assertFalse(h.trial.active)
+    assertTrue(h.trial.busy)
+    gate.complete(Unit)
+    job.join()
+    assertFalse(h.trial.busy)
+  }
+
+  @Test
   fun leaving_while_recording_drops_the_recording() = runTest {
     val h = TrialHarness(this)
     val job = h.launchStart()

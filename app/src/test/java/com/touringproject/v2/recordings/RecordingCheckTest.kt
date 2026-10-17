@@ -95,6 +95,19 @@ class RecordingCheckTest {
   }
 
   @Test
+  fun a_stop_before_the_file_is_read_keeps_the_recording_silent() = runTest {
+    // An intercom press right after ▶ (4b #10): the recording must not start playing into the question.
+    val w = World(this, folder.root)
+    w.store.save(meta(1), byteArrayOf(1))
+    testScheduler.advanceUntilIdle()
+    w.check.play("rec-1.pcm")
+    w.check.stopPlaying()
+    testScheduler.advanceUntilIdle()
+    assertTrue(w.log.none { it.startsWith("play:[") })
+    assertNull(w.check.playing.value)
+  }
+
+  @Test
   fun a_recording_that_cannot_be_played_says_so() = runTest {
     val w = World(this, folder.root, playError = IllegalStateException("no track"))
     w.store.save(meta(1), byteArrayOf(1))

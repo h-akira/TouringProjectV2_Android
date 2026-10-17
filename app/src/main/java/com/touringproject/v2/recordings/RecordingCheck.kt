@@ -3,6 +3,7 @@ package com.touringproject.v2.recordings
 import com.touringproject.v2.ask.RecordingMeta
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +34,9 @@ class RecordingCheck(
   private val messageState = MutableStateFlow<String?>(null)
   val message: StateFlow<String?> = messageState.asStateFlow()
 
+  // Cancelled by a stop as well: a stop that lands while the file is still being read must keep it silent.
+  private var playJob: Job? = null
+
   init {
     // The list follows the store: a question saved or transcribed while SC-12 is open shows up at once.
     scope.launch { store.changes.collect { reload() } }
@@ -53,7 +57,8 @@ class RecordingCheck(
     if (askBusy() || trial.active || playingState.value != null) return
     playingState.value = name
     messageState.value = null
-    scope.launch {
+    playJob = scope.launch {
+      val self = coroutineContext[Job]
       try {
         player.play(store.read(name))
       } catch (e: CancellationException) {
@@ -62,14 +67,22 @@ class RecordingCheck(
         logError("recording playback failed", e)
         messageState.value = PLAY_FAILED_MESSAGE
       } finally {
-        playingState.value = null
+        // A stop already cleared it, and a newer playback may own it now.
+        if (playJob === self) {
+          playJob = null
+          playingState.value = null
+        }
       }
     }
   }
 
   /** The ■ button, and an intercom press while a kept recording plays (the microphone would pick it up). */
   fun stopPlaying() {
-    if (playingState.value != null) player.stop()
+    if (playingState.value == null) return
+    playJob?.cancel()
+    playJob = null
+    player.stop()
+    playingState.value = null
   }
 
   /** After DL-01. The cloud's questions and answers stay; only the audio on this device goes. */
