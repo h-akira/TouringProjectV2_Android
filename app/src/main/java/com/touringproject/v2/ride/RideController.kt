@@ -84,14 +84,17 @@ class RideController(private val deps: RideDeps) {
     null
   }
 
-  private suspend fun write(op: String, block: suspend () -> Unit) {
+  /** False when the write failed (logged and shown). */
+  private suspend fun write(op: String, block: suspend () -> Unit): Boolean {
     try {
       block()
       storeFailing.value = unsaved != null
+      return true
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
       failed(op, e)
+      return false
     }
   }
 
@@ -102,10 +105,11 @@ class RideController(private val deps: RideDeps) {
 
   private suspend fun save(ride: Ride) {
     unsaved = ride
-    write("save") {
+    val saved = write("save") {
       deps.store.save(ride)
       unsaved = null
     }
+    if (saved) deps.changed()
   }
 
   // The active ride's points and alive time have moved on since its save failed: save its current state, not the old one.
@@ -186,7 +190,7 @@ class RideController(private val deps: RideDeps) {
     }
     val point = RoutePoint(ride.segments.last().seq, fix.timestamp, fix.latitude, fix.longitude, fix.accuracy)
     val distance = ride.distanceMeters + stepMeters(lastPoint, point)
-    write("point") { d.store.addPoint(ride.id, point, distance, now) }
+    if (write("point") { d.store.addPoint(ride.id, point, distance, now) }) d.pointAdded()
     lastPoint = point
     activeRide.value = ride.copy(distanceMeters = distance, lastAliveAt = now)
   }

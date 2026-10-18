@@ -30,5 +30,9 @@ class RideDeps(
   /** Tells the foreground service whether a ride is recording (slice 2 spec §4.2). */
   val recording: (Boolean) -> Unit,
   val autoEnded: (Ride) -> Unit,
+  /** A change of the ride was saved: something new to send (slice 2 spec §5.3). */
+  val changed: () -> Unit,
+  /** A route point was saved. */
+  val pointAdded: () -> Unit,
   val log: (event: String, data: Map<String, Any?>) -> Unit,
 )

@@ -35,10 +35,12 @@ class MainActivity : ComponentActivity() {
     setContent { TouringV2Theme { AppUi(graph) } }
   }
 
-  // A ride's service could not start while the app was in the background (slice 2 spec §4.5); it can now.
+  // A ride's service could not start while the app was in the background (slice 2 spec §4.5); it can now. Coming to
+  // the front is also a trigger to send what is left (slice 2 spec §5.3); with nothing left, nothing is sent.
   override fun onStart() {
     super.onStart()
     graph.serviceCoordinator.refresh()
+    graph.sync.request()
   }
 
   override fun onNewIntent(intent: Intent) {

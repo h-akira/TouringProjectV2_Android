@@ -48,6 +48,8 @@ import com.touringproject.v2.settings.SettingsRepository
 import com.touringproject.v2.store.RideDatabase
 import com.touringproject.v2.store.RoomAskLog
 import com.touringproject.v2.store.RoomRideStore
+import com.touringproject.v2.store.RoomSyncStore
+import com.touringproject.v2.sync.RideSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -81,6 +83,17 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val askLog = RoomAskLog(database.asks(), scope) { message, e -> Log.w("trv2.ask", message, e) }
   private val notices = RideNotices(context)
 
+  /** Sends rides and routes; a pass runs on each trigger (slice 2 spec §5.3). */
+  val sync = RideSync(
+    RoomSyncStore(database.rides()),
+    api = {
+      val key = apiKeys.current()
+      val user = settings.settings.value?.userName
+      if (apiBaseUrl.isEmpty() || key == null || user == null) null else ApiClient(apiBaseUrl, key, user, http)
+    },
+    log = { event, data -> Log.i("trv2.sync", "$event $data") },
+  )
+
   val rides = RideController(
     RideDeps(
       now = System::currentTimeMillis,
@@ -91,6 +104,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       alarm = AlarmDeadline(context),
       recording = serviceCoordinator::setRecording,
       autoEnded = notices::autoEnded,
+      changed = sync::request,
+      pointAdded = sync::pointAdded,
       log = { event, data -> Log.i("trv2.ride", "$event $data") },
     ),
   )
@@ -182,11 +197,14 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     audioRoute.onVoiceRecognitionEnded = { router.recognitionEnded() }
     // Settles a ride left recording or paused before this process started (slice 2 spec §4.5).
     scope.launch { rides.load() }
+    scope.launch { sync.run() }
     scope.launch {
       settings.load()
       apiKeys.load()
       loaded = true
       openWhenReady()
+      // The start of the app is a trigger; before this the key and the user name are not known.
+      sync.request()
     }
   }
 

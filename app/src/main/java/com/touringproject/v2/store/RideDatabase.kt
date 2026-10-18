@@ -135,6 +135,40 @@ interface RideDao {
   @Query("UPDATE rides SET lastAliveAt = :at WHERE id = :rideId")
   suspend fun markAlive(rideId: String, at: Long)
 
+  // Sending (slice 2 spec §5.3). Points are counted and cut into chunks in the order they were recorded (id).
+
+  @Query(
+    "SELECT * FROM rides WHERE ((sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
+      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt)) " +
+      "OR id IN (SELECT rideId FROM route_points WHERE chunk IS NULL) ORDER BY updatedAt",
+  )
+  suspend fun unsentRides(): List<RideEntity>
+
+  @Query("SELECT COUNT(*) FROM route_points WHERE rideId = :rideId")
+  suspend fun pointCount(rideId: String): Int
+
+  @Query("SELECT COUNT(*) FROM route_points WHERE rideId = :rideId AND chunk IS NOT NULL")
+  suspend fun sentPointCount(rideId: String): Int
+
+  @Query("SELECT * FROM route_points WHERE rideId = :rideId ORDER BY id LIMIT :count OFFSET :from")
+  suspend fun pointsFrom(rideId: String, from: Int, count: Int): List<RoutePointEntity>
+
+  @Query(
+    "UPDATE route_points SET chunk = :seq WHERE id IN " +
+      "(SELECT id FROM route_points WHERE rideId = :rideId ORDER BY id LIMIT :count OFFSET :from)",
+  )
+  suspend fun markChunk(rideId: String, seq: Int, from: Int, count: Int)
+
+  /** A later save of an older version (none is made today) cannot move the marker back. */
+  @Query("UPDATE rides SET sentUpdatedAt = :updatedAt WHERE id = :rideId AND (sentUpdatedAt IS NULL OR sentUpdatedAt < :updatedAt)")
+  suspend fun markSent(rideId: String, updatedAt: Long)
+
+  @Query("UPDATE rides SET rejectedUpdatedAt = :updatedAt WHERE id = :rideId")
+  suspend fun markRefused(rideId: String, updatedAt: Long)
+
+  @Query("UPDATE rides SET routeRejected = 1 WHERE id = :rideId")
+  suspend fun markRouteRefused(rideId: String)
+
   /** Keeps the sending markers: a save never undoes what the Backend has already accepted or refused. */
   @Transaction
   suspend fun saveRide(ride: RideEntity, segments: List<SegmentEntity>) {
