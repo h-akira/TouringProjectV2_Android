@@ -1,11 +1,16 @@
 package com.touringproject.v2.ui
 
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -37,6 +42,17 @@ class RideScreensTest {
     rule.onNodeWithText("⏸ 一時停止").performClick()
     rule.onNodeWithTag("endRide").performClick()
     assertEquals(listOf("pause", "end"), events)
+  }
+
+  @Test
+  fun the_quiet_texts_follow_the_theme_so_they_stay_readable_in_dark_mode() {
+    val dark = darkColorScheme()
+    rule.setContent { MaterialTheme(colorScheme = dark) { RideCard(RideCardUi("箱根", true, "1:26", "52.8 km"), {}, {}, {}, {}) } }
+    for (text in listOf("箱根", "⏸ 一時停止中", "走行時間")) {
+      val layouts = mutableListOf<TextLayoutResult>()
+      rule.onNodeWithText(text).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+      assertEquals(text, dark.onSurfaceVariant, layouts.single().layoutInput.style.color)
+    }
   }
 
   @Test
