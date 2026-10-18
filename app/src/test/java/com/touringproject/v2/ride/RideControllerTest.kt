@@ -16,6 +16,8 @@ private class World(var now: Long = 1_000, var boot: Int? = 7) {
   val rides = mutableMapOf<String, Ride>()
   val points = mutableMapOf<String, MutableList<RoutePoint>>()
   var failWrites = false
+  /** How many of the next saves fail. */
+  var failSaves = 0
   val events = mutableListOf<String>()
   val autoEnded = mutableListOf<Ride>()
   private var ids = 0
@@ -24,6 +26,10 @@ private class World(var now: Long = 1_000, var boot: Int? = 7) {
     override suspend fun active() = rides.values.firstOrNull { it.status != RideStatus.ENDED }
     override suspend fun save(ride: Ride) {
       if (failWrites) throw IOException("disk full")
+      if (failSaves > 0) {
+        failSaves -= 1
+        throw IOException("disk full")
+      }
       rides[ride.id] = ride
     }
     override suspend fun lastPoint(rideId: String) = points[rideId]?.lastOrNull()
@@ -32,9 +38,11 @@ private class World(var now: Long = 1_000, var boot: Int? = 7) {
       points.getOrPut(rideId) { mutableListOf() } += point
       rides[rideId] = rides.getValue(rideId).copy(distanceMeters = distanceMeters, lastAliveAt = aliveAt)
     }
+    // Like the UPDATE in Room: a ride that was never saved is simply not touched. addPoint above fails on it, like
+    // the foreign key does.
     override suspend fun markAlive(rideId: String, at: Long) {
       if (failWrites) throw IOException("disk full")
-      rides[rideId] = rides.getValue(rideId).copy(lastAliveAt = at)
+      rides[rideId]?.let { rides[rideId] = it.copy(lastAliveAt = at) }
     }
   }
 
@@ -277,6 +285,47 @@ class RideControllerTest {
     assertTrue(w.controller.storeFailed.value)
     assertEquals(RideStatus.RECORDING, w.controller.active.value?.status)
     assertTrue("recording:true" in w.events)
+  }
+
+  @Test
+  fun a_ride_whose_first_save_failed_is_saved_before_its_next_point() = runTest {
+    val w = World()
+    w.controller.load()
+    w.failSaves = 1
+    w.controller.start("箱根")
+    assertTrue(w.rides.isEmpty())
+    w.controller.onFix(fix(2_000, 35.0))
+    assertEquals(RideStatus.RECORDING, w.stored().status)
+    assertEquals(1, w.points.getValue("r1").size)
+    assertFalse(w.controller.storeFailed.value)
+  }
+
+  @Test
+  fun the_warning_stays_while_the_ride_is_still_unsaved() = runTest {
+    val w = World()
+    w.controller.load()
+    w.failSaves = 2
+    w.controller.start("箱根")
+    w.now = 61_000
+    // The heartbeat itself succeeds on a missing row; the ride is still not stored.
+    w.controller.heartbeat()
+    assertTrue(w.controller.storeFailed.value)
+    w.controller.heartbeat()
+    assertFalse(w.controller.storeFailed.value)
+    assertEquals(RideStatus.RECORDING, w.stored().status)
+  }
+
+  @Test
+  fun an_end_that_could_not_be_saved_is_saved_before_anything_else() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.failSaves = 1
+    assertTrue(w.controller.end("箱根"))
+    assertEquals(RideStatus.RECORDING, w.rides.getValue("r1").status)
+    w.controller.start("御殿場")
+    assertEquals(RideStatus.ENDED, w.rides.getValue("r1").status)
+    assertEquals(RideStatus.RECORDING, w.rides.getValue("r2").status)
   }
 
   @Test

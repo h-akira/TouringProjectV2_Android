@@ -14,7 +14,8 @@ import kotlinx.coroutines.sync.withLock
  * Starts, pauses, resumes and ends the ride, and takes in its route points. The service, the deadline alarm, the
  * shutdown broadcast and the screens all call in here; one lock keeps their calls in order. Every call waits for
  * load(), which settles a ride left over from before the process started. A failed write is logged and shown
- * (storeFailed) but never stops the ride (slice 2 spec §8).
+ * (storeFailed) but never stops the ride (slice 2 spec §8). A ride whose save failed is saved again before anything
+ * else, so its points have a row to belong to and an end is not undone by the next launch.
  */
 class RideController(private val deps: RideDeps) {
   private val mutex = Mutex()
@@ -27,6 +28,8 @@ class RideController(private val deps: RideDeps) {
   val storeFailed: StateFlow<Boolean> = storeFailing.asStateFlow()
   // The last stored point of the active ride, for the distance of the next one.
   private var lastPoint: RoutePoint? = null
+  // The latest state of a ride whose save failed; it is written again first by every later call.
+  private var unsaved: Ride? = null
 
   suspend fun load() {
     mutex.withLock {
@@ -64,7 +67,7 @@ class RideController(private val deps: RideDeps) {
   private suspend fun write(op: String, block: suspend () -> Unit) {
     try {
       block()
-      storeFailing.value = false
+      storeFailing.value = unsaved != null
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
@@ -77,9 +80,25 @@ class RideController(private val deps: RideDeps) {
     storeFailing.value = true
   }
 
+  private suspend fun save(ride: Ride) {
+    unsaved = ride
+    flush()
+  }
+
+  private suspend fun flush() {
+    val ride = unsaved ?: return
+    write("save") {
+      deps.store.save(ride)
+      unsaved = null
+    }
+  }
+
   private suspend fun <T> locked(block: suspend () -> T): T {
     loaded.await()
-    return mutex.withLock { block() }
+    return mutex.withLock {
+      flush()
+      block()
+    }
   }
 
   /** Returns false when the name is not usable or another ride is already recording or paused. */
@@ -88,7 +107,7 @@ class RideController(private val deps: RideDeps) {
     val clean = rideName(name)
     if (clean == null || activeRide.value != null) return@locked false
     val ride = newRide(d.newId(), clean, d.now(), d.bootCount(), d.maxRecordingMs())
-    write("save") { d.store.save(ride) }
+    save(ride)
     activeRide.value = ride
     lastPoint = null
     d.alarm.set(ride.id, ride.deadline!!)
@@ -101,7 +120,7 @@ class RideController(private val deps: RideDeps) {
     val ride = activeRide.value?.takeIf { it.status == RideStatus.RECORDING } ?: return@locked
     val d = deps
     val paused = ride.pause(d.now())
-    write("save") { d.store.save(paused) }
+    save(paused)
     activeRide.value = paused
     d.alarm.cancel()
     d.recording(false)
@@ -111,7 +130,7 @@ class RideController(private val deps: RideDeps) {
     val ride = activeRide.value?.takeIf { it.status == RideStatus.PAUSED } ?: return@locked
     val d = deps
     val resumed = ride.resume(d.now(), d.bootCount(), d.maxRecordingMs())
-    write("save") { d.store.save(resumed) }
+    save(resumed)
     activeRide.value = resumed
     lastPoint = null
     d.alarm.set(resumed.id, resumed.deadline!!)
@@ -177,7 +196,7 @@ class RideController(private val deps: RideDeps) {
 
   private suspend fun finish(ended: Ride) {
     val d = deps
-    write("save") { d.store.save(ended) }
+    save(ended)
     activeRide.value = null
     lastPoint = null
     d.alarm.cancel()
