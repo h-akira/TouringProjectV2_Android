@@ -23,8 +23,9 @@ android {
     applicationId = "com.touringproject.v2"
     minSdk = 29
     targetSdk = 36
-    versionCode = 1
-    versionName = "0.1.0"
+    // Raised by hand for every new build put on the phones (Android README), so Settings shows which one is installed.
+    versionCode = 2
+    versionName = "0.2.0"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
   }

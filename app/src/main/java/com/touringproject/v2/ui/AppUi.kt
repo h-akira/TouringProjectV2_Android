@@ -27,6 +27,7 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import com.touringproject.v2.AppGraph
+import com.touringproject.v2.BuildConfig
 import com.touringproject.v2.api.ApiClient
 import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.settings.LaunchableApp
@@ -131,6 +132,7 @@ fun AppUi(graph: AppGraph) {
                 onReturnApp = { backStack.add(ReturnAppKey) },
                 onVolume = { backStack.add(VolumeKey) },
                 onRecordings = { backStack.add(RecordingsKey) },
+                version = BuildConfig.VERSION_NAME,
                 modifier = Modifier.safeDrawingPadding(),
               )
             }

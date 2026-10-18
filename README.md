@@ -85,3 +85,5 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
 端末に2つのユーザーがあるときは、`adb install --user 0 -r ...` のようにユーザーを指す。
+
+新しい plan の走行用のビルドを実機に入れる前に、`app/build.gradle.kts` の `versionName`（`0.2.0` → `0.3.0` のように）と `versionCode`（1つ上げる）を手で上げる。同じ plan の中の入れ直しでは上げない。入っている版は、アプリの「設定 → バージョン」で見る。コミットの番号はアプリに出さない。

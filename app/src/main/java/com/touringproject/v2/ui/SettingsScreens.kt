@@ -49,9 +49,10 @@ private val Blue = Color(0xFF1F4FD1)
 private val Red = Color(0xFFD42A2A)
 
 @Composable
-private fun SettingsRow(title: String, value: String, onClick: () -> Unit) {
+/** A row without onClick only shows its value. */
+private fun SettingsRow(title: String, value: String, onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
   Surface(
-    Modifier.fillMaxWidth().clickable(onClick = onClick),
+    modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
     shape = RoundedCornerShape(12.dp),
     border = BorderStroke(1.dp, Color(0xFFCCCCCC)),
   ) {
@@ -72,6 +73,8 @@ fun SettingsScreen(
   onReturnApp: () -> Unit,
   onVolume: () -> Unit,
   onRecordings: () -> Unit,
+  /** The app's version, raised by hand for every new build put on the phones. */
+  version: String,
   modifier: Modifier = Modifier,
 ) {
   val returnValue = if (!settings.returnEnabled) "戻らない" else settings.returnApp?.label ?: "未設定"
@@ -81,6 +84,7 @@ fun SettingsScreen(
     SettingsRow("応答後に戻るアプリ", returnValue, onReturnApp)
     SettingsRow("回答の音量", "+${settings.answerVolumeDb}dB", onVolume)
     SettingsRow("録音の確認", "", onRecordings)
+    SettingsRow("バージョン", version, null, Modifier.testTag("versionRow"))
   }
 }
 
