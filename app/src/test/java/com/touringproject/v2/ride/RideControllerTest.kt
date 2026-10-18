@@ -1,6 +1,10 @@
 package com.touringproject.v2.ride
 
 import com.touringproject.v2.location.Fix
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -18,13 +22,24 @@ private class World(var now: Long = 1_000, var boot: Int? = 7) {
   var failWrites = false
   /** How many of the next saves fail. */
   var failSaves = 0
+  /** How many of the next reads of the active ride fail. */
+  var failActive = 0
+  /** When set, a save waits for it before writing. */
+  var gate: CompletableDeferred<Unit>? = null
   val events = mutableListOf<String>()
   val autoEnded = mutableListOf<Ride>()
   private var ids = 0
 
   val store = object : RideStore {
-    override suspend fun active() = rides.values.firstOrNull { it.status != RideStatus.ENDED }
+    override suspend fun active(): Ride? {
+      if (failActive > 0) {
+        failActive -= 1
+        throw IOException("disk I/O error")
+      }
+      return rides.values.firstOrNull { it.status != RideStatus.ENDED }
+    }
     override suspend fun save(ride: Ride) {
+      gate?.await()
       if (failWrites) throw IOException("disk full")
       if (failSaves > 0) {
         failSaves -= 1
@@ -324,6 +339,73 @@ class RideControllerTest {
     assertTrue(w.controller.end("箱根"))
     assertEquals(RideStatus.RECORDING, w.rides.getValue("r1").status)
     w.controller.start("御殿場")
+    assertEquals(RideStatus.ENDED, w.rides.getValue("r1").status)
+    assertEquals(RideStatus.RECORDING, w.rides.getValue("r2").status)
+  }
+
+  @Test
+  fun a_failed_first_read_is_tried_again_before_a_new_ride_can_start() = runTest {
+    val before = World()
+    before.controller.load()
+    before.controller.start("箱根")
+    val after = World(now = 30_000).apply {
+      rides += before.rides
+      failActive = 1
+    }
+    after.controller.load()
+    assertNull(after.controller.active.value)
+    assertTrue(after.controller.storeFailed.value)
+    // The next call reads again and finds the ride left recording, so no second one starts.
+    assertFalse(after.controller.start("御殿場"))
+    assertEquals("r1", after.controller.active.value?.id)
+    assertEquals(1, after.rides.size)
+    assertFalse(after.controller.storeFailed.value)
+  }
+
+  @Test
+  fun a_retried_save_keeps_the_distance_recorded_meanwhile() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.controller.pause()
+    w.failSaves = 3
+    w.now = 9_000
+    w.controller.resume()
+    w.controller.onFix(fix(10_000, 35.000))
+    w.controller.onFix(fix(15_000, 35.001))
+    w.now = 70_000
+    w.controller.heartbeat()
+    assertEquals(RideStatus.RECORDING, w.stored().status)
+    assertEquals(111.2, w.stored().distanceMeters, 0.5)
+  }
+
+  @Test
+  fun a_pause_finishes_even_when_its_caller_is_cancelled() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.events.clear()
+    w.gate = CompletableDeferred()
+    val job = launch { w.controller.pause() }
+    runCurrent()
+    job.cancel()
+    w.gate!!.complete(Unit)
+    advanceUntilIdle()
+    assertEquals(RideStatus.PAUSED, w.controller.active.value?.status)
+    assertEquals(RideStatus.PAUSED, w.stored().status)
+    assertEquals(listOf("alarm:cancel", "recording:false"), w.events)
+  }
+
+  @Test
+  fun no_new_ride_starts_while_an_ended_one_is_still_unsaved() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.failSaves = 2
+    w.controller.end("箱根")
+    assertFalse(w.controller.start("御殿場"))
+    assertEquals(setOf("r1"), w.rides.keys)
+    assertTrue(w.controller.start("御殿場"))
     assertEquals(RideStatus.ENDED, w.rides.getValue("r1").status)
     assertEquals(RideStatus.RECORDING, w.rides.getValue("r2").status)
   }

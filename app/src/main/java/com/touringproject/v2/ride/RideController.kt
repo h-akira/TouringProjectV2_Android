@@ -4,18 +4,22 @@ import com.touringproject.v2.location.Fix
 import com.touringproject.v2.location.acceptRoutePoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * Starts, pauses, resumes and ends the ride, and takes in its route points. The service, the deadline alarm, the
  * shutdown broadcast and the screens all call in here; one lock keeps their calls in order. Every call waits for
  * load(), which settles a ride left over from before the process started. A failed write is logged and shown
  * (storeFailed) but never stops the ride (slice 2 spec §8). A ride whose save failed is saved again before anything
- * else, so its points have a row to belong to and an end is not undone by the next launch.
+ * else, so its points have a row to belong to and an end is not undone by the next launch. Once a call holds the lock
+ * it runs to the end even if its caller is cancelled (a screen that goes away), so memory, the database, the alarm and
+ * the service never part.
  */
 class RideController(private val deps: RideDeps) {
   private val mutex = Mutex()
@@ -28,30 +32,46 @@ class RideController(private val deps: RideDeps) {
   val storeFailed: StateFlow<Boolean> = storeFailing.asStateFlow()
   // The last stored point of the active ride, for the distance of the next one.
   private var lastPoint: RoutePoint? = null
-  // The latest state of a ride whose save failed; it is written again first by every later call.
+  // A ride whose save failed; it is written again first by every later call.
   private var unsaved: Ride? = null
+  // False until the ride left over from before this process has been read; until then no new ride may start.
+  private var reconciled = false
 
   suspend fun load() {
     mutex.withLock {
       if (loaded.isCompleted) return
-      val d = deps
-      val ride = read("active") { d.store.active() }
-      val now = d.now()
-      val decision = reconcile(ride, now, d.bootCount())
-      d.log("ride_load", mapOf("ride" to ride?.id, "decision" to decision.toString()))
-      when (decision) {
-        Reconcile.Nothing -> Unit
-        is Reconcile.EndShutdown -> finish(ride!!.end(decision.at, EndReason.SHUTDOWN, now))
-        is Reconcile.EndAuto -> finish(ride!!.end(decision.at, EndReason.AUTO, now))
-        Reconcile.KeepPaused -> activeRide.value = ride
-        Reconcile.Resume -> {
-          activeRide.value = ride
-          lastPoint = read("last_point") { d.store.lastPoint(ride!!.id) }
-          d.alarm.set(ride!!.id, ride.deadline!!)
-          d.recording(true)
-        }
-      }
+      withContext(NonCancellable) { reconcileNow() }
       loaded.complete(Unit)
+    }
+  }
+
+  // A failed read leaves reconciled false, so the next call tries again instead of taking the database as empty.
+  private suspend fun reconcileNow() {
+    val d = deps
+    val ride = try {
+      d.store.active()
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      failed("active", e)
+      return
+    }
+    reconciled = true
+    storeFailing.value = unsaved != null
+    val now = d.now()
+    val decision = reconcile(ride, now, d.bootCount())
+    d.log("ride_load", mapOf("ride" to ride?.id, "decision" to decision.toString()))
+    when (decision) {
+      Reconcile.Nothing -> Unit
+      is Reconcile.EndShutdown -> finish(ride!!.end(decision.at, EndReason.SHUTDOWN, now))
+      is Reconcile.EndAuto -> finish(ride!!.end(decision.at, EndReason.AUTO, now))
+      Reconcile.KeepPaused -> activeRide.value = ride
+      Reconcile.Resume -> {
+        activeRide.value = ride
+        lastPoint = read("last_point") { d.store.lastPoint(ride!!.id) }
+        d.alarm.set(ride!!.id, ride.deadline!!)
+        d.recording(true)
+      }
     }
   }
 
@@ -82,30 +102,37 @@ class RideController(private val deps: RideDeps) {
 
   private suspend fun save(ride: Ride) {
     unsaved = ride
-    flush()
-  }
-
-  private suspend fun flush() {
-    val ride = unsaved ?: return
     write("save") {
       deps.store.save(ride)
       unsaved = null
     }
   }
 
+  // The active ride's points and alive time have moved on since its save failed: save its current state, not the old one.
+  private suspend fun flush() {
+    val pending = unsaved ?: return
+    save(activeRide.value?.takeIf { it.id == pending.id } ?: pending)
+  }
+
   private suspend fun <T> locked(block: suspend () -> T): T {
     loaded.await()
     return mutex.withLock {
-      flush()
-      block()
+      withContext(NonCancellable) {
+        flush()
+        if (!reconciled) reconcileNow()
+        block()
+      }
     }
   }
 
-  /** Returns false when the name is not usable or another ride is already recording or paused. */
+  /**
+   * Returns false when the name is not usable, another ride is already recording or paused, or the database has not
+   * yet told which (a failed read, or an earlier ride's end still unsaved).
+   */
   suspend fun start(name: String): Boolean = locked {
     val d = deps
     val clean = rideName(name)
-    if (clean == null || activeRide.value != null) return@locked false
+    if (clean == null || !reconciled || unsaved != null || activeRide.value != null) return@locked false
     val ride = newRide(d.newId(), clean, d.now(), d.bootCount(), d.maxRecordingMs())
     save(ride)
     activeRide.value = ride
