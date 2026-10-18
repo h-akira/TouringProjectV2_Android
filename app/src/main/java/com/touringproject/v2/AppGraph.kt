@@ -36,6 +36,7 @@ import com.touringproject.v2.recordings.TrialState
 import com.touringproject.v2.ride.DEFAULT_MAX_RECORDING_MS
 import com.touringproject.v2.ride.RideController
 import com.touringproject.v2.ride.RideDeps
+import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.service.AlarmDeadline
 import com.touringproject.v2.service.ContextServiceLauncher
 import com.touringproject.v2.service.RideNotices
@@ -45,6 +46,7 @@ import com.touringproject.v2.settings.DataStoreKeyValueStore
 import com.touringproject.v2.settings.KeystoreCipher
 import com.touringproject.v2.settings.SettingsRepository
 import com.touringproject.v2.store.RideDatabase
+import com.touringproject.v2.store.RoomAskLog
 import com.touringproject.v2.store.RoomRideStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
@@ -76,6 +78,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val routeSource: RouteSource = FusedRouteSource(context)
   private val database = RideDatabase.open(context)
   val rideStore = RoomRideStore(database.rides())
+  val askLog = RoomAskLog(database.asks(), scope) { message, e -> Log.w("trv2.ask", message, e) }
   private val notices = RideNotices(context)
 
   val rides = RideController(
@@ -113,6 +116,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       route = AudioRouteControl(audioRoute),
       recorder = PcmRecorder(),
       recordings = RecordingKeeper(recordingStore, scope) { message, e -> Log.w("trv2.recordings", message, e) },
+      asks = askLog,
+      rideId = { rides.active.value?.takeIf { it.status == RideStatus.RECORDING }?.id },
       location = PositionTracker(FusedPositionSource(context)),
       service = serviceCoordinator.keepAlive,
       nav = launcher,

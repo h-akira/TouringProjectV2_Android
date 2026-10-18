@@ -67,6 +67,7 @@ fun AppUi(graph: AppGraph) {
   val volumeDismissedAt by graph.volumeDismissedAt.collectAsStateWithLifecycle()
   val ride by graph.rides.active.collectAsStateWithLifecycle()
   val storeFailed by graph.rides.storeFailed.collectAsStateWithLifecycle()
+  val askStoreFailed by graph.askLog.failed.collectAsStateWithLifecycle()
   var sheet by remember { mutableStateOf<RideSheet?>(null) }
   val now = rememberNow(ride != null)
   val context = LocalContext.current
@@ -92,7 +93,7 @@ fun AppUi(graph: AppGraph) {
                   hasKey = apiKey != null,
                   returnAppMissing = current.returnEnabled && current.returnApp == null,
                   volumeLow = volumeWarning(volume, volumeDismissedAt),
-                  storeFailed = storeFailed,
+                  storeFailed = storeFailed || askStoreFailed,
                 ),
                 conversation = conversationLabel(expiresAt, System.currentTimeMillis()),
               )

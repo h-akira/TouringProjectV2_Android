@@ -19,6 +19,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -56,6 +57,7 @@ private class Harness(
   val serviceError: Exception? = null,
   val device: InputDevice? = InputDevice(InputDevice.Type.BLUETOOTH, "M1-S PRO"),
   val pcm: ByteArray = byteArrayOf(1, 2, 3),
+  var rideId: String? = null,
 ) {
   val log = mutableListOf<String>()
   val states = mutableListOf<FlowState>()
@@ -63,6 +65,7 @@ private class Harness(
   val metas = mutableListOf<RecordingMeta>()
   val keptPcm = mutableListOf<ByteArray>()
   val transcripts = mutableListOf<Pair<String, String>>()
+  val kept = mutableListOf<AskRecord>()
   private val results = answers.toMutableList()
   fun now() = scope.testScheduler.currentTime
 
@@ -108,6 +111,8 @@ private class Harness(
       override fun saved(meta: RecordingMeta, pcm: ByteArray) { metas += meta; keptPcm += pcm }
       override fun transcribed(name: String, transcript: String) { transcripts += name to transcript }
     },
+    asks = { kept += it },
+    rideId = { rideId },
     location = object : Positions {
       override fun begin() { log += "loc:begin" }
       override fun end() = HERE to listOf(BEHIND, HERE)
@@ -524,5 +529,101 @@ class AskControllerTest {
     h.controller.run(Source.HANDSFREE)
     assertTrue(h.states.any { it.phase == Phase.RECORDING && it.phoneMic })
     assertTrue("post" in h.log)
+  }
+
+  @Test
+  fun an_answered_ask_is_kept_with_where_it_was_asked() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000)
+    h.controller.run(Source.HANDSFREE)
+    val kept = h.kept.single()
+    assertEquals("a1", kept.askId)
+    assertEquals(AskOutcome.ANSWERED, kept.outcome)
+    assertEquals("愛鷹山です。", kept.answer)
+    assertEquals(HERE.latitude, kept.latitude!!, 0.0)
+    assertEquals("c1", kept.conversationId)
+    assertTrue(kept.newConversation)
+    assertEquals(null, kept.rideId)
+  }
+
+  @Test
+  fun the_next_ask_of_the_conversation_does_not_start_a_new_one() = runTest {
+    val h = Harness(this, stopAfterMs = null)
+    h.controller.run(Source.HANDSFREE)
+    h.controller.run(Source.HANDSFREE)
+    assertEquals(listOf(true, false), h.kept.map { it.newConversation })
+  }
+
+  @Test
+  fun a_failure_the_backend_reports_is_kept_with_its_reason() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000, answers = listOf(done(status = "failed", error = "no_speech", answer = null, audio = emptyList())))
+    h.controller.run(Source.HANDSFREE)
+    val kept = h.kept.single()
+    assertEquals(AskOutcome.FAILED, kept.outcome)
+    assertEquals("no_speech", kept.failure)
+    assertEquals(null, kept.answeredAt)
+  }
+
+  @Test
+  fun an_ask_that_timed_out_is_kept_as_a_timeout() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000, answers = List(200) { PROCESSING })
+    h.controller.run(Source.HANDSFREE)
+    assertEquals(TIMEOUT_FAILURE, h.kept.single().failure)
+  }
+
+  @Test
+  fun an_ask_the_backend_never_took_in_is_not_kept() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000, post = { throw ApiError(ApiErrorKind.NETWORK) })
+    h.controller.run(Source.HANDSFREE)
+    assertTrue(h.kept.isEmpty())
+  }
+
+  @Test
+  fun an_ask_cancelled_while_waiting_is_not_kept() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000, answers = List(200) { PROCESSING })
+    launch { h.controller.run(Source.HANDSFREE) }
+    h.until { h.phase == Phase.WAITING }
+    h.controller.cancel()
+    advanceUntilIdle()
+    assertTrue(h.kept.isEmpty())
+  }
+
+  @Test
+  fun an_ask_started_while_a_ride_records_goes_with_the_ride() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000, rideId = "r1")
+    h.controller.run(Source.HANDSFREE)
+    assertEquals("r1", h.bodies.single().rideId)
+    assertEquals("r1", h.kept.single().rideId)
+  }
+
+  @Test
+  fun the_ride_is_read_when_the_ask_starts_so_a_pause_meanwhile_does_not_drop_it() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000, rideId = "r1")
+    launch { h.controller.run(Source.HANDSFREE) }
+    h.until { h.phase == Phase.RECORDING }
+    h.rideId = null
+    advanceUntilIdle()
+    assertEquals("r1", h.bodies.single().rideId)
+  }
+}
+
+class AskRecordTest {
+  private val sent = SentAsk("a1", "c1", true, 5_000, Fix(35.0, 139.0, 4_000, 5.0), "r1")
+
+  @Test
+  fun the_backend_time_of_the_ask_is_kept_and_the_device_time_stands_in_without_it() {
+    val result = AskResult("a1", "completed", "Q", "A", askedAt = "2026-10-18T01:02:03.456Z", address = "御殿場市", headingDegrees = 90.0)
+    val kept = askRecord(sent, result, 9_000)
+    assertEquals(java.time.Instant.parse("2026-10-18T01:02:03.456Z").toEpochMilli(), kept.askedAt)
+    assertEquals(9_000L, kept.answeredAt)
+    assertEquals("御殿場市", kept.address)
+    assertEquals(5_000L, askRecord(sent, result.copy(askedAt = null), 9_000).askedAt)
+  }
+
+  @Test
+  fun text_whose_speech_failed_is_an_answer_and_a_failure_without_a_reason_is_the_agents() {
+    assertEquals(AskOutcome.ANSWERED, askRecord(sent, AskResult("a1", "failed", "Q", "A", error = "tts_failed"), 9_000).outcome)
+    val failed = askRecord(sent, AskResult("a1", "failed", "Q", null), 9_000)
+    assertEquals(AskOutcome.FAILED, failed.outcome)
+    assertEquals("agent_failed", failed.failure)
   }
 }
