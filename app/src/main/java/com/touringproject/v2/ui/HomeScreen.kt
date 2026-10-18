@@ -87,6 +87,7 @@ fun HomeScreen(
   onNewConversation: () -> Unit,
   modifier: Modifier = Modifier,
   onDismissVolume: () -> Unit = {},
+  ride: @Composable () -> Unit = {},
 ) {
   var confirming by remember { mutableStateOf(false) }
   Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -99,8 +100,9 @@ fun HomeScreen(
     }
     ui.banner?.let { banner ->
       val low = banner == Banner.LOW_VOLUME
-      WarningBand(banner.text, if (low) null else ({ onBanner(banner) }), if (low) onDismissVolume else null, Modifier.testTag("banner"))
+      WarningBand(banner.text, if (banner.leads) ({ onBanner(banner) }) else null, if (low) onDismissVolume else null, Modifier.testTag("banner"))
     }
+    ride()
     Text("インカムのボタンで話せます", color = Color(0xFF13804A), fontSize = 16.sp)
     Column(
       Modifier.fillMaxWidth().heightIn(min = 76.dp, max = 140.dp).background(Color(0xFF1F4FD1), RoundedCornerShape(16.dp))
