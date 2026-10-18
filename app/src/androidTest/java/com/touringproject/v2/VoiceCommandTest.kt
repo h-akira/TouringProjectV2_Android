@@ -89,6 +89,12 @@ class VoiceCommandTest {
     waitUntil { app.graph.state.value.phase == Phase.IDLE }
     // Back closes the activity but the process stays (4b #9).
     val activity = resumed() as MainActivity
+    // The ask overlay holds Back until the screen has recomposed without it, a frame after the phase turns IDLE.
+    waitUntil {
+      var held = true
+      instrumentation.runOnMainSync { held = activity.onBackPressedDispatcher.hasEnabledCallbacks() }
+      !held
+    }
     instrumentation.runOnMainSync { activity.onBackPressedDispatcher.onBackPressed() }
     waitUntil { activity.isDestroyed || activity.isFinishing }
     app.startActivity(voiceCommand())

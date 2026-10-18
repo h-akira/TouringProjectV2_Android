@@ -5,6 +5,8 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.kotlin.serialization)
+  alias(libs.plugins.ksp)
+  alias(libs.plugins.room)
 }
 
 // The API URL lives in local.properties (not tracked): trv2.apiBaseUrl=https://<id>.execute-api.ap-northeast-1.amazonaws.com/Prod
@@ -58,6 +60,11 @@ kotlin {
   jvmToolchain(17)
 }
 
+// The schema of every version is kept in git so that later migrations can be tested against it (slice 2 spec §5.1).
+room {
+  schemaDirectory("$projectDir/schemas")
+}
+
 dependencies {
   val composeBom = platform(libs.androidx.compose.bom)
   implementation(composeBom)
@@ -80,6 +87,9 @@ dependencies {
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.okhttp)
   implementation(libs.play.services.location)
+  implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.room.ktx)
+  ksp(libs.androidx.room.compiler)
   // Play services bring Fragment 1.1.0, which the release lint rejects next to the Activity Result API; the app uses no fragments.
   implementation(libs.androidx.fragment)
   debugImplementation(libs.androidx.compose.ui.tooling)

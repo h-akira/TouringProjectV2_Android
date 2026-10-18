@@ -3,6 +3,7 @@ package com.touringproject.v2
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.provider.Settings as SystemSettings
 import android.util.Log
 import com.touringproject.v2.api.ApiClient
 import com.touringproject.v2.ask.AskController
@@ -21,7 +22,9 @@ import com.touringproject.v2.audio.TtsSpeech
 import com.touringproject.v2.handsfree.PressGate
 import com.touringproject.v2.handsfree.PressRouter
 import com.touringproject.v2.location.FusedPositionSource
+import com.touringproject.v2.location.FusedRouteSource
 import com.touringproject.v2.location.PositionTracker
+import com.touringproject.v2.location.RouteSource
 import com.touringproject.v2.nav.AppLauncher
 import com.touringproject.v2.recordings.RecordingCheck
 import com.touringproject.v2.recordings.RecordingKeeper
@@ -30,11 +33,19 @@ import com.touringproject.v2.recordings.TRIAL_IDLE
 import com.touringproject.v2.recordings.TrialController
 import com.touringproject.v2.recordings.TrialDeps
 import com.touringproject.v2.recordings.TrialState
-import com.touringproject.v2.service.ServiceKeepAlive
+import com.touringproject.v2.ride.DEFAULT_MAX_RECORDING_MS
+import com.touringproject.v2.ride.RideController
+import com.touringproject.v2.ride.RideDeps
+import com.touringproject.v2.service.AlarmDeadline
+import com.touringproject.v2.service.ContextServiceLauncher
+import com.touringproject.v2.service.RideNotices
+import com.touringproject.v2.service.ServiceCoordinator
 import com.touringproject.v2.settings.ApiKeyStore
 import com.touringproject.v2.settings.DataStoreKeyValueStore
 import com.touringproject.v2.settings.KeystoreCipher
 import com.touringproject.v2.settings.SettingsRepository
+import com.touringproject.v2.store.RideDatabase
+import com.touringproject.v2.store.RoomRideStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -43,6 +54,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.UUID
 
 /** Builds the app's parts by hand (no DI library) and owns them for the life of the process. */
 class AppGraph(private val context: Context, val scope: CoroutineScope = MainScope()) {
@@ -56,6 +68,26 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val recordingStore = RecordingStore(File(context.filesDir, "recordings"))
   private val cues = ToneCues()
   private val micAllowed = { context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED }
+
+  val serviceCoordinator = ServiceCoordinator(ContextServiceLauncher(context)) { message, e -> Log.w("trv2.ride", message, e) }
+  val routeSource: RouteSource = FusedRouteSource(context)
+  private val database = RideDatabase.open(context)
+  val rideStore = RoomRideStore(database.rides())
+  private val notices = RideNotices(context)
+
+  val rides = RideController(
+    RideDeps(
+      now = System::currentTimeMillis,
+      bootCount = { runCatching { SystemSettings.Global.getInt(context.contentResolver, SystemSettings.Global.BOOT_COUNT) }.getOrNull() },
+      newId = { UUID.randomUUID().toString() },
+      maxRecordingMs = { DEFAULT_MAX_RECORDING_MS },
+      store = rideStore,
+      alarm = AlarmDeadline(context),
+      recording = serviceCoordinator::setRecording,
+      autoEnded = notices::autoEnded,
+      log = { event, data -> Log.i("trv2.ride", "$event $data") },
+    ),
+  )
 
   private val flowState = MutableStateFlow(IDLE)
   val state: StateFlow<FlowState> = flowState.asStateFlow()
@@ -79,7 +111,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       recorder = PcmRecorder(),
       recordings = RecordingKeeper(recordingStore, scope) { message, e -> Log.w("trv2.recordings", message, e) },
       location = PositionTracker(FusedPositionSource(context)),
-      service = ServiceKeepAlive(context),
+      service = serviceCoordinator.keepAlive,
       nav = launcher,
       cues = cues,
       player = ExoAnswerPlayer(context),
@@ -140,6 +172,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
 
   init {
     audioRoute.onVoiceRecognitionEnded = { router.recognitionEnded() }
+    // Settles a ride left recording or paused before this process started (slice 2 spec §4.5).
+    scope.launch { rides.load() }
     scope.launch {
       settings.load()
       apiKeys.load()

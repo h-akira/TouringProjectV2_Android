@@ -27,14 +27,17 @@ fun conversationLabel(expiresAt: Long?, now: Long): String =
   if (expiresAt == null || expiresAt <= now) "新しい会話です"
   else "${HHMM.format(Instant.ofEpochMilli(expiresAt))} まで質問がなければ自動で区切ります"
 
-enum class Banner(val text: String) {
+/** leads is true when tapping the band opens the setting that fixes it. */
+enum class Banner(val text: String, val leads: Boolean = true) {
+  STORE_FAILED("記録を保存できません", leads = false),
   NO_KEY("接続キーが未設定です（押して設定）"),
   NO_RETURN_APP("戻り先のアプリが未設定です（押して選ぶ）"),
-  LOW_VOLUME("メディアの音量が低く、回答が聞こえないかもしれません"),
+  LOW_VOLUME("メディアの音量が低く、回答が聞こえないかもしれません", leads = false),
 }
 
 /** SC-02 shows at most one warning band, the most urgent first. */
-fun homeBanner(hasKey: Boolean, returnAppMissing: Boolean, volumeLow: Boolean = false): Banner? = when {
+fun homeBanner(hasKey: Boolean, returnAppMissing: Boolean, volumeLow: Boolean = false, storeFailed: Boolean = false): Banner? = when {
+  storeFailed -> Banner.STORE_FAILED
   !hasKey -> Banner.NO_KEY
   returnAppMissing -> Banner.NO_RETURN_APP
   volumeLow -> Banner.LOW_VOLUME

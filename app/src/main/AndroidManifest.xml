@@ -13,6 +13,7 @@
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
   <!-- The return-app list (SC-10) and launching the nav app need to see launcher activities. -->
   <queries>
@@ -48,7 +49,11 @@
     <service
       android:name=".service.RideForegroundService"
       android:exported="false"
-      android:foregroundServiceType="microphone|mediaPlayback" />
+      android:foregroundServiceType="location|microphone|mediaPlayback" />
+    <!-- Ends a ride at its deadline even when the process has died (slice 2 spec §4.4). -->
+    <receiver
+      android:name=".service.DeadlineReceiver"
+      android:exported="false" />
   </application>
 
 </manifest>

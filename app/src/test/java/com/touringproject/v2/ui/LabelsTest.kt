@@ -53,6 +53,8 @@ class LabelsTest {
   fun the_low_volume_band_comes_last() {
     assertEquals(Banner.NO_RETURN_APP, homeBanner(hasKey = true, returnAppMissing = true, volumeLow = true))
     assertEquals(Banner.LOW_VOLUME, homeBanner(hasKey = true, returnAppMissing = false, volumeLow = true))
+    // A failing database is the most urgent: rides are being lost (slice 2 spec §8).
+    assertEquals(Banner.STORE_FAILED, homeBanner(hasKey = false, returnAppMissing = true, volumeLow = true, storeFailed = true))
   }
 
   @Test
