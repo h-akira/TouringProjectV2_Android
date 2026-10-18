@@ -35,6 +35,12 @@ class MainActivity : ComponentActivity() {
     setContent { TouringV2Theme { AppUi(graph) } }
   }
 
+  // A ride's service could not start while the app was in the background (slice 2 spec §4.5); it can now.
+  override fun onStart() {
+    super.onStart()
+    graph.serviceCoordinator.refresh()
+  }
+
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     handleVoiceCommand(intent, restored = false)
