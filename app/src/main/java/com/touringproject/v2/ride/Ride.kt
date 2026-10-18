@@ -41,8 +41,15 @@ data class Ride(
 /** One stored route point. segment is the seq of the segment it was recorded in. */
 data class RoutePoint(val segment: Int, val t: Long, val lat: Double, val lon: Double, val accuracy: Double?)
 
+// Characters are counted as code points, as the Backend counts them, so an emoji is never cut in half (Android #18).
+private fun String.characters() = codePointCount(0, length)
+
 /** Returns the trimmed name, or null when it cannot name a ride (SC-17, SC-04: required, up to 40 characters). */
-fun rideName(input: String): String? = input.trim().takeIf { it.isNotEmpty() && it.length <= RIDE_NAME_MAX }
+fun rideName(input: String): String? = input.trim().takeIf { it.isNotEmpty() && it.characters() <= RIDE_NAME_MAX }
+
+/** What the name field keeps of a typed or pasted name: its first 40 characters. */
+fun cutRideName(input: String): String =
+  if (input.characters() <= RIDE_NAME_MAX) input else input.substring(0, input.offsetByCodePoints(0, RIDE_NAME_MAX))
 
 fun newRide(id: String, name: String, now: Long, bootCount: Int?, maxRecordingMs: Long) = Ride(
   id = id,
@@ -56,25 +63,34 @@ fun newRide(id: String, name: String, now: Long, bootCount: Int?, maxRecordingMs
   updatedAt = now,
 )
 
+// The Backend keeps a ride only when its updatedAt is newer than the one it has, so every change moves it forward,
+// even when the device's clock has been set back.
+private fun Ride.touched(now: Long) = maxOf(now, updatedAt + 1)
+
 private fun Ride.closeOpenSegment(at: Long) = segments.map {
   if (it.endedAt == null) it.copy(endedAt = maxOf(at, it.startedAt)) else it
 }
 
 fun Ride.pause(now: Long): Ride {
   check(status == RideStatus.RECORDING) { "only a recording ride can pause" }
-  return copy(status = RideStatus.PAUSED, segments = closeOpenSegment(now), deadline = null, lastAliveAt = now, updatedAt = now)
+  return copy(status = RideStatus.PAUSED, segments = closeOpenSegment(now), deadline = null, lastAliveAt = now, updatedAt = touched(now))
 }
 
+/** A clock set back during the pause does not start the new segment before the last one ended (Android #22). */
 fun Ride.resume(now: Long, bootCount: Int?, maxRecordingMs: Long): Ride {
   check(status == RideStatus.PAUSED) { "only a paused ride can resume" }
-  val next = Segment(segments.last().seq + 1, now, null, bootCount)
-  return copy(status = RideStatus.RECORDING, segments = segments + next, deadline = now + maxRecordingMs, lastAliveAt = now, updatedAt = now)
+  val last = segments.last()
+  val startedAt = maxOf(now, last.endedAt ?: now)
+  val next = Segment(last.seq + 1, startedAt, null, bootCount)
+  return copy(
+    status = RideStatus.RECORDING, segments = segments + next, deadline = startedAt + maxRecordingMs, lastAliveAt = now, updatedAt = touched(now),
+  )
 }
 
 /** Ends the ride as of at (the open segment closes there); now is when the change is made. */
 fun Ride.end(at: Long, reason: EndReason, now: Long, name: String = this.name): Ride {
   check(status != RideStatus.ENDED) { "the ride has already ended" }
-  return copy(name = name, status = RideStatus.ENDED, segments = closeOpenSegment(at), endReason = reason, deadline = null, updatedAt = now)
+  return copy(name = name, status = RideStatus.ENDED, segments = closeOpenSegment(at), endReason = reason, deadline = null, updatedAt = touched(now))
 }
 
 /** The time spent recording; an open segment counts up to now (US-C-07.006). */

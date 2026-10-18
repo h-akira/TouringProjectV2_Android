@@ -66,6 +66,36 @@ class RideTest {
   }
 }
 
+class RideClockAndNameTest {
+  private val started = newRide("r1", "箱根", 1_000, 7, MAX)
+
+  @Test
+  fun a_clock_set_back_during_the_pause_does_not_overlap_the_segments() {
+    val resumed = started.pause(5_000).resume(3_000, 7, MAX)
+    assertEquals(Segment(1, 5_000, null, 7), resumed.segments.last())
+    assertEquals(5_000 + MAX, resumed.deadline)
+  }
+
+  @Test
+  fun every_change_moves_updatedAt_forward_even_when_the_clock_goes_back() {
+    val paused = started.pause(500)
+    assertEquals(1_001L, paused.updatedAt)
+    val resumed = paused.resume(400, 7, MAX)
+    assertEquals(1_002L, resumed.updatedAt)
+    assertEquals(1_003L, resumed.end(300, EndReason.MANUAL, 300).updatedAt)
+    assertEquals(9_000L, started.pause(9_000).updatedAt)
+  }
+
+  @Test
+  fun a_name_is_counted_in_characters_so_an_emoji_counts_once() {
+    val name = "あ".repeat(39) + "😀"
+    assertEquals(name, rideName(name))
+    assertNull(rideName(name + "😀"))
+    assertEquals(name, cutRideName(name + "😀"))
+    assertEquals("箱根", cutRideName("箱根"))
+  }
+}
+
 class ReconcileTest {
   private val recording = newRide("r1", "箱根", 1_000, 7, MAX).copy(lastAliveAt = 60_000)
 
