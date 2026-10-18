@@ -32,6 +32,8 @@ data class AskBody(
   val headingSample: HeadingSample? = null,
   val conversationId: String? = null,
   val volumeDb: Int? = null,
+  /** Only for an ask started while a ride is recording (slice 2 spec §4.6). */
+  val rideId: String? = null,
 )
 
 @Serializable data class AskAccepted(val askId: String, val conversationId: String, val conversationExpiresAt: String)
@@ -46,11 +48,31 @@ data class AskResult(
   val answer: String? = null,
   val audio: List<AudioClip> = emptyList(),
   val error: String? = null,
+  /** When the Backend took the ask in (UTC). */
+  val askedAt: String? = null,
+  val address: String? = null,
+  val headingDegrees: Double? = null,
 )
 
 interface AskApi {
   suspend fun postAsk(body: AskBody): AskAccepted
   suspend fun getAsk(askId: String): AskResult
+}
+
+// A ride and its route (slice 2 spec §6.2). Times are ISO 8601 with their time zone.
+@Serializable data class SegmentBody(val startedAt: String, val endedAt: String?)
+
+@Serializable
+data class RideBody(val name: String, val status: String, val segments: List<SegmentBody>, val autoEnded: Boolean, val updatedAt: String)
+
+@Serializable data class PointBody(val t: String, val lat: Double, val lon: Double, val accuracy: Double?, val segment: Int)
+
+@Serializable data class RouteBody(val points: List<PointBody>)
+
+/** Both calls may be sent again and again: the Backend keeps one copy of each. A 400 throws BAD_REQUEST. */
+interface RideApi {
+  suspend fun putRide(rideId: String, body: RideBody)
+  suspend fun putRoute(rideId: String, seq: Int, body: RouteBody)
 }
 
 private val TRANSIENT = setOf(ApiErrorKind.RATE_LIMITED, ApiErrorKind.SERVER, ApiErrorKind.NETWORK)
@@ -67,25 +89,36 @@ private fun kindFor(status: Int): ApiErrorKind? = when {
   else -> null
 }
 
+/** http is the app's one OkHttpClient, so every client shares its connections and threads (Android #12). */
 class ApiClient(
   baseUrl: String,
   private val apiKey: String,
   private val userName: String,
+  http: OkHttpClient,
   private val maxAttempts: Int = 3,
   timeoutMs: Long = 15_000,
   private val retryDelay: suspend (Long) -> Unit = { delay(it) },
-  http: OkHttpClient = OkHttpClient(),
-) : AskApi {
+) : AskApi, RideApi {
   private val baseUrl = baseUrl.trimEnd('/')
   // callTimeout bounds the whole exchange, so a stalled connection cannot hang the ask.
   private val http = http.newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS).build()
   private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+  // The ride's open segment and a point without an accuracy are sent as null, as the contract writes them.
+  private val rideJson = Json { explicitNulls = true }
 
   // Only 429 is retried for POST: a lost response may already have created an ask.
   override suspend fun postAsk(body: AskBody): AskAccepted =
     json.decodeFromString(request("POST", "/asks", json.encodeToString(AskBody.serializer(), body), setOf(ApiErrorKind.RATE_LIMITED)))
 
   override suspend fun getAsk(askId: String): AskResult = json.decodeFromString(request("GET", "/asks/$askId", null, TRANSIENT))
+
+  override suspend fun putRide(rideId: String, body: RideBody) {
+    request("PUT", "/rides/$rideId", rideJson.encodeToString(RideBody.serializer(), body), TRANSIENT)
+  }
+
+  override suspend fun putRoute(rideId: String, seq: Int, body: RouteBody) {
+    request("PUT", "/rides/$rideId/route/$seq", rideJson.encodeToString(RouteBody.serializer(), body), TRANSIENT)
+  }
 
   suspend fun checkKey() {
     try {

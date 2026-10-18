@@ -53,12 +53,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 import java.io.File
 import java.util.UUID
 
 /** Builds the app's parts by hand (no DI library) and owns them for the life of the process. */
 class AppGraph(private val context: Context, val scope: CoroutineScope = MainScope()) {
   val apiBaseUrl: String = BuildConfig.API_BASE_URL
+  /** The one HTTP client of the app: every ApiClient shares its connections and threads (Android #12). */
+  val http = OkHttpClient()
   private val store = DataStoreKeyValueStore(context)
   val settings = SettingsRepository(store)
   val apiKeys = ApiKeyStore(store, KeystoreCipher())
@@ -105,7 +108,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       apiKey = { if (apiBaseUrl.isEmpty()) null else apiKeys.current() },
       micAllowed = micAllowed,
       mediaVolume = { runCatching { audioRoute.mediaVolume() }.getOrNull() },
-      api = { key, user -> ApiClient(apiBaseUrl, key, user) },
+      api = { key, user -> ApiClient(apiBaseUrl, key, user, http) },
       conversation = conversation,
       route = AudioRouteControl(audioRoute),
       recorder = PcmRecorder(),

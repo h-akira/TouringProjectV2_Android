@@ -157,7 +157,7 @@ fun AppUi(graph: AppGraph) {
               ConnectionScreen(
                 apiKey = apiKey,
                 urlMissing = graph.apiBaseUrl.isEmpty(),
-                check = { key -> ApiClient(graph.apiBaseUrl, key, current.userName).checkKey() },
+                check = { key -> ApiClient(graph.apiBaseUrl, key, current.userName, graph.http).checkKey() },
                 save = { graph.apiKeys.save(it) },
                 modifier = Modifier.safeDrawingPadding(),
               )
