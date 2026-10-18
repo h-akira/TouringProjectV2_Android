@@ -1,6 +1,7 @@
 package com.touringproject.v2.store
 
 import android.content.Context
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -13,6 +14,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 // The device's record of rides (slice 2 spec §5.1). Every schema version is exported to app/schemas and is moved
 // forward by a Migration; the database is never rebuilt destructively.
@@ -31,6 +34,10 @@ data class RideEntity(
   val updatedAt: Long,
   /** The updatedAt the Backend last accepted (slice 2 plan 3); null until then. */
   val sentUpdatedAt: Long?,
+  /** The updatedAt the Backend refused with 400; that version is not sent again (slice 2 spec §5.3). */
+  val rejectedUpdatedAt: Long? = null,
+  /** True once the Backend has refused one of the ride's route chunks with 400. */
+  @ColumnInfo(defaultValue = "0") val routeRejected: Boolean = false,
 )
 
 @Entity(
@@ -42,7 +49,8 @@ data class SegmentEntity(val rideId: String, val seq: Int, val startedAt: Long, 
 
 @Entity(
   tableName = "route_points",
-  indices = [Index(value = ["rideId", "segment", "t"])],
+  // chunk first: finding the rides with points left to send reads only the unsent ones (slice 2 plan 3a).
+  indices = [Index(value = ["rideId", "segment", "t"]), Index(value = ["chunk", "rideId"])],
   foreignKeys = [ForeignKey(entity = RideEntity::class, parentColumns = ["id"], childColumns = ["rideId"], onDelete = ForeignKey.CASCADE)],
 )
 data class RoutePointEntity(
@@ -56,6 +64,41 @@ data class RoutePointEntity(
   /** The seq of the chunk it was sent in (slice 2 plan 3); null until then. */
   val chunk: Int?,
 )
+
+/** An ask whose loop ended with an answer or a failure the Backend reported (slice 2 spec §5.2). */
+@Entity(tableName = "asks", indices = [Index(value = ["rideId"]), Index(value = ["askedAt"])])
+data class AskEntity(
+  @PrimaryKey val askId: String,
+  val askedAt: Long,
+  /** When the answer arrived; null for a failed ask. */
+  val answeredAt: Long?,
+  val transcript: String?,
+  val answer: String?,
+  val latitude: Double?,
+  val longitude: Double?,
+  val address: String?,
+  val headingDegrees: Double?,
+  /** voice / text */
+  val input: String,
+  val conversationId: String,
+  /** True for the first ask of a conversation: the conversation breaks just before it (US-C-03.004). */
+  val newConversation: Boolean,
+  /** answered / failed */
+  val status: String,
+  /** no_speech / transcribe_failed / agent_failed / tts_failed / timeout; null when answered */
+  val failure: String?,
+  /** The ride that was recording when the ask started; null when none was. Not a foreign key: a ride's row may be missing for a while after a failed save. */
+  val rideId: String?,
+)
+
+@Dao
+interface AskDao {
+  @Upsert
+  suspend fun upsert(ask: AskEntity)
+
+  @Query("SELECT * FROM asks WHERE askId = :askId")
+  suspend fun ask(askId: String): AskEntity?
+}
 
 @Dao
 interface RideDao {
@@ -92,10 +135,13 @@ interface RideDao {
   @Query("UPDATE rides SET lastAliveAt = :at WHERE id = :rideId")
   suspend fun markAlive(rideId: String, at: Long)
 
-  /** Keeps the sent marker: a save never undoes what the Backend has already accepted. */
+  /** Keeps the sending markers: a save never undoes what the Backend has already accepted or refused. */
   @Transaction
   suspend fun saveRide(ride: RideEntity, segments: List<SegmentEntity>) {
-    upsertRide(ride.copy(sentUpdatedAt = ride(ride.id)?.sentUpdatedAt))
+    val saved = ride(ride.id)
+    upsertRide(
+      ride.copy(sentUpdatedAt = saved?.sentUpdatedAt, rejectedUpdatedAt = saved?.rejectedUpdatedAt, routeRejected = saved?.routeRejected ?: false),
+    )
     deleteSegments(ride.id)
     insertSegments(segments)
   }
@@ -107,11 +153,34 @@ interface RideDao {
   }
 }
 
-@Database(entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class], version = 1, exportSchema = true)
+@Database(entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class], version = 2, exportSchema = true)
 abstract class RideDatabase : RoomDatabase() {
   abstract fun rides(): RideDao
+  abstract fun asks(): AskDao
 
   companion object {
-    fun open(context: Context): RideDatabase = Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").build()
+    fun open(context: Context): RideDatabase =
+      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2).build()
+  }
+}
+
+/**
+ * 1 -> 2 (slice 2 plan 3a): the asks table, the rides' markers for what the Backend refused, and an index for the
+ * points left to send. It only adds, so it stays quick: it runs inside RideController.load(), which the service awaits
+ * before startForeground (adr/0006).
+ */
+val MIGRATION_1_2 = object : Migration(1, 2) {
+  override fun migrate(db: SupportSQLiteDatabase) {
+    db.execSQL("ALTER TABLE `rides` ADD COLUMN `rejectedUpdatedAt` INTEGER")
+    db.execSQL("ALTER TABLE `rides` ADD COLUMN `routeRejected` INTEGER NOT NULL DEFAULT 0")
+    db.execSQL(
+      "CREATE TABLE IF NOT EXISTS `asks` (`askId` TEXT NOT NULL, `askedAt` INTEGER NOT NULL, `answeredAt` INTEGER, " +
+        "`transcript` TEXT, `answer` TEXT, `latitude` REAL, `longitude` REAL, `address` TEXT, `headingDegrees` REAL, " +
+        "`input` TEXT NOT NULL, `conversationId` TEXT NOT NULL, `newConversation` INTEGER NOT NULL, `status` TEXT NOT NULL, " +
+        "`failure` TEXT, `rideId` TEXT, PRIMARY KEY(`askId`))",
+    )
+    db.execSQL("CREATE INDEX IF NOT EXISTS `index_asks_rideId` ON `asks` (`rideId`)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS `index_asks_askedAt` ON `asks` (`askedAt`)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS `index_route_points_chunk_rideId` ON `route_points` (`chunk`, `rideId`)")
   }
 }

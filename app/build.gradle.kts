@@ -49,6 +49,11 @@ android {
   testOptions {
     unitTests.isIncludeAndroidResources = true
   }
+  // MigrationTestHelper reads the exported schemas as assets. Robolectric sees the assets of the build under test, so
+  // they go into the debug build (never the release one).
+  sourceSets {
+    getByName("debug").assets.srcDir("$projectDir/schemas")
+  }
   packaging {
     resources {
       excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -103,6 +108,7 @@ dependencies {
   testImplementation(libs.androidx.test.core)
   testImplementation(libs.androidx.test.ext.junit)
   testImplementation(libs.androidx.compose.ui.test.junit4)
+  testImplementation(libs.androidx.room.testing)
 
   // Emulator tests
   androidTestImplementation(libs.androidx.test.core)
