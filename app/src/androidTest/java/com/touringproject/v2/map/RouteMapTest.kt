@@ -55,4 +55,16 @@ class RouteMapTest {
     rule.waitUntil(10_000) { tapped.isNotEmpty() }
     check(tapped.last() == "a2") { "tapped ${tapped.last()}" }
   }
+
+  // Final review: a tap while the map is still being drawn must not ask for rendered features (MapLibre would crash).
+  @Test
+  fun taps_while_the_map_is_still_drawing_do_not_crash() {
+    var map: MapLibreMap? = null
+    rule.setContent { RouteMap(rideMap(points, ended = true, pins = pins), null, {}, Modifier.fillMaxSize(), onMap = { map = it }) }
+    val until = System.currentTimeMillis() + 3_000
+    while (map == null && System.currentTimeMillis() < until) {
+      rule.onRoot().performTouchInput { click(center) }
+    }
+    rule.waitUntil(30_000) { map != null }
+  }
 }

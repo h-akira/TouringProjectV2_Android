@@ -208,21 +208,22 @@ fun RouteMap(
       map.uiSettings.isCompassEnabled = false
       map.uiSettings.isRotateGesturesEnabled = false
       map.uiSettings.isTiltGesturesEnabled = false
-      map.addOnMapClickListener { at ->
-        val point = map.projection.toScreenLocation(at)
-        val reach = 20f * density
-        val hit = map.queryRenderedFeatures(RectF(point.x - reach, point.y - reach, point.x + reach, point.y + reach), PINS_LAYER)
-        tapped(hit.firstOrNull()?.getStringProperty("askId"))
-        true
-      }
       map.setStyle(Style.Builder().fromJson(styleJson(context))) { style ->
         addLayers(style, data.faint, dark)
         loaded = map to style
-        // Rendered features can be asked for only once the renderer has drawn: before that MapLibre crashes.
+        // Rendered features can be asked for only once the renderer has drawn: before that MapLibre crashes. So taps
+        // are listened to, and the map is handed to the tests, only from the first time it has drawn.
         var told = false
         view.addOnDidBecomeIdleListener {
           if (!told) {
             told = true
+            map.addOnMapClickListener { at ->
+              val point = map.projection.toScreenLocation(at)
+              val reach = 20f * density
+              val hit = map.queryRenderedFeatures(RectF(point.x - reach, point.y - reach, point.x + reach, point.y + reach), PINS_LAYER)
+              tapped(hit.firstOrNull()?.getStringProperty("askId"))
+              true
+            }
             ready(map)
           }
         }
