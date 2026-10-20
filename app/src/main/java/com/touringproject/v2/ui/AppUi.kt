@@ -152,7 +152,7 @@ fun AppUi(graph: AppGraph) {
               entry<RecordsKey> {
                 RideListScreen(
                   rideList?.let { rideSections(it, System.currentTimeMillis(), ZoneId.systemDefault()) },
-                  onRide = { tabs.current.add(RideKey(it)) },
+                  onRide = { tabs.push(RideKey(it)) },
                   modifier = Modifier.safeDrawingPadding(),
                 )
               }
@@ -162,7 +162,7 @@ fun AppUi(graph: AppGraph) {
                   updateSettings = { next -> scope.launch { graph.settings.update(next) } },
                   rideId = key.rideId,
                   onBack = { tabs.back() },
-                  onAsk = { tabs.current.add(AskKey(key.rideId, it)) },
+                  onAsk = { tabs.push(AskKey(key.rideId, it)) },
                   onFullMap = { mapFull = it },
                   modifier = Modifier.safeDrawingPadding(),
                 )
@@ -179,12 +179,12 @@ fun AppUi(graph: AppGraph) {
               entry<SettingsKey> {
                 SettingsScreen(
                   current, apiKey,
-                  onConnection = { tabs.current.add(ConnectionKey) },
-                  onUser = { tabs.current.add(UserKey) },
-                  onRideRecording = { tabs.current.add(RideRecordingKey) },
-                  onReturnApp = { tabs.current.add(ReturnAppKey) },
-                  onVolume = { tabs.current.add(VolumeKey) },
-                  onRecordings = { tabs.current.add(RecordingsKey) },
+                  onConnection = { tabs.push(ConnectionKey) },
+                  onUser = { tabs.push(UserKey) },
+                  onRideRecording = { tabs.push(RideRecordingKey) },
+                  onReturnApp = { tabs.push(ReturnAppKey) },
+                  onVolume = { tabs.push(VolumeKey) },
+                  onRecordings = { tabs.push(RecordingsKey) },
                   version = BuildConfig.VERSION_NAME,
                   modifier = Modifier.safeDrawingPadding(),
                 )
