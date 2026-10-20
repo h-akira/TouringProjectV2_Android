@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.touringproject.v2.ask.ASK_INPUT_VOICE
 import com.touringproject.v2.ask.AskOutcome
 import com.touringproject.v2.ask.AskRecord
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -38,11 +39,24 @@ class RoomAskLogTest {
   }
 
   @Test
+  fun the_count_of_a_ride_follows_the_asks_kept_for_it() = runBlocking {
+    val count = db.asks().countForRide("r1")
+    assertEquals(0, count.first())
+    log.save(record)
+    log.save(record.copy(askId = "a2", outcome = AskOutcome.FAILED, failure = "no_speech"))
+    log.save(record.copy(askId = "a3", rideId = null))
+    log.save(record.copy(askId = "a4", rideId = "r2"))
+    assertEquals(2, count.first())
+    db.close()
+  }
+
+  @Test
   fun a_failed_write_is_logged_and_shown_until_the_next_one_works() = runBlocking {
     var full = true
     val dao = object : AskDao {
       override suspend fun upsert(ask: AskEntity) = if (full) throw IOException("disk full") else Unit
       override suspend fun ask(askId: String): AskEntity? = null
+      override fun countForRide(rideId: String) = kotlinx.coroutines.flow.flowOf(0)
     }
     val failing = RoomAskLog(dao, kotlinx.coroutines.MainScope()) { message, _ -> errors += message }
     failing.save(record)

@@ -32,6 +32,7 @@ import com.touringproject.v2.api.ApiClient
 import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.settings.LaunchableApp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 import kotlinx.serialization.Serializable
@@ -69,6 +70,7 @@ fun AppUi(graph: AppGraph) {
   val ride by graph.rides.active.collectAsStateWithLifecycle()
   val storeFailed by graph.rides.storeFailed.collectAsStateWithLifecycle()
   val askStoreFailed by graph.askLog.failed.collectAsStateWithLifecycle()
+  val questions by remember(ride?.id) { ride?.id?.let(graph::askCount) ?: flowOf(0) }.collectAsStateWithLifecycle(0)
   var sheet by remember { mutableStateOf<RideSheet?>(null) }
   val now = rememberNow(ride != null)
   val context = LocalContext.current
@@ -109,7 +111,7 @@ fun AppUi(graph: AppGraph) {
                 onDismissVolume = { volume?.let { graph.dismissVolumeWarning(it.current) } },
                 ride = {
                   RideCard(
-                    ride?.let { rideCard(it, now) },
+                    ride?.let { rideCard(it, now, questions) },
                     onStart = { sheet = RideSheet.START },
                     onPause = {
                       scope.launch { graph.rides.pause() }
@@ -186,7 +188,7 @@ fun AppUi(graph: AppGraph) {
           )
           RideSheet.END -> ride?.let { active ->
             EndRideSheet(
-              endSummary(active, now, ZoneId.systemDefault()),
+              endSummary(active, now, ZoneId.systemDefault(), questions),
               active.name,
               onEnd = { name ->
                 sheet = null

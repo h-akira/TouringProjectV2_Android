@@ -34,15 +34,17 @@ fun periodLabel(start: Long, end: Long, zone: ZoneId): String {
 fun pausesLabel(pauses: Pauses): String? =
   if (pauses.count == 0) null else "一時停止 ${pauses.count}回（${pauses.totalMs / 60_000}分）は走行時間に含めません"
 
-data class RideCardUi(val name: String, val paused: Boolean, val elapsed: String, val distance: String)
+/** questions is how many of the ride's asks the device has kept (answered or failed; slice 2 spec §7.2). */
+data class RideCardUi(val name: String, val paused: Boolean, val elapsed: String, val distance: String, val questions: String)
 
-fun rideCard(ride: Ride, now: Long) = RideCardUi(ride.name, ride.status == RideStatus.PAUSED, elapsedLabel(ride.recordedMs(now)), distanceLabel(ride.distanceMeters))
+fun rideCard(ride: Ride, now: Long, questions: Int) =
+  RideCardUi(ride.name, ride.status == RideStatus.PAUSED, elapsedLabel(ride.recordedMs(now)), distanceLabel(ride.distanceMeters), questions.toString())
 
-data class EndSummaryUi(val elapsed: String, val distance: String, val note: String)
+data class EndSummaryUi(val elapsed: String, val distance: String, val questions: String, val note: String)
 
-/** SC-04's summary as if the ride ended now. */
-fun endSummary(ride: Ride, now: Long, zone: ZoneId): EndSummaryUi {
+/** SC-04's summary as if the ride ended now (slice 2 spec §7.3). */
+fun endSummary(ride: Ride, now: Long, zone: ZoneId, questions: Int): EndSummaryUi {
   val end = if (ride.status == RideStatus.PAUSED) ride.segments.last().endedAt ?: now else now
   val note = listOfNotNull(periodLabel(ride.startedAt(), end, zone), pausesLabel(ride.pauses())).joinToString(" · ")
-  return EndSummaryUi(elapsedLabel(ride.recordedMs(now)), distanceLabel(ride.distanceMeters), note)
+  return EndSummaryUi(elapsedLabel(ride.recordedMs(now)), distanceLabel(ride.distanceMeters), questions.toString(), note)
 }

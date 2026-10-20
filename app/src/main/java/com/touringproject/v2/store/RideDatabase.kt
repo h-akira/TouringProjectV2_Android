@@ -16,6 +16,7 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import kotlinx.coroutines.flow.Flow
 
 // The device's record of rides (slice 2 spec §5.1). Every schema version is exported to app/schemas and is moved
 // forward by a Migration; the database is never rebuilt destructively.
@@ -98,6 +99,10 @@ interface AskDao {
 
   @Query("SELECT * FROM asks WHERE askId = :askId")
   suspend fun ask(askId: String): AskEntity?
+
+  /** How many of the ride's asks are kept, answered or failed; follows every new one (SC-02, SC-04). */
+  @Query("SELECT COUNT(*) FROM asks WHERE rideId = :rideId")
+  fun countForRide(rideId: String): Flow<Int>
 }
 
 @Dao

@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.touringproject.v2.ride.cutRideName
 import com.touringproject.v2.ride.rideName
 
-/** SC-02's ride card (slice 2 spec §7.2). Memo buttons wait for slice 3; the question count waits for plan 3. */
+/** SC-02's ride card (slice 2 spec §7.2). Memo buttons wait for slice 3. */
 @Composable
 fun RideCard(ride: RideCardUi?, onStart: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onEnd: () -> Unit) {
   val card = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)).padding(14.dp)
@@ -51,6 +51,7 @@ fun RideCard(ride: RideCardUi?, onStart: () -> Unit, onPause: () -> Unit, onResu
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
       Stat(ride.elapsed, "走行時間", Modifier.testTag("rideElapsed"))
       Stat(ride.distance, "距離", Modifier.testTag("rideDistance"))
+      Stat(ride.questions, "質問", Modifier.testTag("rideQuestions"))
     }
     if (ride.paused) Text("一時停止中の質問は走行の記録に入りません（日ごとには残ります）", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -115,6 +116,7 @@ fun EndRideSheet(summary: EndSummaryUi, initialName: String, onEnd: (String) -> 
       Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
         Stat(summary.elapsed, "走行時間")
         Stat(summary.distance, "距離")
+        Stat(summary.questions, "質問", Modifier.testTag("endQuestions"))
       }
       Text(summary.note, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
       NameField(name, { name = it }, null)
