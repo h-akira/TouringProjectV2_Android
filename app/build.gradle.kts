@@ -27,6 +27,8 @@ android {
     versionCode = 4
     versionName = "0.3.1"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    // The phone and the emulator are both arm64; MapLibre's native code for other ABIs only makes the app bigger (slice 2 spec §7.7).
+    ndk { abiFilters += "arm64-v8a" }
     buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
   }
 
@@ -93,6 +95,7 @@ dependencies {
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.okhttp)
   implementation(libs.play.services.location)
+  implementation(libs.maplibre.android)
   implementation(libs.androidx.room.runtime)
   implementation(libs.androidx.room.ktx)
   ksp(libs.androidx.room.compiler)
@@ -115,6 +118,7 @@ dependencies {
   androidTestImplementation(libs.androidx.test.core)
   androidTestImplementation(libs.androidx.test.ext.junit)
   androidTestImplementation(libs.androidx.test.runner)
+  androidTestImplementation(libs.androidx.compose.ui.test.junit4)
 }
 
 // A test that deadlocks on the main thread must fail the build instead of hanging it.
