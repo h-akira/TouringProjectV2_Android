@@ -9,7 +9,8 @@ enum class Source { HANDSFREE, SCREEN }
 
 enum class Phase { IDLE, RECORDING, SENDING, WAITING, SPEAKING, FAILED }
 
-enum class FailureReason { NO_SPEECH, TRANSCRIBE_FAILED, AGENT_FAILED, TTS_FAILED, TIMEOUT, NETWORK, INVALID_KEY, NO_KEY, MIC, SERVICE }
+/** NOT_RECORDING and PAUSED: the ask was not taken, as only a recording ride takes asks (slice 2 spec §4.7). */
+enum class FailureReason { NO_SPEECH, TRANSCRIBE_FAILED, AGENT_FAILED, TTS_FAILED, TIMEOUT, NETWORK, INVALID_KEY, NO_KEY, MIC, SERVICE, NOT_RECORDING, PAUSED }
 
 data class FlowState(
   val phase: Phase = Phase.IDLE,

@@ -12,6 +12,7 @@ import com.touringproject.v2.ask.ConversationState
 import com.touringproject.v2.ask.FlowState
 import com.touringproject.v2.ask.IDLE
 import com.touringproject.v2.ask.isBusy
+import com.touringproject.v2.ask.rideNow
 import com.touringproject.v2.audio.AudioRoute
 import com.touringproject.v2.audio.AudioRouteControl
 import com.touringproject.v2.audio.ExoAnswerPlayer
@@ -143,7 +144,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       recorder = PcmRecorder(),
       recordings = RecordingKeeper(recordingStore, scope) { message, e -> Log.w("trv2.recordings", message, e) },
       asks = askLog,
-      rideId = { rides.active.value?.takeIf { it.status == RideStatus.RECORDING }?.id },
+      ride = { rideNow(rides.active.value) },
       location = PositionTracker(FusedPositionSource(context)),
       service = serviceCoordinator.keepAlive,
       nav = launcher,

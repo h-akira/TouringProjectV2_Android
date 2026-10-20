@@ -17,7 +17,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 // On the emulator: the intercom's assistant button arrives as VOICE_COMMAND and starts exactly one ask
-// (4a #1 and 4b #9 of the slice 1 checklist). Without an API key the ask ends at once with "no key".
+// (4a #1 and 4b #9 of the slice 1 checklist). With no ride recording the ask ends at once and says so (slice 2 spec §4.7).
 // MainActivity is singleTask, which ActivityScenario cannot follow, so the activity is started directly.
 @RunWith(AndroidJUnit4::class)
 class VoiceCommandTest {

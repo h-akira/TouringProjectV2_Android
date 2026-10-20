@@ -1,5 +1,7 @@
 package com.touringproject.v2.ask
 
+import com.touringproject.v2.ride.Ride
+import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.api.AskApi
 import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.audio.MediaVolume
@@ -81,6 +83,19 @@ interface Speech {
   fun stop()
 }
 
+/** Where the rider's ride stands when an ask is asked for (slice 2 spec §4.7). */
+sealed interface RideNow {
+  data class Recording(val rideId: String) : RideNow
+  data object Paused : RideNow
+  data object NotRecording : RideNow
+}
+
+fun rideNow(active: Ride?): RideNow = when {
+  active == null || active.status == RideStatus.ENDED -> RideNow.NotRecording
+  active.status == RideStatus.PAUSED -> RideNow.Paused
+  else -> RideNow.Recording(active.id)
+}
+
 class AskDeps(
   val now: () -> Long,
   val sleep: suspend (Long) -> Unit,
@@ -95,8 +110,8 @@ class AskDeps(
   val recordings: RecordingSink,
   /** Where the asks that reached the Backend are kept (slice 2 spec §5.2). */
   val asks: AskLog,
-  /** The id of the ride that is recording now, or null (paused or none: slice 2 spec §4.6). */
-  val rideId: () -> String?,
+  /** Whether a ride is recording now: an ask starts only then (slice 2 spec §4.7). */
+  val ride: () -> RideNow,
   val location: Positions,
   val service: KeepAlive,
   val nav: NavReturn,
