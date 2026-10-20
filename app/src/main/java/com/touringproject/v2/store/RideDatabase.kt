@@ -96,7 +96,11 @@ data class AskEntity(
   val status: String,
   /** no_speech / transcribe_failed / agent_failed / tts_failed / timeout; null when answered */
   val failure: String?,
-  /** The ride that was recording when the ask started; null when none was. Not a foreign key: a ride's row may be missing for a while after a failed save. */
+  /**
+   * The ride that was recording when the ask started. Asks need a recording ride since version 4 (slice 2 spec §4.7), so
+   * it is set on every ask; the column stays nullable for the API's sake. Not a foreign key: a ride's row may be
+   * missing for a while after a failed save.
+   */
   val rideId: String?,
 )
 
@@ -228,14 +232,14 @@ interface RideDao {
   }
 }
 
-@Database(entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class], version = 3, exportSchema = true)
+@Database(entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class], version = 4, exportSchema = true)
 abstract class RideDatabase : RoomDatabase() {
   abstract fun rides(): RideDao
   abstract fun asks(): AskDao
 
   companion object {
     fun open(context: Context): RideDatabase =
-      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
   }
 }
 
@@ -270,5 +274,15 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     db.execSQL("ALTER TABLE `route_points` ADD COLUMN `refused` INTEGER NOT NULL DEFAULT 0")
     db.execSQL("UPDATE `route_points` SET `refused` = 1 WHERE `chunk` IS NOT NULL AND `rideId` IN (SELECT `id` FROM `rides` WHERE `routeRejected` = 1)")
     db.execSQL("CREATE INDEX IF NOT EXISTS `index_route_points_refused_rideId` ON `route_points` (`refused`, `rideId`)")
+  }
+}
+
+/**
+ * 3 -> 4 (slice 2 plan 4b, adr/0008): asks are taken only while a ride records, and the asks kept without a ride (the
+ * test asks of development) go. The schema itself does not change.
+ */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+  override fun migrate(db: SupportSQLiteDatabase) {
+    db.execSQL("DELETE FROM `asks` WHERE `rideId` IS NULL")
   }
 }
