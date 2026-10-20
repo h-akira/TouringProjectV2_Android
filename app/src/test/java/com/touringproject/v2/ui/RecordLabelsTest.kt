@@ -129,4 +129,30 @@ class RecordLabelsTest {
     assertEquals("1 · 09:41 · 足柄下郡箱根町仙石原", card.heading)
     assertEquals("金時山です。", card.answer)
   }
+
+  // Android #41: the day after the night has no ask, yet the ride runs over two days.
+  @Test
+  fun an_overnight_ride_without_asks_after_midnight_still_gets_its_day_headings() {
+    val overnight = newRide("r2", "伊豆", ms(16, 15, 0), 7, 48 * HOUR_MS).pause(ms(16, 21, 10)).resume(ms(17, 8, 30), 7, 48 * HOUR_MS)
+      .end(ms(17, 12, 0), EndReason.MANUAL, ms(17, 12, 0))
+    assertEquals(
+      listOf(
+        TimelineRow.Day("10月16日（金）"),
+        TimelineRow.Ask("a1", 1, "16:00", "足柄下郡箱根町仙石原", "右手の山は？", false),
+        TimelineRow.Pause("⏸ 一時停止 21:10〜10月17日 08:30"),
+      ),
+      rideTimeline(overnight, listOf(ask("a1", ms(16, 16, 0))), zone),
+    )
+  }
+
+  // Android #45
+  @Test
+  fun the_short_place_drops_only_a_real_prefecture() {
+    assertEquals("御殿場市", shortPlace("静岡県御殿場市"))
+    assertEquals("札幌市", shortPlace("北海道札幌市"))
+    assertEquals("中央区", shortPlace("東京都中央区"))
+    assertEquals("京都市左京区", shortPlace("京都府京都市左京区"))
+    assertEquals("国道1号線沿い", shortPlace("国道1号線沿い"))
+    assertEquals("場所不明", shortPlace(null))
+  }
 }
