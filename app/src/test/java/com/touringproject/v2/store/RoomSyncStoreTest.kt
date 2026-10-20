@@ -21,7 +21,6 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -73,11 +72,24 @@ class RoomSyncStoreTest {
   }
 
   @Test
-  fun a_refused_chunk_marks_the_ride() = runBlocking {
+  fun a_refused_chunk_marks_its_points_and_is_not_sent_again() = runBlocking {
+    rides.save(ride)
+    store.rideSent("r1", ride.updatedAt)
+    addPoints(2)
+    store.chunkSent("r1", ChunkRange(0, 0, 2), refused = true)
+    assertEquals(listOf(true, true), dao.points("r1").map { it.refused })
+    assertEquals(emptyList<String>(), store.unsent().map { it.ride.id })
+  }
+
+  // Android #27: the partial chunk sent at a pause was refused, the full one under the same seq is taken later.
+  @Test
+  fun a_chunk_taken_under_the_seq_of_a_refused_one_clears_the_refusal() = runBlocking {
     rides.save(ride)
     addPoints(2)
     store.chunkSent("r1", ChunkRange(0, 0, 2), refused = true)
-    assertTrue(dao.ride("r1")!!.routeRejected)
+    addPoints(1)
+    store.chunkSent("r1", ChunkRange(0, 0, 3), refused = false)
+    assertEquals(listOf(false, false, false), dao.points("r1").map { it.refused })
   }
 
   @Test

@@ -37,7 +37,11 @@ data class RideEntity(
   val sentUpdatedAt: Long?,
   /** The updatedAt the Backend refused with 400; that version is not sent again (slice 2 spec §5.3). */
   val rejectedUpdatedAt: Long? = null,
-  /** True once the Backend has refused one of the ride's route chunks with 400. */
+  /**
+   * Version 2's mark of a refused route chunk. No longer written: a refusal is kept on the chunk's points
+   * ([RoutePointEntity.refused], Android #27). The column stays, because dropping it would rebuild the table its
+   * segments and points refer to.
+   */
   @ColumnInfo(defaultValue = "0") val routeRejected: Boolean = false,
 )
 
@@ -51,7 +55,7 @@ data class SegmentEntity(val rideId: String, val seq: Int, val startedAt: Long, 
 @Entity(
   tableName = "route_points",
   // chunk first: finding the rides with points left to send reads only the unsent ones (slice 2 plan 3a).
-  indices = [Index(value = ["rideId", "segment", "t"]), Index(value = ["chunk", "rideId"])],
+  indices = [Index(value = ["rideId", "segment", "t"]), Index(value = ["chunk", "rideId"]), Index(value = ["refused", "rideId"])],
   foreignKeys = [ForeignKey(entity = RideEntity::class, parentColumns = ["id"], childColumns = ["rideId"], onDelete = ForeignKey.CASCADE)],
 )
 data class RoutePointEntity(
@@ -64,6 +68,8 @@ data class RoutePointEntity(
   val accuracy: Double?,
   /** The seq of the chunk it was sent in (slice 2 plan 3); null until then. */
   val chunk: Int?,
+  /** True while the Backend has refused that chunk with 400; it is not sent again unless the chunk grows (Android #27). */
+  @ColumnInfo(defaultValue = "0") val refused: Boolean = false,
 )
 
 /** An ask whose loop ended with an answer or a failure the Backend reported (slice 2 spec §5.2). */
@@ -158,11 +164,12 @@ interface RideDao {
   @Query("SELECT * FROM route_points WHERE rideId = :rideId ORDER BY id LIMIT :count OFFSET :from")
   suspend fun pointsFrom(rideId: String, from: Int, count: Int): List<RoutePointEntity>
 
+  /** A chunk sent again under the same seq overwrites what the Backend said of it the time before (Android #27). */
   @Query(
-    "UPDATE route_points SET chunk = :seq WHERE id IN " +
+    "UPDATE route_points SET chunk = :seq, refused = :refused WHERE id IN " +
       "(SELECT id FROM route_points WHERE rideId = :rideId ORDER BY id LIMIT :count OFFSET :from)",
   )
-  suspend fun markChunk(rideId: String, seq: Int, from: Int, count: Int)
+  suspend fun markChunk(rideId: String, seq: Int, from: Int, count: Int, refused: Boolean)
 
   /** A later save of an older version (none is made today) cannot move the marker back. */
   @Query("UPDATE rides SET sentUpdatedAt = :updatedAt WHERE id = :rideId AND (sentUpdatedAt IS NULL OR sentUpdatedAt < :updatedAt)")
@@ -170,9 +177,6 @@ interface RideDao {
 
   @Query("UPDATE rides SET rejectedUpdatedAt = :updatedAt WHERE id = :rideId")
   suspend fun markRefused(rideId: String, updatedAt: Long)
-
-  @Query("UPDATE rides SET routeRejected = 1 WHERE id = :rideId")
-  suspend fun markRouteRefused(rideId: String)
 
   /** Keeps the sending markers: a save never undoes what the Backend has already accepted or refused. */
   @Transaction
@@ -192,14 +196,14 @@ interface RideDao {
   }
 }
 
-@Database(entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class], version = 2, exportSchema = true)
+@Database(entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class], version = 3, exportSchema = true)
 abstract class RideDatabase : RoomDatabase() {
   abstract fun rides(): RideDao
   abstract fun asks(): AskDao
 
   companion object {
     fun open(context: Context): RideDatabase =
-      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2).build()
+      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
   }
 }
 
@@ -221,5 +225,18 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     db.execSQL("CREATE INDEX IF NOT EXISTS `index_asks_rideId` ON `asks` (`rideId`)")
     db.execSQL("CREATE INDEX IF NOT EXISTS `index_asks_askedAt` ON `asks` (`askedAt`)")
     db.execSQL("CREATE INDEX IF NOT EXISTS `index_route_points_chunk_rideId` ON `route_points` (`chunk`, `rideId`)")
+  }
+}
+
+/**
+ * 2 -> 3 (slice 2 plan 4a, Android #27): a refusal moves from the ride to the points of the refused chunk. Version 2
+ * did not keep which chunk was refused, so all the sent points of such a ride count as refused: the ride shows
+ * "未送信あり" rather than "保存済み". It only adds, like 1 -> 2.
+ */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+  override fun migrate(db: SupportSQLiteDatabase) {
+    db.execSQL("ALTER TABLE `route_points` ADD COLUMN `refused` INTEGER NOT NULL DEFAULT 0")
+    db.execSQL("UPDATE `route_points` SET `refused` = 1 WHERE `chunk` IS NOT NULL AND `rideId` IN (SELECT `id` FROM `rides` WHERE `routeRejected` = 1)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS `index_route_points_refused_rideId` ON `route_points` (`refused`, `rideId`)")
   }
 }
