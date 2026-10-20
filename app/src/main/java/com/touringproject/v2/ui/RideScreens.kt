@@ -19,7 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,7 +86,7 @@ private fun NameField(name: String, onChange: (String) -> Unit, placeholder: Str
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StartRideSheet(locationAllowed: Boolean, onStart: (String) -> Unit, onDismiss: () -> Unit) {
-  var name by remember { mutableStateOf("") }
+  var name by rememberSaveable { mutableStateOf("") }
   ModalBottomSheet(onDismissRequest = onDismiss) {
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
       Text("走行を開始", fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -109,7 +109,7 @@ fun StartRideSheet(locationAllowed: Boolean, onStart: (String) -> Unit, onDismis
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EndRideSheet(summary: EndSummaryUi, initialName: String, onEnd: (String) -> Unit, onDismiss: () -> Unit) {
-  var name by remember { mutableStateOf(initialName) }
+  var name by rememberSaveable { mutableStateOf(initialName) }
   ModalBottomSheet(onDismissRequest = onDismiss) {
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
       Text("走行を終了しますか？", fontSize = 20.sp, fontWeight = FontWeight.Bold)

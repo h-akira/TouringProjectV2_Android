@@ -81,7 +81,6 @@ fun WarningBand(text: String, onClick: (() -> Unit)?, onClose: (() -> Unit)?, mo
 fun HomeScreen(
   ui: HomeUi,
   onTapToTalk: () -> Unit,
-  onSettings: () -> Unit,
   onUser: () -> Unit,
   onBanner: (Banner) -> Unit,
   onNewConversation: () -> Unit,
@@ -93,10 +92,8 @@ fun HomeScreen(
   Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
       Text(ui.userName, Modifier.clickable(onClick = onUser), fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = onTapToTalk, Modifier.testTag("tapToTalk")) { Text("🎤 押して話す") }
-        OutlinedButton(onClick = onSettings) { Text("⚙ 設定") }
-      }
+      // Settings is a tab now (slice 2 spec §7.1).
+      OutlinedButton(onClick = onTapToTalk, Modifier.testTag("tapToTalk")) { Text("🎤 押して話す") }
     }
     ui.banner?.let { banner ->
       val low = banner == Banner.LOW_VOLUME

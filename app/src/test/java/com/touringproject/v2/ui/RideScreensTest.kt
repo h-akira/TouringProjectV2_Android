@@ -2,10 +2,15 @@ package com.touringproject.v2.ui
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onChildAt
@@ -15,6 +20,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -96,6 +102,24 @@ class RideScreensTest {
     rule.onNodeWithTag("rideName").performTextInput("あ".repeat(39) + "😀😀")
     rule.onNodeWithTag("startGo").performClick()
     assertEquals("あ".repeat(39) + "😀", started)
+  }
+
+  @Test
+  fun the_names_being_typed_survive_a_recreated_activity() {
+    val restore = StateRestorationTester(rule)
+    var ending by mutableStateOf(false)
+    restore.setContent {
+      if (ending) EndRideSheet(EndSummaryUi("1:30", "62.4 km", "4", ""), "箱根", {}, {})
+      else StartRideSheet(locationAllowed = true, onStart = {}, onDismiss = {})
+    }
+    rule.onNodeWithTag("rideName").performTextInput("箱根")
+    restore.emulateSavedInstanceStateRestore()
+    rule.onNodeWithTag("rideName").assertTextContains("箱根")
+    ending = true
+    rule.waitForIdle()
+    rule.onNodeWithTag("rideName").performTextReplacement("箱根から御殿場へ")
+    restore.emulateSavedInstanceStateRestore()
+    rule.onNodeWithTag("rideName").assertTextContains("箱根から御殿場へ")
   }
 
   @Test

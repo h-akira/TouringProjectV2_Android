@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import com.touringproject.v2.api.ApiError
 import com.touringproject.v2.api.ApiErrorKind
 import com.touringproject.v2.settings.LaunchableApp
+import com.touringproject.v2.settings.MAX_RECORDING_HOURS_CHOICES
 import com.touringproject.v2.settings.ReturnTiming
 import com.touringproject.v2.settings.Settings
 import com.touringproject.v2.settings.USER_NAME_RE
@@ -70,6 +71,7 @@ fun SettingsScreen(
   apiKey: String?,
   onConnection: () -> Unit,
   onUser: () -> Unit,
+  onRideRecording: () -> Unit,
   onReturnApp: () -> Unit,
   onVolume: () -> Unit,
   onRecordings: () -> Unit,
@@ -81,6 +83,7 @@ fun SettingsScreen(
   Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
     SettingsRow("接続の設定", apiKey?.let(::maskKey) ?: "未設定", onConnection)
     SettingsRow("ユーザー名", settings.userName, onUser)
+    SettingsRow("走行の記録", "最長 ${settings.maxRecordingHours}時間", onRideRecording)
     SettingsRow("応答後に戻るアプリ", returnValue, onReturnApp)
     SettingsRow("回答の音量", "+${settings.answerVolumeDb}dB", onVolume)
     SettingsRow("録音の確認", "", onRecordings)
@@ -105,6 +108,34 @@ fun VolumeScreen(settings: Settings, onUpdate: (Settings) -> Unit, modifier: Mod
       }
     }
     Text("単位は dB です。+6（最大）で、+0 のおよそ2倍の大きさです。それでも小さいときは、スマホのメディアの音量を上げてください。", color = Color(0xFF666666), fontSize = 14.sp)
+  }
+}
+
+// SC-16 (slice 2 spec §7.8): the longest a ride may record without a pause. A recording ride follows at once.
+@Composable
+fun RideRecordingScreen(settings: Settings, onUpdate: (Settings) -> Unit, modifier: Modifier = Modifier) {
+  Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Text("連続して記録できる最長時間", fontSize = 18.sp)
+    Text(
+      "開始または再開してから一時停止せずに記録し続けた時間がこれを超えると、終了し忘れとみなして自動で終了・保存します。一時停止して再開すると数え直します",
+      color = Color(0xFF666666),
+      fontSize = 14.sp,
+    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      MAX_RECORDING_HOURS_CHOICES.forEach { hours ->
+        FilterChip(
+          selected = settings.maxRecordingHours == hours,
+          onClick = { onUpdate(settings.copy(maxRecordingHours = hours)) },
+          label = { Text("${hours}時間", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+          modifier = Modifier.weight(1f).testTag("maxHours-$hours"),
+        )
+      }
+    }
+    Text(
+      "泊まりがけでも、休憩や宿泊で一時停止していれば数え直すので、ふだんは変える必要はありません。記録中の走行にも、変更はすぐに反映されます。",
+      color = Color(0xFF666666),
+      fontSize = 14.sp,
+    )
   }
 }
 

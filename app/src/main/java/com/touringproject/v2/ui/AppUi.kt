@@ -44,6 +44,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object ReturnAppKey : NavKey
 @Serializable data object VolumeKey : NavKey
 @Serializable data object RecordingsKey : NavKey
+@Serializable data object RideRecordingKey : NavKey
 
 private enum class RideSheet { START, END }
 
@@ -103,7 +104,6 @@ fun AppUi(graph: AppGraph) {
               HomeScreen(
                 ui = ui,
                 onTapToTalk = graph::tapToTalk,
-                onSettings = { backStack.add(SettingsKey) },
                 onUser = { backStack.add(UserKey) },
                 onBanner = { backStack.add(if (it == Banner.NO_KEY) ConnectionKey else ReturnAppKey) },
                 onNewConversation = graph.controller::resetConversation,
@@ -131,6 +131,7 @@ fun AppUi(graph: AppGraph) {
                 current, apiKey,
                 onConnection = { backStack.add(ConnectionKey) },
                 onUser = { backStack.add(UserKey) },
+                onRideRecording = { backStack.add(RideRecordingKey) },
                 onReturnApp = { backStack.add(ReturnAppKey) },
                 onVolume = { backStack.add(VolumeKey) },
                 onRecordings = { backStack.add(RecordingsKey) },
