@@ -147,18 +147,26 @@ class RideController(private val deps: RideDeps) {
     true
   }
 
-  suspend fun pause() = locked {
-    val ride = activeRide.value?.takeIf { it.status == RideStatus.RECORDING } ?: return@locked
+  /**
+   * Returns true when the ride is now paused. A ride already past its deadline ends automatically at the deadline
+   * instead (Android #15), and false tells the screen that nothing was paused.
+   */
+  suspend fun pause(): Boolean = locked {
+    val ride = activeRide.value?.takeIf { it.status == RideStatus.RECORDING } ?: return@locked false
     val d = deps
-    val paused = ride.pause(d.now())
+    val now = d.now()
+    if (autoEndIfDue(ride, now)) return@locked false
+    val paused = ride.pause(now)
     save(paused)
     activeRide.value = paused
     d.alarm.cancel()
     d.recording(false)
+    true
   }
 
-  suspend fun resume() = locked {
-    val ride = activeRide.value?.takeIf { it.status == RideStatus.PAUSED } ?: return@locked
+  /** Returns true when the ride is now recording again. */
+  suspend fun resume(): Boolean = locked {
+    val ride = activeRide.value?.takeIf { it.status == RideStatus.PAUSED } ?: return@locked false
     val d = deps
     val resumed = ride.resume(d.now(), d.bootCount(), d.maxRecordingMs())
     save(resumed)
@@ -166,15 +174,34 @@ class RideController(private val deps: RideDeps) {
     lastPoint = null
     d.alarm.set(resumed.id, resumed.deadline!!)
     d.recording(true)
+    true
   }
 
-  /** SC-04. Returns false when the name is not usable. */
+  /**
+   * SC-04. Returns false when the name is not usable. A ride already past its deadline ends automatically at the
+   * deadline, keeping the name the rider gave (Android #15).
+   */
   suspend fun end(name: String): Boolean = locked {
     val ride = activeRide.value ?: return@locked true
     val clean = rideName(name) ?: return@locked false
     val now = deps.now()
-    finish(ride.end(now, EndReason.MANUAL, now, clean))
+    if (!autoEndIfDue(ride, now, clean)) finish(ride.end(now, EndReason.MANUAL, now, clean))
     true
+  }
+
+  /**
+   * SC-16: the longest recording time changed (US-C-08.005). The recording segment's deadline is worked out again from
+   * its start; one already passed ends the ride automatically at that deadline. A paused ride takes the new time when
+   * it resumes. The deadline is not sent, so updatedAt stays.
+   */
+  suspend fun maxRecordingChanged() = locked {
+    val ride = activeRide.value?.takeIf { it.status == RideStatus.RECORDING } ?: return@locked
+    val d = deps
+    val moved = ride.copy(deadline = ride.segments.last().startedAt + d.maxRecordingMs())
+    if (autoEndIfDue(moved, d.now())) return@locked
+    save(moved)
+    activeRide.value = moved
+    d.alarm.set(moved.id, moved.deadline!!)
   }
 
   suspend fun onFix(fix: Fix) = locked {
@@ -218,10 +245,10 @@ class RideController(private val deps: RideDeps) {
     finish(ride.end(now, EndReason.SHUTDOWN, now))
   }
 
-  private suspend fun autoEndIfDue(ride: Ride, now: Long): Boolean {
+  private suspend fun autoEndIfDue(ride: Ride, now: Long, name: String = ride.name): Boolean {
     val deadline = ride.deadline ?: return false
     if (now < deadline) return false
-    finish(ride.end(deadline, EndReason.AUTO, now))
+    finish(ride.end(deadline, EndReason.AUTO, now, name))
     return true
   }
 
