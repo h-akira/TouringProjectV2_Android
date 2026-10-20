@@ -38,7 +38,6 @@ import com.touringproject.v2.api.ApiClient
 import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.settings.LaunchableApp
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 import kotlinx.serialization.Serializable
@@ -78,7 +77,7 @@ fun AppUi(graph: AppGraph) {
   val ride by graph.rides.active.collectAsStateWithLifecycle()
   val storeFailed by graph.rides.storeFailed.collectAsStateWithLifecycle()
   val askStoreFailed by graph.askLog.failed.collectAsStateWithLifecycle()
-  val questions by remember(ride?.id) { ride?.id?.let(graph::askCount) ?: flowOf(0) }.collectAsStateWithLifecycle(0)
+  val questions by graph.activeAskCount.collectAsStateWithLifecycle()
   // Saveable: SC-17 and SC-04 stay open when the activity is recreated, e.g. on rotation (Android #20).
   var sheet by rememberSaveable { mutableStateOf<RideSheet?>(null) }
   val now = rememberNow(ride != null)
@@ -162,17 +161,8 @@ fun AppUi(graph: AppGraph) {
                 )
               }
               entry<RideRecordingKey> {
-                RideRecordingScreen(
-                  current,
-                  { next ->
-                    scope.launch {
-                      graph.settings.update(next)
-                      // The recording ride's deadline follows at once (US-C-08.005).
-                      graph.rides.maxRecordingChanged()
-                    }
-                  },
-                  Modifier.safeDrawingPadding(),
-                )
+                // AppGraph moves the recording ride's deadline when the setting changes (US-C-08.005, Android #33).
+                RideRecordingScreen(current, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
               }
               entry<VolumeKey> {
                 VolumeScreen(current, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())

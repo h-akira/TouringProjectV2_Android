@@ -1,5 +1,7 @@
 package com.touringproject.v2.settings
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,14 +39,14 @@ class SettingsTest {
   fun saved_settings_round_trip() = runTest {
     val store = FakeStore()
     val repo = SettingsRepository(store)
-    val s = Settings("rider01", returnEnabled = false, returnApp = maps, returnTiming = ReturnTiming.SPOKEN, recentApps = listOf(maps), answerVolumeDb = 3, maxRecordingHours = 6)
+    val s = Settings("rider01", returnEnabled = false, returnApp = maps, returnTiming = ReturnTiming.SPOKEN, recentApps = listOf(maps), answerVolumeDb = 3, maxRecordingHours = 6, showAskPins = false)
     repo.update(s)
     assertEquals(s, SettingsRepository(store).load())
   }
 
   @Test
   fun broken_values_fall_back_to_defaults() {
-    val raw = """{"userName":"NO","returnEnabled":"yes","returnApp":{"packageName":1},"returnTiming":"later","recentApps":[{"packageName":"a","label":"A"},3],"answerVolumeDb":12,"maxRecordingHours":72}"""
+    val raw = """{"userName":"NO","returnEnabled":"yes","returnApp":{"packageName":1},"returnTiming":"later","recentApps":[{"packageName":"a","label":"A"},3],"answerVolumeDb":12,"maxRecordingHours":72,"showAskPins":"no"}"""
     val (s, needsSave) = decodeSettings(raw, Random(2))
     assertTrue(needsSave)
     assertTrue(s.returnEnabled)
@@ -53,6 +55,7 @@ class SettingsTest {
     assertEquals(listOf(LaunchableApp("a", "A")), s.recentApps)
     assertEquals(DEFAULT_VOLUME_DB, s.answerVolumeDb)
     assertEquals(DEFAULT_MAX_RECORDING_HOURS, s.maxRecordingHours)
+    assertTrue(s.showAskPins)
   }
 
   @Test
@@ -97,6 +100,25 @@ class SettingsTest {
   fun mask_shows_only_the_last_four_characters() {
     assertEquals("••••••••7890", maskKey("abcdef1234567890"))
     assertEquals("••••", maskKey("abcd"))
+  }
+
+  // Android #33: AppGraph moves the recording ride's deadline on each change, not on the first load.
+  @Test
+  fun only_a_changed_longest_recording_time_is_passed_on() = runTest {
+    val settings = MutableStateFlow<Settings?>(null)
+    val seen = mutableListOf<Int>()
+    val job = backgroundScope.launch { maxRecordingChanges(settings).collect { seen += it } }
+    testScheduler.runCurrent()
+    settings.value = Settings("rider01")
+    testScheduler.runCurrent()
+    settings.value = Settings("rider01", answerVolumeDb = 3)
+    testScheduler.runCurrent()
+    settings.value = Settings("rider01", maxRecordingHours = 6)
+    testScheduler.runCurrent()
+    settings.value = Settings("rider01", maxRecordingHours = 48)
+    testScheduler.runCurrent()
+    assertEquals(listOf(6, 48), seen)
+    job.cancel()
   }
 }
 
