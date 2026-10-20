@@ -159,10 +159,9 @@ fun RideDetailScreen(
       card?.let { PinCard(it, { onAsk(it.askId) }, Modifier.align(Alignment.BottomCenter).padding(8.dp)) }
     }
   }
-  if (full) {
-    mapArea(modifier.fillMaxSize())
-  } else {
-    Column(modifier.fillMaxSize()) {
+  // The map keeps one place in the composition and only changes size, so full screen keeps the rider's pan and zoom.
+  Column(modifier.fillMaxSize()) {
+    if (!full) {
       TopBar(ui.name, onBack) {
         Box {
           TextButton(onClick = { menu = true }, modifier = Modifier.testTag("rideMenu")) { Text("⋮", fontSize = 22.sp) }
@@ -174,7 +173,9 @@ fun RideDetailScreen(
           }
         }
       }
-      mapArea(Modifier.fillMaxWidth().height(280.dp))
+    }
+    mapArea(if (full) Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth().height(280.dp))
+    if (!full) {
       LazyColumn(Modifier.fillMaxSize().testTag("timeline")) {
         item { Summary(ui.summary, ui.recording) }
         item { Muted("時系列", Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp)) }

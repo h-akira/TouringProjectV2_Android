@@ -4,7 +4,9 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -21,6 +23,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
+import androidx.navigation3.runtime.NavEntry
+import androidx.navigation3.ui.NavDisplay
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.touringproject.v2.map.LatLon
 import com.touringproject.v2.map.MapData
@@ -167,5 +171,48 @@ class RecordsScreensTest {
     rule.onNodeWithTag("askAnswer").assertTextEquals("金時山です。")
     rule.onNodeWithTag("mapState").assertTextEquals("pins 1 selected a1")
     rule.onNodeWithText("北東へ走行中（右手 南東・左手 北西）").assertExists()
+  }
+
+  // Final review: the map is the same one before and after full screen, so the rider's pan and zoom stay.
+  @Test
+  fun the_map_is_not_made_again_when_it_fills_the_screen_and_comes_back() {
+    var made = 0
+    val countingMap: MapSlot = { data, selected, onPin, modifier ->
+      DisposableEffect(Unit) {
+        made++
+        onDispose {}
+      }
+      fakeMap(data, selected, onPin, modifier)
+    }
+    rule.setContent { RideDetailScreen(detail(), countingMap, true, {}, {}, {}, {}, {}) }
+    rule.onNodeWithTag("fullMap").performClick()
+    rule.waitForIdle()
+    back()
+    rule.waitForIdle()
+    rule.onNodeWithTag("timeline").assertExists()
+    assertEquals(1, made)
+  }
+
+  // Final review: inside the app's NavDisplay, Back from the full map closes the full map, not the ride detail.
+  @Test
+  fun back_from_the_full_map_stays_on_the_ride_inside_the_navigation() {
+    val stack = mutableStateListOf("list", "ride")
+    rule.setContent {
+      NavDisplay(
+        backStack = stack,
+        onBack = { stack.removeAt(stack.lastIndex) },
+        entryProvider = { key ->
+          NavEntry(key) {
+            if (key == "list") Text("list") else RideDetailScreen(detail(), fakeMap, true, {}, {}, {}, {}, {})
+          }
+        },
+      )
+    }
+    rule.onNodeWithTag("fullMap").performClick()
+    rule.waitForIdle()
+    back()
+    rule.waitForIdle()
+    assertEquals(listOf("list", "ride"), stack.toList())
+    rule.onNodeWithTag("timeline").assertExists()
   }
 }
