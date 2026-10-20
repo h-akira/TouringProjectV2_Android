@@ -24,8 +24,8 @@ android {
     minSdk = 29
     targetSdk = 36
     // Raised by hand for every new build put on the phones (Android README), so Settings shows which one is installed.
-    versionCode = 3
-    versionName = "0.3.0"
+    versionCode = 4
+    versionName = "0.3.1"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
   }

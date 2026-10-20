@@ -119,10 +119,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   private val flowState = MutableStateFlow(IDLE)
   val state: StateFlow<FlowState> = flowState.asStateFlow()
 
-  private val ready = MutableStateFlow(false)
-  val isReady: StateFlow<Boolean> = ready.asStateFlow()
-  private var loaded = false
-  private var permissionsAsked = false
+  private var permissionPromptTaken = false
 
   val controller: AskController = AskController(
     AskDeps(
@@ -196,32 +193,39 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   /** The screen's "押して話す", routed like an intercom press so it waits for a left trial to unwind. */
   fun tapToTalk() = router.tap()
 
-  /** The intercom button presses wait here until settings are loaded and the permission prompt has been answered. */
+  /** The intercom button presses wait here until the app is ready ([readiness]). */
   val presses = PressGate { router.press() }
+
+  private val readiness = Readiness { presses.openGate(System.currentTimeMillis()) }
+  val isReady: StateFlow<Boolean> = readiness.isReady
 
   init {
     audioRoute.onVoiceRecognitionEnded = { router.recognitionEnded() }
     // Settles a ride left recording or paused before this process started (slice 2 spec §4.5).
-    scope.launch { rides.load() }
+    // load() finishes even when the read fails, so the app never stays on "準備中…" because of it.
+    scope.launch {
+      rides.load()
+      readiness.ridesLoaded()
+    }
     scope.launch { sync.run() }
     scope.launch {
       settings.load()
       apiKeys.load()
-      loaded = true
-      openWhenReady()
+      readiness.settingsLoaded()
       // The start of the app is a trigger; before this the key and the user name are not known.
       sync.request()
     }
   }
 
-  fun permissionsAnswered() {
-    permissionsAsked = true
-    openWhenReady()
+  /**
+   * True once per process: the first activity of this process asks for permissions, whether it starts fresh or is
+   * restored after process death (Android #38). An activity recreated in the same process does not ask again.
+   */
+  fun takePermissionPrompt(): Boolean {
+    if (permissionPromptTaken) return false
+    permissionPromptTaken = true
+    return true
   }
 
-  private fun openWhenReady() {
-    if (!loaded || !permissionsAsked || ready.value) return
-    ready.value = true
-    presses.openGate(System.currentTimeMillis())
-  }
+  fun permissionsAnswered() = readiness.permissionsAnswered()
 }
