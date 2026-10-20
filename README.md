@@ -59,7 +59,7 @@ $SDK/cmdline-tools/latest/bin/android --no-metrics emulator stop medium_phone
 
 インカムの合図は `adb shell am start -a android.intent.action.VOICE_COMMAND -n com.touringproject.v2/.MainActivity` で送れる。
 
-MapLibre は Robolectric では動かない（ネイティブのライブラリが要る）。地図の見た目とピンのタップは、エミュレーターの `RouteMapTest` で確かめる。記録の画面は地図を枠で受けるので、JVM のテストでは作り物の地図を渡す。`queryRenderedFeatures` は、地図が一度描き終える前に呼ぶとネイティブのコードが落ちる（`RouteMap` の `onMap` は描き終えてから渡す）。
+MapLibre は Robolectric では動かない（ネイティブのライブラリが要る）。地図の見た目とピンのタップは、エミュレーターの `RouteMapTest` で確かめる。記録の画面は地図を枠で受けるので、JVM のテストでは作り物の地図を渡す。`queryRenderedFeatures` は、地図が一度描き終える前に呼ぶとネイティブのコードが落ちる（`RouteMap` は、押した判定の受け口とテストへの `onMap` を、描き終えてから付ける）。
 
 `RideRecordingTest` は、Fused の mock mode で作り物の位置を流す（テストが自分で、アプリを位置の作り物を出すアプリにする）。記録中の質問のテストは、`local.properties` に `trv2.apiBaseUrl` が無いと飛ばす。接続キーを入れて録音の途中で取り消し、最後にキーを消す。
 
