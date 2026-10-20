@@ -38,14 +38,14 @@ class RideLabelsTest {
   fun the_end_summary_of_a_paused_ride_ends_at_its_pause() {
     val ride = newRide("r1", "箱根", at(17, 8, 58), 7, 24 * HOUR_MS)
       .pause(at(17, 9, 30)).resume(at(17, 9, 48), 7, 24 * HOUR_MS).pause(at(17, 10, 46))
-    val summary = endSummary(ride.copy(distanceMeters = 62_400.0), at(17, 11, 30), TOKYO)
-    assertEquals(EndSummaryUi("1:30", "62.4 km", "08:58〜10:46 · 一時停止 1回（18分）は走行時間に含めません"), summary)
+    val summary = endSummary(ride.copy(distanceMeters = 62_400.0), at(17, 11, 30), TOKYO, questions = 4)
+    assertEquals(EndSummaryUi("1:30", "62.4 km", "4", "08:58〜10:46 · 一時停止 1回（18分）は走行時間に含めません"), summary)
   }
 
   @Test
   fun the_card_says_whether_the_ride_is_paused() {
     val ride = newRide("r1", "箱根", 0, 7, 24 * HOUR_MS)
-    assertEquals(RideCardUi("箱根", false, "0:01", "0.0 km"), rideCard(ride, 60_000))
-    assertEquals(true, rideCard(ride.pause(60_000), 120_000).paused)
+    assertEquals(RideCardUi("箱根", false, "0:01", "0.0 km", "3"), rideCard(ride, 60_000, questions = 3))
+    assertEquals(true, rideCard(ride.pause(60_000), 120_000, questions = 0).paused)
   }
 }

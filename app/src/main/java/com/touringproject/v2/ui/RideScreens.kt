@@ -19,7 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.touringproject.v2.ride.cutRideName
 import com.touringproject.v2.ride.rideName
 
-/** SC-02's ride card (slice 2 spec §7.2). Memo buttons wait for slice 3; the question count waits for plan 3. */
+/** SC-02's ride card (slice 2 spec §7.2). Memo buttons wait for slice 3. */
 @Composable
 fun RideCard(ride: RideCardUi?, onStart: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onEnd: () -> Unit) {
   val card = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)).padding(14.dp)
@@ -51,6 +51,7 @@ fun RideCard(ride: RideCardUi?, onStart: () -> Unit, onPause: () -> Unit, onResu
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
       Stat(ride.elapsed, "走行時間", Modifier.testTag("rideElapsed"))
       Stat(ride.distance, "距離", Modifier.testTag("rideDistance"))
+      Stat(ride.questions, "質問", Modifier.testTag("rideQuestions"))
     }
     if (ride.paused) Text("一時停止中の質問は走行の記録に入りません（日ごとには残ります）", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -85,7 +86,7 @@ private fun NameField(name: String, onChange: (String) -> Unit, placeholder: Str
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StartRideSheet(locationAllowed: Boolean, onStart: (String) -> Unit, onDismiss: () -> Unit) {
-  var name by remember { mutableStateOf("") }
+  var name by rememberSaveable { mutableStateOf("") }
   ModalBottomSheet(onDismissRequest = onDismiss) {
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
       Text("走行を開始", fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -108,13 +109,14 @@ fun StartRideSheet(locationAllowed: Boolean, onStart: (String) -> Unit, onDismis
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EndRideSheet(summary: EndSummaryUi, initialName: String, onEnd: (String) -> Unit, onDismiss: () -> Unit) {
-  var name by remember { mutableStateOf(initialName) }
+  var name by rememberSaveable { mutableStateOf(initialName) }
   ModalBottomSheet(onDismissRequest = onDismiss) {
     Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
       Text("走行を終了しますか？", fontSize = 20.sp, fontWeight = FontWeight.Bold)
       Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
         Stat(summary.elapsed, "走行時間")
         Stat(summary.distance, "距離")
+        Stat(summary.questions, "質問", Modifier.testTag("endQuestions"))
       }
       Text(summary.note, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
       NameField(name, { name = it }, null)

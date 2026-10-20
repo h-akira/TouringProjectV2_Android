@@ -33,7 +33,7 @@ import com.touringproject.v2.recordings.TRIAL_IDLE
 import com.touringproject.v2.recordings.TrialController
 import com.touringproject.v2.recordings.TrialDeps
 import com.touringproject.v2.recordings.TrialState
-import com.touringproject.v2.ride.DEFAULT_MAX_RECORDING_MS
+import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.RideController
 import com.touringproject.v2.ride.RideDeps
 import com.touringproject.v2.ride.RideStatus
@@ -42,6 +42,7 @@ import com.touringproject.v2.service.ContextServiceLauncher
 import com.touringproject.v2.service.RideNotices
 import com.touringproject.v2.service.ServiceCoordinator
 import com.touringproject.v2.settings.ApiKeyStore
+import com.touringproject.v2.settings.DEFAULT_MAX_RECORDING_HOURS
 import com.touringproject.v2.settings.DataStoreKeyValueStore
 import com.touringproject.v2.settings.KeystoreCipher
 import com.touringproject.v2.settings.SettingsRepository
@@ -53,6 +54,7 @@ import com.touringproject.v2.sync.RideSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -81,6 +83,9 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   private val database = RideDatabase.open(context)
   val rideStore = RoomRideStore(database.rides())
   val askLog = RoomAskLog(database.asks(), scope) { message, e -> Log.w("trv2.ask", message, e) }
+
+  /** How many asks the device keeps for the ride (SC-02, SC-04). */
+  fun askCount(rideId: String): Flow<Int> = database.asks().countForRide(rideId)
   private val notices = RideNotices(context)
 
   /** Sends rides and routes; a pass runs on each trigger (slice 2 spec §5.3). */
@@ -99,7 +104,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       now = System::currentTimeMillis,
       bootCount = { runCatching { SystemSettings.Global.getInt(context.contentResolver, SystemSettings.Global.BOOT_COUNT) }.getOrNull() },
       newId = { UUID.randomUUID().toString() },
-      maxRecordingMs = { DEFAULT_MAX_RECORDING_MS },
+      // Read at each start and resume; before the settings are loaded only the default exists.
+      maxRecordingMs = { (settings.settings.value?.maxRecordingHours ?: DEFAULT_MAX_RECORDING_HOURS) * HOUR_MS },
       store = rideStore,
       alarm = AlarmDeadline(context),
       recording = serviceCoordinator::setRecording,

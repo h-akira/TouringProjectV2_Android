@@ -2,17 +2,25 @@ package com.touringproject.v2.ui
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onChildAt
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -35,10 +43,12 @@ class RideScreensTest {
   @Test
   fun a_recording_ride_shows_its_time_and_distance_and_can_pause_or_end() {
     val events = mutableListOf<String>()
-    rule.setContent { RideCard(RideCardUi("箱根", false, "1:26", "52.8 km"), {}, { events += "pause" }, { events += "resume" }, { events += "end" }) }
+    rule.setContent { RideCard(RideCardUi("箱根", false, "1:26", "52.8 km", "4"), {}, { events += "pause" }, { events += "resume" }, { events += "end" }) }
     rule.onNodeWithText("● 走行を記録中").assertExists()
     rule.onNodeWithText("1:26").assertExists()
     rule.onNodeWithText("52.8 km").assertExists()
+    rule.onNodeWithTag("rideQuestions").onChildAt(0).assertTextEquals("4")
+    rule.onNodeWithText("質問").assertExists()
     rule.onNodeWithText("⏸ 一時停止").performClick()
     rule.onNodeWithTag("endRide").performClick()
     assertEquals(listOf("pause", "end"), events)
@@ -47,7 +57,7 @@ class RideScreensTest {
   @Test
   fun the_quiet_texts_follow_the_theme_so_they_stay_readable_in_dark_mode() {
     val dark = darkColorScheme()
-    rule.setContent { MaterialTheme(colorScheme = dark) { RideCard(RideCardUi("箱根", true, "1:26", "52.8 km"), {}, {}, {}, {}) } }
+    rule.setContent { MaterialTheme(colorScheme = dark) { RideCard(RideCardUi("箱根", true, "1:26", "52.8 km", "4"), {}, {}, {}, {}) } }
     for (text in listOf("箱根", "⏸ 一時停止中", "走行時間")) {
       val layouts = mutableListOf<TextLayoutResult>()
       rule.onNodeWithText(text).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
@@ -58,7 +68,7 @@ class RideScreensTest {
   @Test
   fun a_paused_ride_says_its_questions_are_not_recorded_and_can_resume() {
     var resumes = 0
-    rule.setContent { RideCard(RideCardUi("箱根", true, "1:26", "52.8 km"), {}, {}, { resumes++ }, {}) }
+    rule.setContent { RideCard(RideCardUi("箱根", true, "1:26", "52.8 km", "4"), {}, {}, { resumes++ }, {}) }
     rule.onNodeWithText("一時停止中の質問は走行の記録に入りません（日ごとには残ります）").assertExists()
     rule.onNodeWithText("▶ 再開").performClick()
     assertEquals(1, resumes)
@@ -95,6 +105,24 @@ class RideScreensTest {
   }
 
   @Test
+  fun the_names_being_typed_survive_a_recreated_activity() {
+    val restore = StateRestorationTester(rule)
+    var ending by mutableStateOf(false)
+    restore.setContent {
+      if (ending) EndRideSheet(EndSummaryUi("1:30", "62.4 km", "4", ""), "箱根", {}, {})
+      else StartRideSheet(locationAllowed = true, onStart = {}, onDismiss = {})
+    }
+    rule.onNodeWithTag("rideName").performTextInput("箱根")
+    restore.emulateSavedInstanceStateRestore()
+    rule.onNodeWithTag("rideName").assertTextContains("箱根")
+    ending = true
+    rule.waitForIdle()
+    rule.onNodeWithTag("rideName").performTextReplacement("箱根から御殿場へ")
+    restore.emulateSavedInstanceStateRestore()
+    rule.onNodeWithTag("rideName").assertTextContains("箱根から御殿場へ")
+  }
+
+  @Test
   fun the_start_sheet_says_why_without_the_location_permission() {
     rule.setContent { StartRideSheet(locationAllowed = false, onStart = {}, onDismiss = {}) }
     rule.onNodeWithTag("noLocation").assertExists()
@@ -107,9 +135,10 @@ class RideScreensTest {
     var ended: String? = null
     var dismissed = 0
     rule.setContent {
-      EndRideSheet(EndSummaryUi("1:30", "62.4 km", "08:58〜10:46 · 一時停止 1回（18分）は走行時間に含めません"), "箱根", { ended = it }, { dismissed++ })
+      EndRideSheet(EndSummaryUi("1:30", "62.4 km", "4", "08:58〜10:46 · 一時停止 1回（18分）は走行時間に含めません"), "箱根", { ended = it }, { dismissed++ })
     }
     rule.onNodeWithText("08:58〜10:46 · 一時停止 1回（18分）は走行時間に含めません").assertExists()
+    rule.onNodeWithTag("endQuestions").onChildAt(0).assertTextEquals("4")
     rule.onNodeWithTag("rideName").performTextClearance()
     rule.onNodeWithTag("endGo").assertIsNotEnabled()
     rule.onNodeWithTag("rideName").performTextInput("箱根から御殿場へ")

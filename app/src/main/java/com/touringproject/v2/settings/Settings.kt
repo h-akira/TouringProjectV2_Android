@@ -22,6 +22,10 @@ data class LaunchableApp(val packageName: String, val label: String)
 val VOLUME_DB_CHOICES = listOf(0, 3, 6)
 const val DEFAULT_VOLUME_DB = 6
 
+// SC-16: how long a ride may record without a pause before it ends by itself (slice 2 spec §4.4, US-C-08.003).
+val MAX_RECORDING_HOURS_CHOICES = listOf(6, 12, 24, 48)
+const val DEFAULT_MAX_RECORDING_HOURS = 24
+
 data class Settings(
   val userName: String,
   val returnEnabled: Boolean = true,
@@ -29,6 +33,7 @@ data class Settings(
   val returnTiming: ReturnTiming = ReturnTiming.SENT,
   val recentApps: List<LaunchableApp> = emptyList(),
   val answerVolumeDb: Int = DEFAULT_VOLUME_DB,
+  val maxRecordingHours: Int = DEFAULT_MAX_RECORDING_HOURS,
 )
 
 val USER_NAME_RE = Regex("^[a-z0-9]{3,20}$")
@@ -53,6 +58,8 @@ fun decodeSettings(raw: String?, random: Random = Random.Default): Pair<Settings
     recentApps = runCatching { obj["recentApps"]?.jsonArray?.mapNotNull { app(it) } }.getOrNull() ?: emptyList(),
     answerVolumeDb = runCatching { obj["answerVolumeDb"]?.jsonPrimitive?.intOrNull }.getOrNull()
       ?.takeIf { it in VOLUME_DB_CHOICES } ?: DEFAULT_VOLUME_DB,
+    maxRecordingHours = runCatching { obj["maxRecordingHours"]?.jsonPrimitive?.intOrNull }.getOrNull()
+      ?.takeIf { it in MAX_RECORDING_HOURS_CHOICES } ?: DEFAULT_MAX_RECORDING_HOURS,
   )
   return settings to (savedName == null)
 }
@@ -66,6 +73,7 @@ fun encodeSettings(settings: Settings): String = json.encodeToString(
     returnTiming = settings.returnTiming.name.lowercase(),
     recentApps = settings.recentApps,
     answerVolumeDb = settings.answerVolumeDb,
+    maxRecordingHours = settings.maxRecordingHours,
   ),
 )
 
@@ -77,6 +85,7 @@ private data class SavedSettings(
   val returnTiming: String,
   val recentApps: List<LaunchableApp>,
   val answerVolumeDb: Int,
+  val maxRecordingHours: Int,
 )
 
 fun withRecentApp(recent: List<LaunchableApp>, app: LaunchableApp, max: Int = 5): List<LaunchableApp> =

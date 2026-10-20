@@ -39,7 +39,7 @@ class HomeScreenTest {
   @Test
   fun tap_to_talk_starts_a_screen_question() {
     var taps = 0
-    rule.setContent { HomeScreen(HomeUi("rider01", null, "新しい会話です"), { taps++ }, {}, {}, {}, {}) }
+    rule.setContent { HomeScreen(HomeUi("rider01", null, "新しい会話です"), { taps++ }, {}, {}, {}) }
     rule.onNodeWithTag("tapToTalk").performClick()
     assertEquals(1, taps)
   }
@@ -47,7 +47,7 @@ class HomeScreenTest {
   @Test
   fun the_banner_leads_to_its_setting() {
     var opened: Banner? = null
-    rule.setContent { HomeScreen(HomeUi("rider01", Banner.NO_KEY, "新しい会話です"), {}, {}, {}, { opened = it }, {}) }
+    rule.setContent { HomeScreen(HomeUi("rider01", Banner.NO_KEY, "新しい会話です"), {}, {}, { opened = it }, {}) }
     rule.onNodeWithText(Banner.NO_KEY.text).performClick()
     assertEquals(Banner.NO_KEY, opened)
   }
@@ -56,7 +56,7 @@ class HomeScreenTest {
   fun the_low_volume_band_closes_with_its_cross_and_leads_nowhere() {
     var opened: Banner? = null
     var dismissed = 0
-    rule.setContent { HomeScreen(HomeUi("rider01", Banner.LOW_VOLUME, "新しい会話です"), {}, {}, {}, { opened = it }, {}, onDismissVolume = { dismissed++ }) }
+    rule.setContent { HomeScreen(HomeUi("rider01", Banner.LOW_VOLUME, "新しい会話です"), {}, {}, { opened = it }, {}, onDismissVolume = { dismissed++ }) }
     rule.onNodeWithText(Banner.LOW_VOLUME.text).performClick()
     rule.onNodeWithTag("bandClose").performClick()
     assertNull(opened)
@@ -87,7 +87,7 @@ class HomeScreenTest {
   @Test
   fun a_new_conversation_is_confirmed_first() {
     var resets = 0
-    rule.setContent { HomeScreen(HomeUi("rider01", null, "新しい会話です"), {}, {}, {}, {}, { resets++ }) }
+    rule.setContent { HomeScreen(HomeUi("rider01", null, "新しい会話です"), {}, {}, {}, { resets++ }) }
     rule.onNodeWithTag("newConversation").performClick()
     assertEquals(0, resets)
     rule.onNodeWithText("やめる").performClick()
@@ -183,18 +183,43 @@ class SettingsScreensTest {
   @Test
   fun the_settings_list_leads_to_the_volume_and_the_recordings() {
     val opened = mutableListOf<String>()
-    rule.setContent { SettingsScreen(Settings("rider01", answerVolumeDb = 3), null, {}, {}, {}, { opened += "volume" }, { opened += "recordings" }, "0.2.0") }
+    rule.setContent {
+      SettingsScreen(
+        Settings("rider01", answerVolumeDb = 3, maxRecordingHours = 12), null, {}, {}, { opened += "ride" }, {}, { opened += "volume" }, { opened += "recordings" }, "0.2.0",
+      )
+    }
+    rule.onNodeWithText("最長 12時間").performClick()
     rule.onNodeWithText("+3dB").performClick()
     rule.onNodeWithText("録音の確認").performClick()
-    assertEquals(listOf("volume", "recordings"), opened)
+    assertEquals(listOf("ride", "volume", "recordings"), opened)
   }
 
   @Test
   fun the_settings_list_shows_the_app_version_as_a_row_that_leads_nowhere() {
-    rule.setContent { SettingsScreen(Settings("rider01"), null, {}, {}, {}, {}, {}, "0.2.0") }
+    rule.setContent { SettingsScreen(Settings("rider01"), null, {}, {}, {}, {}, {}, {}, "0.2.0") }
     rule.onNodeWithText("バージョン").assertExists()
     rule.onNodeWithText("0.2.0").assertExists()
     rule.onNodeWithTag("versionRow").assertHasNoClickAction()
+  }
+
+  @Test
+  fun the_longest_recording_time_is_chosen_from_four_steps() {
+    var updated: Settings? = null
+    rule.setContent { RideRecordingScreen(Settings("rider01"), { updated = it }) }
+    rule.onNodeWithText("連続して記録できる最長時間").assertExists()
+    for (hours in listOf(6, 12, 24, 48)) rule.onNodeWithTag("maxHours-$hours").assertExists()
+    rule.onNodeWithTag("maxHours-6").performClick()
+    assertEquals(6, updated!!.maxRecordingHours)
+  }
+
+  @Test
+  fun the_tab_bar_names_the_three_tabs_and_tells_which_was_pressed() {
+    val pressed = mutableListOf<Tab>()
+    rule.setContent { TabBar(Tab.HOME) { pressed += it } }
+    rule.onNodeWithText("ホーム").assertExists()
+    rule.onNodeWithText("記録").performClick()
+    rule.onNodeWithText("設定").performClick()
+    assertEquals(listOf(Tab.RECORDS, Tab.SETTINGS), pressed)
   }
 
   @Test

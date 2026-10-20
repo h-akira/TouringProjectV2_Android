@@ -29,6 +29,8 @@ private class World(var now: Long = 1_000, var boot: Int? = 7) {
   val events = mutableListOf<String>()
   val autoEnded = mutableListOf<Ride>()
   var changes = 0
+  /** The longest recording time the rider has chosen (SC-16). */
+  var max = MAX
   var pointsAdded = 0
   private var ids = 0
 
@@ -68,7 +70,7 @@ private class World(var now: Long = 1_000, var boot: Int? = 7) {
       now = { now },
       bootCount = { boot },
       newId = { "r${++ids}" },
-      maxRecordingMs = { MAX },
+      maxRecordingMs = { max },
       store = store,
       alarm = object : DeadlineAlarm {
         override fun set(rideId: String, at: Long) { events += "alarm:$at" }
@@ -457,5 +459,95 @@ class RideControllerTest {
     w.failWrites = true
     w.controller.onFix(fix(8_000, 35.002))
     assertEquals(1, w.pointsAdded)
+  }
+
+  @Test
+  fun pause_resume_and_start_say_whether_they_changed_anything() = runTest {
+    val w = World()
+    w.controller.load()
+    assertFalse(w.controller.pause())
+    assertFalse(w.controller.resume())
+    assertTrue(w.controller.start("箱根"))
+    assertFalse(w.controller.resume())
+    w.now = 5_000
+    assertTrue(w.controller.pause())
+    assertFalse(w.controller.pause())
+    w.now = 9_000
+    assertTrue(w.controller.resume())
+  }
+
+  @Test
+  fun a_pause_after_the_deadline_ends_the_ride_automatically_at_the_deadline() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 1_000 + MAX + 60_000
+    assertFalse(w.controller.pause())
+    val ended = w.stored()
+    assertEquals(RideStatus.ENDED, ended.status)
+    assertEquals(EndReason.AUTO, ended.endReason)
+    assertEquals(1_000 + MAX, ended.endedAt())
+    assertEquals(listOf(ended), w.autoEnded)
+  }
+
+  @Test
+  fun an_end_after_the_deadline_is_an_automatic_end_at_the_deadline_with_the_new_name() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 1_000 + MAX + 60_000
+    assertTrue(w.controller.end("箱根から御殿場へ"))
+    val ended = w.stored()
+    assertEquals(EndReason.AUTO, ended.endReason)
+    assertEquals(1_000 + MAX, ended.endedAt())
+    assertEquals("箱根から御殿場へ", ended.name)
+    assertEquals(1, w.autoEnded.size)
+  }
+
+  @Test
+  fun a_longer_or_shorter_limit_moves_the_recording_segments_deadline_and_its_alarm() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.events.clear()
+    val updatedAt = w.stored().updatedAt
+    w.now = 2 * HOUR_MS
+    w.max = 6 * HOUR_MS
+    w.controller.maxRecordingChanged()
+    assertEquals(1_000 + 6 * HOUR_MS, w.stored().deadline)
+    assertEquals(1_000 + 6 * HOUR_MS, w.controller.active.value?.deadline)
+    assertEquals(listOf("alarm:${1_000 + 6 * HOUR_MS}"), w.events)
+    // The deadline is not sent, so the Backend has nothing new.
+    assertEquals(updatedAt, w.stored().updatedAt)
+  }
+
+  @Test
+  fun a_limit_the_segment_has_already_passed_ends_the_ride_automatically_at_the_new_deadline() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 7 * HOUR_MS
+    w.max = 6 * HOUR_MS
+    w.controller.maxRecordingChanged()
+    val ended = w.stored()
+    assertEquals(EndReason.AUTO, ended.endReason)
+    assertEquals(1_000 + 6 * HOUR_MS, ended.endedAt())
+    assertEquals(1, w.autoEnded.size)
+    assertNull(w.controller.active.value)
+  }
+
+  @Test
+  fun a_paused_ride_takes_the_new_limit_when_it_resumes() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    w.controller.pause()
+    w.max = 6 * HOUR_MS
+    w.controller.maxRecordingChanged()
+    assertNull(w.stored().deadline)
+    w.now = 9_000
+    w.controller.resume()
+    assertEquals(9_000 + 6 * HOUR_MS, w.stored().deadline)
   }
 }
