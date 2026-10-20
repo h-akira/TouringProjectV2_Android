@@ -15,6 +15,15 @@ private val TOKYO = ZoneId.of("Asia/Tokyo")
 private fun at(day: Int, hour: Int, minute: Int) = ZonedDateTime.of(2026, 10, day, hour, minute, 0, 0, TOKYO).toInstant().toEpochMilli()
 
 class RideLabelsTest {
+  // Slice 2 spec §4.7, §7.2
+  @Test
+  fun the_hint_says_how_to_ask_unless_a_ride_records() {
+    val ride = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS)
+    assertEquals(null, askHint(ride))
+    assertEquals("再開すると、インカムのボタンで話せます", askHint(ride.pause(5_000)))
+    assertEquals("走行を開始すると、インカムのボタンで話せます", askHint(null))
+  }
+
   @Test
   fun elapsed_and_distance_read_like_the_mock() {
     assertEquals("1:26", elapsedLabel(86 * 60_000L + 59_000))

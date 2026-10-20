@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,7 +36,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.touringproject.v2.audio.MediaVolume
 import kotlinx.coroutines.delay
 
-data class HomeUi(val userName: String, val banner: Banner?, val conversation: String)
+/** askHint is set while no ask can start (no ride recording: slice 2 spec §4.7); it says how to make one possible. */
+data class HomeUi(val userName: String, val banner: Banner?, val conversation: String, val askHint: String? = null)
 
 const val VOLUME_CHECK_MS = 2_000L
 
@@ -93,14 +95,19 @@ fun HomeScreen(
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
       Text(ui.userName, Modifier.clickable(onClick = onUser), fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
       // Settings is a tab now (slice 2 spec §7.1).
-      OutlinedButton(onClick = onTapToTalk, Modifier.testTag("tapToTalk")) { Text("🎤 押して話す") }
+      OutlinedButton(onClick = onTapToTalk, Modifier.testTag("tapToTalk"), enabled = ui.askHint == null) { Text("🎤 押して話す") }
     }
     ui.banner?.let { banner ->
       val low = banner == Banner.LOW_VOLUME
       WarningBand(banner.text, if (banner.leads) ({ onBanner(banner) }) else null, if (low) onDismissVolume else null, Modifier.testTag("banner"))
     }
     ride()
-    Text("インカムのボタンで話せます", color = Color(0xFF13804A), fontSize = 16.sp)
+    Text(
+      ui.askHint ?: "インカムのボタンで話せます",
+      Modifier.testTag("askHint"),
+      color = if (ui.askHint == null) Color(0xFF13804A) else MaterialTheme.colorScheme.onSurfaceVariant,
+      fontSize = 16.sp,
+    )
     Column(
       Modifier.fillMaxWidth().heightIn(min = 76.dp, max = 140.dp).background(Color(0xFF1F4FD1), RoundedCornerShape(16.dp))
         .clickable { confirming = true }.padding(16.dp).testTag("newConversation"),

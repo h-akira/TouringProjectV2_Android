@@ -123,6 +123,7 @@ fun AppUi(graph: AppGraph) {
                     storeFailed = storeFailed || askStoreFailed,
                   ),
                   conversation = conversationLabel(expiresAt, System.currentTimeMillis()),
+                  askHint = askHint(ride),
                 )
                 HomeScreen(
                   ui = ui,

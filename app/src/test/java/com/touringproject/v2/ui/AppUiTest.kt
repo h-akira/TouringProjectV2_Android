@@ -87,10 +87,12 @@ class AppUiTest {
     assertFalse(rule.activity.onBackPressedDispatcher.hasEnabledCallbacks())
   }
 
-  // Android #36: the ask screen covers the tabs. Without a connection key the ask fails at once and says so.
+  // Android #36: the ask screen covers the tabs. Without a recording ride the intercom press fails at once and says so
+  // (slice 2 spec §4.7).
   @Test
   fun the_tabs_hide_while_an_ask_is_on_screen() {
-    rule.onNodeWithTag("tapToTalk").performClick()
+    val graph = (rule.activity.application as TouringApp).graph
+    rule.runOnUiThread { graph.controller.press() }
     rule.waitUntil(5_000) { !rule.onAllNodesWithTagExists("tab-HOME") }
   }
 

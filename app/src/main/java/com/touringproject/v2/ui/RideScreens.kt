@@ -38,7 +38,7 @@ fun RideCard(ride: RideCardUi?, onStart: () -> Unit, onPause: () -> Unit, onResu
   if (ride == null) {
     Column(card, verticalArrangement = Arrangement.spacedBy(8.dp)) {
       Button(onClick = onStart, Modifier.fillMaxWidth().heightIn(min = 60.dp).testTag("startRide")) { Text("▶ 走行を開始", fontSize = 18.sp) }
-      Text("記録しなくても質問できます（日ごとの記録に残ります）", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
+      Text("走行を記録しているあいだだけ質問できます", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
     }
     return
   }
@@ -53,7 +53,7 @@ fun RideCard(ride: RideCardUi?, onStart: () -> Unit, onPause: () -> Unit, onResu
       Stat(ride.distance, "距離", Modifier.testTag("rideDistance"))
       Stat(ride.questions, "質問", Modifier.testTag("rideQuestions"))
     }
-    if (ride.paused) Text("一時停止中の質問は走行の記録に入りません（日ごとには残ります）", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
+    if (ride.paused) Text("一時停止中は質問できません（再開すると質問できます）", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
       if (ride.paused) Button(onClick = onResume, Modifier.weight(1f)) { Text("▶ 再開") }
       else OutlinedButton(onClick = onPause, Modifier.weight(1f)) { Text("⏸ 一時停止") }

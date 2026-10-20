@@ -35,7 +35,7 @@ class RideScreensTest {
   fun without_a_ride_the_card_offers_to_start_one() {
     var starts = 0
     rule.setContent { RideCard(null, { starts++ }, {}, {}, {}) }
-    rule.onNodeWithText("記録しなくても質問できます（日ごとの記録に残ります）").assertExists()
+    rule.onNodeWithText("走行を記録しているあいだだけ質問できます").assertExists()
     rule.onNodeWithTag("startRide").performClick()
     assertEquals(1, starts)
   }
@@ -69,7 +69,7 @@ class RideScreensTest {
   fun a_paused_ride_says_its_questions_are_not_recorded_and_can_resume() {
     var resumes = 0
     rule.setContent { RideCard(RideCardUi("箱根", true, "1:26", "52.8 km", "4"), {}, {}, { resumes++ }, {}) }
-    rule.onNodeWithText("一時停止中の質問は走行の記録に入りません（日ごとには残ります）").assertExists()
+    rule.onNodeWithText("一時停止中は質問できません（再開すると質問できます）").assertExists()
     rule.onNodeWithText("▶ 再開").performClick()
     assertEquals(1, resumes)
   }
