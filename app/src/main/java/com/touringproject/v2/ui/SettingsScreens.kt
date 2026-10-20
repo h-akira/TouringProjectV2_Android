@@ -25,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -181,6 +182,7 @@ fun ConnectionScreen(
   modifier: Modifier = Modifier,
 ) {
   val scope = rememberCoroutineScope()
+  // Not saveable: the key being typed is not put into the saved state, which the system may write out.
   var input by remember { mutableStateOf("") }
   var checking by remember { mutableStateOf(false) }
   var message by remember { mutableStateOf<String?>(null) }
@@ -228,7 +230,8 @@ fun ConnectionScreen(
 // SC-18
 @Composable
 fun UserScreen(userName: String, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
-  var input by remember { mutableStateOf("") }
+  // Saveable, so a name being typed survives a trip to another tab (Android #34).
+  var input by rememberSaveable { mutableStateOf("") }
   var error by remember { mutableStateOf(false) }
   var confirming by remember { mutableStateOf<String?>(null) }
   Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

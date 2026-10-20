@@ -1,12 +1,20 @@
 package com.touringproject.v2.ui
 
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.touringproject.v2.MainActivity
 import com.touringproject.v2.TouringApp
+import com.touringproject.v2.ride.EndReason
+import com.touringproject.v2.ride.HOUR_MS
+import com.touringproject.v2.ride.end
+import com.touringproject.v2.ride.newRide
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -36,20 +44,54 @@ class AppUiTest {
   }
 
   @Test
-  fun the_records_tab_says_its_list_comes_later_and_home_keeps_its_place() {
+  fun the_records_tab_lists_the_kept_rides_and_home_keeps_its_place() {
+    val graph = (rule.activity.application as TouringApp).graph
     rule.onNodeWithTag("tab-RECORDS").performClick()
-    rule.onNodeWithText("走行と日ごとの記録の一覧は、次の版でここに出ます。").assertExists()
+    rule.onNodeWithText("まだ走行の記録がありません。ホームの「▶ 走行を開始」で記録します。").assertExists()
+    val ride = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS).end(5_000, EndReason.MANUAL, 5_000)
+    runBlocking { graph.rideStore.save(ride) }
+    rule.waitUntil(5_000) { rule.onAllNodesWithTagExists("ride-r1") }
+    rule.onNodeWithText("箱根").assertExists()
     rule.onNodeWithTag("tab-HOME").performClick()
     rule.onNodeWithTag("tapToTalk").assertExists()
   }
 
+  // Android #36: from deep in Settings, the user chip opens the user name above Settings' first screen.
   @Test
-  fun the_user_chip_opens_the_user_name_in_the_settings_tab() {
+  fun the_user_chip_opens_the_user_name_above_the_first_settings_screen() {
     val graph = (rule.activity.application as TouringApp).graph
+    rule.onNodeWithTag("tab-SETTINGS").performClick()
+    rule.onNodeWithText("回答の音量").performClick()
+    rule.onNodeWithTag("tab-HOME").performClick()
     rule.onNodeWithText(graph.settings.current().userName).performClick()
-    rule.onNodeWithTag("tab-SETTINGS").assertExists()
+    rule.onNodeWithTag("userInput").assertExists()
     back()
     rule.onNodeWithText("走行の記録").assertExists()
+  }
+
+  // Android #34
+  @Test
+  fun a_name_being_typed_survives_a_trip_to_another_tab() {
+    rule.onNodeWithTag("tab-SETTINGS").performClick()
+    rule.onNodeWithText("ユーザー名").performClick()
+    rule.onNodeWithTag("userInput").performTextInput("rider02")
+    rule.onNodeWithTag("tab-HOME").performClick()
+    rule.onNodeWithTag("tab-SETTINGS").performClick()
+    rule.onNodeWithTag("userInput").assertTextContains("rider02")
+  }
+
+  // Android #32: on Home's first screen the app takes no Back; the system moves the app to the back.
+  @Test
+  fun the_app_leaves_back_on_homes_first_screen_to_the_system() {
+    rule.onNodeWithTag("tapToTalk").assertExists()
+    assertFalse(rule.activity.onBackPressedDispatcher.hasEnabledCallbacks())
+  }
+
+  // Android #36: the ask screen covers the tabs. Without a connection key the ask fails at once and says so.
+  @Test
+  fun the_tabs_hide_while_an_ask_is_on_screen() {
+    rule.onNodeWithTag("tapToTalk").performClick()
+    rule.waitUntil(5_000) { !rule.onAllNodesWithTagExists("tab-HOME") }
   }
 
   @Test
