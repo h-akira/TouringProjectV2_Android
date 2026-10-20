@@ -190,6 +190,25 @@ class RideController(private val deps: RideDeps) {
   }
 
   /**
+   * SC-06 (and SC-04 through end): gives any kept ride a new name. Returns false when the name is not usable or the
+   * ride is not kept. The active ride stays as it is but for its name.
+   */
+  suspend fun rename(rideId: String, name: String): Boolean = locked {
+    val clean = rideName(name) ?: return@locked false
+    val now = deps.now()
+    val active = activeRide.value
+    if (active?.id == rideId) {
+      val renamed = active.rename(clean, now)
+      save(renamed)
+      activeRide.value = renamed
+      return@locked true
+    }
+    val ride = read("ride") { deps.store.ride(rideId) } ?: return@locked false
+    save(ride.rename(clean, now))
+    true
+  }
+
+  /**
    * SC-16: the longest recording time changed (US-C-08.005). The recording segment's deadline is worked out again from
    * its start; one already passed ends the ride automatically at that deadline. A paused ride takes the new time when
    * it resumes. The deadline is not sent, so updatedAt stays.

@@ -1,0 +1,15 @@
+{
+  "version": 8,
+  "name": "gsi-pale",
+  "sources": {
+    "gsi": {
+      "type": "raster",
+      "tiles": ["https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png"],
+      "tileSize": 256,
+      "minzoom": 2,
+      "maxzoom": 18,
+      "attribution": "<a href=\"https://maps.gsi.go.jp/development/ichiran.html\">地理院タイル</a>"
+    }
+  },
+  "layers": [{ "id": "gsi", "type": "raster", "source": "gsi" }]
+}

@@ -17,8 +17,6 @@ class RoomSyncStore(private val dao: RideDao) : SyncStore {
 
   override suspend fun rideRefused(rideId: String, updatedAt: Long) = dao.markRefused(rideId, updatedAt)
 
-  override suspend fun chunkSent(rideId: String, chunk: ChunkRange, refused: Boolean) {
-    dao.markChunk(rideId, chunk.seq, chunk.from, chunk.until - chunk.from)
-    if (refused) dao.markRouteRefused(rideId)
-  }
+  override suspend fun chunkSent(rideId: String, chunk: ChunkRange, refused: Boolean) =
+    dao.markChunk(rideId, chunk.seq, chunk.from, chunk.until - chunk.from, refused)
 }

@@ -5,6 +5,8 @@ package com.touringproject.v2.ride
 interface RideStore {
   /** The ride that is recording or paused, if any (only one can be: US-C-01.005). */
   suspend fun active(): Ride?
+  /** Any kept ride, ended or not. */
+  suspend fun ride(id: String): Ride?
   /** Writes the ride and its segments. The sent marker of an earlier write is kept. */
   suspend fun save(ride: Ride)
   suspend fun lastPoint(rideId: String): RoutePoint?

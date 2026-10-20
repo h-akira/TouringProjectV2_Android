@@ -19,15 +19,18 @@ class TabStacks<K>(
 
   val current: MutableList<K> get() = stacks.getValue(selected())
 
-  /** False only on Home's first screen, where Back leaves the app. */
-  val canGoBack: Boolean get() = current.size > 1 || tab != Tab.HOME
+  /** On the first screen of Records or Settings, where Back goes to Home rather than within the tab. */
+  val onAnotherTabsFirst: Boolean get() = current.size == 1 && tab != Tab.HOME
 
   /** Another tab shows as it was left; the tab already shown goes back to its first screen. */
   fun press(pressed: Tab) {
     if (pressed == tab) toFirst(current) else select(pressed)
   }
 
-  /** Back within the tab; from another tab's first screen, to Home. Returns false when the app should close. */
+  /**
+   * Back within the tab; from another tab's first screen, to Home. Returns false on Home's first screen, where Back is
+   * left to the system (Android #32).
+   */
   fun back(): Boolean {
     val stack = current
     if (stack.size > 1) {

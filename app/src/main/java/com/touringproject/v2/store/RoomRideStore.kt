@@ -29,6 +29,8 @@ fun RoutePointEntity.toPoint() = RoutePoint(segment, t, lat, lon, accuracy)
 class RoomRideStore(private val dao: RideDao) : RideStore {
   override suspend fun active(): Ride? = dao.active()?.let { it.toRide(dao.segments(it.id)) }
 
+  override suspend fun ride(id: String): Ride? = dao.ride(id)?.let { it.toRide(dao.segments(it.id)) }
+
   override suspend fun save(ride: Ride) =
     dao.saveRide(ride.toEntity(), ride.segments.map { SegmentEntity(ride.id, it.seq, it.startedAt, it.endedAt, it.bootCount) })
 

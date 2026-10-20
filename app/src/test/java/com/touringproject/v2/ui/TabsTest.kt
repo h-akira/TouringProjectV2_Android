@@ -37,12 +37,13 @@ class TabsTest {
   fun back_goes_back_within_the_tab_then_to_home_then_leaves_the_app() {
     tabs.press(Tab.SETTINGS)
     tabs.current += "volume"
-    assertTrue(tabs.canGoBack)
+    assertFalse(tabs.onAnotherTabsFirst)
     assertTrue(tabs.back())
     assertEquals(listOf("settings"), tabs.current)
+    assertTrue(tabs.onAnotherTabsFirst)
     assertTrue(tabs.back())
     assertEquals(Tab.HOME, selected)
-    assertFalse(tabs.canGoBack)
+    assertFalse(tabs.onAnotherTabsFirst)
     assertFalse(tabs.back())
     assertEquals(Tab.HOME, selected)
   }

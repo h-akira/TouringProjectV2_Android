@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -30,7 +29,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.runtime.rememberDecoratedNavEntries
 import androidx.navigation3.runtime.rememberNavBackStack
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.touringproject.v2.AppGraph
 import com.touringproject.v2.BuildConfig
@@ -38,7 +39,6 @@ import com.touringproject.v2.api.ApiClient
 import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.settings.LaunchableApp
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 import kotlinx.serialization.Serializable
@@ -52,6 +52,8 @@ import kotlinx.serialization.Serializable
 @Serializable data object RecordingsKey : NavKey
 @Serializable data object RideRecordingKey : NavKey
 @Serializable data object RecordsKey : NavKey
+@Serializable data class RideKey(val rideId: String) : NavKey
+@Serializable data class AskKey(val rideId: String, val askId: String) : NavKey
 
 private enum class RideSheet { START, END }
 
@@ -78,7 +80,10 @@ fun AppUi(graph: AppGraph) {
   val ride by graph.rides.active.collectAsStateWithLifecycle()
   val storeFailed by graph.rides.storeFailed.collectAsStateWithLifecycle()
   val askStoreFailed by graph.askLog.failed.collectAsStateWithLifecycle()
-  val questions by remember(ride?.id) { ride?.id?.let(graph::askCount) ?: flowOf(0) }.collectAsStateWithLifecycle(0)
+  val questions by graph.activeAskCount.collectAsStateWithLifecycle()
+  val rideList by graph.records.list.collectAsStateWithLifecycle(null)
+  // SC-06 tells while its map fills the screen; the tabs go with it (slice 2 spec §7.1).
+  var mapFull by remember { mutableStateOf(false) }
   // Saveable: SC-17 and SC-04 stay open when the activity is recreated, e.g. on rotation (Android #20).
   var sheet by rememberSaveable { mutableStateOf<RideSheet?>(null) }
   val now = rememberNow(ride != null)
@@ -91,7 +96,6 @@ fun AppUi(graph: AppGraph) {
   val tabs = remember(homeStack, recordsStack, settingsStack) {
     TabStacks(mapOf(Tab.HOME to homeStack, Tab.RECORDS to recordsStack, Tab.SETTINGS to settingsStack), { selectedTab }, { selectedTab = it })
   }
-  val activity = LocalActivity.current
   val current = settings
   // Re-read on every phase change, so the label updates once an ask has renewed the conversation.
   val expiresAt = remember(state) { graph.conversation.expiresAt(System.currentTimeMillis()) }
@@ -100,17 +104,14 @@ fun AppUi(graph: AppGraph) {
       if (!ready || current == null) {
         Text("準備中…", Modifier.safeDrawingPadding())
       } else {
-        // NavDisplay handles Back within a stack; on the first screen of Records or Settings, Back goes to Home.
-        BackHandler(enabled = tabs.current.size == 1 && tabs.tab != Tab.HOME) { tabs.back() }
+        // NavDisplay handles Back within a stack; on the first screen of Records or Settings, Back goes to Home. On
+        // Home's first screen nothing takes it, and the system moves the app to the back (Android #32).
+        BackHandler(enabled = tabs.onAnotherTabsFirst) { tabs.back() }
         Scaffold(
           containerColor = MaterialTheme.colorScheme.background,
-          bottomBar = { if (tabsShown(state.phase)) TabBar(tabs.tab, tabs::press) },
+          bottomBar = { if (tabsShown(state.phase) && !mapFull) TabBar(tabs.tab, tabs::press) },
         ) { inner ->
-          NavDisplay(
-            backStack = tabs.current,
-            onBack = { if (!tabs.back()) activity?.finish() },
-            modifier = Modifier.padding(inner).consumeWindowInsets(inner),
-            entryProvider = entryProvider {
+          val screens = entryProvider<NavKey> {
               entry<HomeKey> {
                 val volume = rememberMediaVolume(volumeReadable(state.phase)) { graph.audioRoute.mediaVolume() }
                 val ui = HomeUi(
@@ -147,7 +148,33 @@ fun AppUi(graph: AppGraph) {
                   },
                 )
               }
-              entry<RecordsKey> { RecordsPlaceholder(Modifier.safeDrawingPadding()) }
+              entry<RecordsKey> {
+                RideListScreen(
+                  rideList?.let { rideSections(it, System.currentTimeMillis(), ZoneId.systemDefault()) },
+                  onRide = { tabs.current.add(RideKey(it)) },
+                  modifier = Modifier.safeDrawingPadding(),
+                )
+              }
+              entry<RideKey> { key ->
+                RideDetailRoute(
+                  graph.records, graph.rides, current,
+                  updateSettings = { next -> scope.launch { graph.settings.update(next) } },
+                  rideId = key.rideId,
+                  onBack = { tabs.back() },
+                  onAsk = { tabs.current.add(AskKey(key.rideId, it)) },
+                  onFullMap = { mapFull = it },
+                  modifier = Modifier.safeDrawingPadding(),
+                )
+              }
+              entry<AskKey> { key ->
+                AskDetailRoute(
+                  graph.records, key.rideId, key.askId,
+                  onBack = { tabs.back() },
+                  // ‹ › stay within the ride's asks: the shown ask is swapped, so Back still goes to SC-06.
+                  onMove = { other -> tabs.current[tabs.current.lastIndex] = AskKey(key.rideId, other) },
+                  modifier = Modifier.safeDrawingPadding(),
+                )
+              }
               entry<SettingsKey> {
                 SettingsScreen(
                   current, apiKey,
@@ -162,17 +189,8 @@ fun AppUi(graph: AppGraph) {
                 )
               }
               entry<RideRecordingKey> {
-                RideRecordingScreen(
-                  current,
-                  { next ->
-                    scope.launch {
-                      graph.settings.update(next)
-                      // The recording ride's deadline follows at once (US-C-08.005).
-                      graph.rides.maxRecordingChanged()
-                    }
-                  },
-                  Modifier.safeDrawingPadding(),
-                )
+                // AppGraph moves the recording ride's deadline when the setting changes (US-C-08.005, Android #33).
+                RideRecordingScreen(current, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
               }
               entry<VolumeKey> {
                 VolumeScreen(current, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
@@ -211,7 +229,17 @@ fun AppUi(graph: AppGraph) {
                 LaunchedEffect(Unit) { apps = graph.launcher.launchableApps() }
                 ReturnAppScreen(current, apps, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
               }
-            },
+            }
+          // Each tab keeps the saved state of its screens (typed text, scroll) while another tab is shown (Android #34).
+          val entries = mapOf(
+            Tab.HOME to rememberDecoratedNavEntries(homeStack, listOf(rememberSaveableStateHolderNavEntryDecorator()), screens),
+            Tab.RECORDS to rememberDecoratedNavEntries(recordsStack, listOf(rememberSaveableStateHolderNavEntryDecorator()), screens),
+            Tab.SETTINGS to rememberDecoratedNavEntries(settingsStack, listOf(rememberSaveableStateHolderNavEntryDecorator()), screens),
+          )
+          NavDisplay(
+            entries = entries.getValue(tabs.tab),
+            modifier = Modifier.padding(inner).consumeWindowInsets(inner),
+            onBack = { tabs.back() },
           )
         }
         when (sheet) {

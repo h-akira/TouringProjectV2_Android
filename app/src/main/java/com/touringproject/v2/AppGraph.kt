@@ -33,6 +33,7 @@ import com.touringproject.v2.recordings.TRIAL_IDLE
 import com.touringproject.v2.recordings.TrialController
 import com.touringproject.v2.recordings.TrialDeps
 import com.touringproject.v2.recordings.TrialState
+import com.touringproject.v2.records.activeAskCount
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.RideController
 import com.touringproject.v2.ride.RideDeps
@@ -46,18 +47,22 @@ import com.touringproject.v2.settings.DEFAULT_MAX_RECORDING_HOURS
 import com.touringproject.v2.settings.DataStoreKeyValueStore
 import com.touringproject.v2.settings.KeystoreCipher
 import com.touringproject.v2.settings.SettingsRepository
+import com.touringproject.v2.settings.maxRecordingChanges
 import com.touringproject.v2.store.RideDatabase
 import com.touringproject.v2.store.RoomAskLog
+import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.store.RoomRideStore
 import com.touringproject.v2.store.RoomSyncStore
 import com.touringproject.v2.sync.RideSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.io.File
@@ -83,9 +88,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   private val database = RideDatabase.open(context)
   val rideStore = RoomRideStore(database.rides())
   val askLog = RoomAskLog(database.asks(), scope) { message, e -> Log.w("trv2.ask", message, e) }
-
-  /** How many asks the device keeps for the ride (SC-02, SC-04). */
-  fun askCount(rideId: String): Flow<Int> = database.asks().countForRide(rideId)
+  /** What the Records tab reads (SC-05, SC-06, SC-07). */
+  val records = RoomRecords(database.rides(), database.asks())
   private val notices = RideNotices(context)
 
   /** Sends rides and routes; a pass runs on each trigger (slice 2 spec §5.3). */
@@ -115,6 +119,10 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       log = { event, data -> Log.i("trv2.ride", "$event $data") },
     ),
   )
+
+  /** How many asks the device keeps for the ride recording or paused (SC-02, SC-04; Android #35). */
+  val activeAskCount: StateFlow<Int> =
+    activeAskCount(rides.active.map { it?.id }, database.asks()::countForRide).stateIn(scope, SharingStarted.Eagerly, 0)
 
   private val flowState = MutableStateFlow(IDLE)
   val state: StateFlow<FlowState> = flowState.asStateFlow()
@@ -208,6 +216,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       readiness.ridesLoaded()
     }
     scope.launch { sync.run() }
+    // SC-16: the recording ride's deadline follows the longest recording time, wherever it was changed (Android #33).
+    scope.launch { maxRecordingChanges(settings.settings).collect { rides.maxRecordingChanged() } }
     scope.launch {
       settings.load()
       apiKeys.load()
