@@ -1224,7 +1224,7 @@ const SPEC = {
 <li>要約: 走行時間（一時停止を除く）、距離、質問数、開始〜終了の時刻、一時停止の回数と合計時間。日をまたぐときは期間（◯月◯日〜◯日）。</li>
 <li>最長時間に達したときはこのシートを出さず、自動で保存する（名前は開始時に付けたもののまま。あとで SC-06 で変えられる）。</li>
 <li>名前は開始時（SC-17）に付けたものを入れておく。ここでも変えられる（あとから SC-06 でも変えられる）。空にはできない。</li>
-<li>「終了して保存」で記録を確定し、その走行の SC-06 を開く。保存はまず端末に行い、クラウドへは裏で送る。</li>
+<li>「終了して保存」で記録を確定し、ホームに戻る（振り返りは記録のタブから。adr/0007）。保存はまず端末に行い、クラウドへは裏で送る。</li>
 <li>「走行を続ける」・外側のタップで閉じ、もとの状態（記録中／一時停止中）に戻る。</li>
 <li>質問が0件・距離がごく短い走行でも保存する（削除は SC-06 から）。</li></ul>` },
 
@@ -1993,7 +1993,7 @@ document.addEventListener("click", e => {
   if (act === "startTrip") { if (t.disabled) return; closeOverlays(); states["SC-02"] = "riding"; show("SC-02"); toast("走行の記録を始めました"); return; }
   if (act === "pauseTrip") { states["SC-02"] = "paused"; show("SC-02"); toast("一時停止しました（ルートを記録しません）"); return; }
   if (act === "resumeTrip") { states["SC-02"] = "riding"; show("SC-02"); toast("走行の記録を再開しました"); return; }
-  if (act === "endTrip") { closeOverlays(); states["SC-02"] = "idle"; params.trip = "t1"; stack = ["SC-05", "SC-06"]; show("SC-06"); toast("走行を保存しました"); return; }
+  if (act === "endTrip") { closeOverlays(); states["SC-02"] = "idle"; stack = ["SC-02"]; show("SC-02"); toast("走行を保存しました"); return; }
   if (act === "homeTripMemo") { params.memo = "trip"; params.trip = "t1"; stack = ["SC-02"]; return go("SC-08"); }
   if (act === "tripMemo") { closeOverlays(); params.memo = "trip"; return go("SC-08"); }
   if (act === "newMemo") { params.memoId = null; states["SC-19"] = "new"; return go("SC-19"); }
