@@ -3,11 +3,16 @@ package com.touringproject.v2.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -18,6 +23,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -45,6 +51,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object VolumeKey : NavKey
 @Serializable data object RecordingsKey : NavKey
 @Serializable data object RideRecordingKey : NavKey
+@Serializable data object RecordsKey : NavKey
 
 private enum class RideSheet { START, END }
 
@@ -72,11 +79,19 @@ fun AppUi(graph: AppGraph) {
   val storeFailed by graph.rides.storeFailed.collectAsStateWithLifecycle()
   val askStoreFailed by graph.askLog.failed.collectAsStateWithLifecycle()
   val questions by remember(ride?.id) { ride?.id?.let(graph::askCount) ?: flowOf(0) }.collectAsStateWithLifecycle(0)
-  var sheet by remember { mutableStateOf<RideSheet?>(null) }
+  // Saveable: SC-17 and SC-04 stay open when the activity is recreated, e.g. on rotation (Android #20).
+  var sheet by rememberSaveable { mutableStateOf<RideSheet?>(null) }
   val now = rememberNow(ride != null)
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
-  val backStack = rememberNavBackStack(HomeKey)
+  val homeStack = rememberNavBackStack(HomeKey)
+  val recordsStack = rememberNavBackStack(RecordsKey)
+  val settingsStack = rememberNavBackStack(SettingsKey)
+  var selectedTab by rememberSaveable { mutableStateOf(Tab.HOME) }
+  val tabs = remember(homeStack, recordsStack, settingsStack) {
+    TabStacks(mapOf(Tab.HOME to homeStack, Tab.RECORDS to recordsStack, Tab.SETTINGS to settingsStack), { selectedTab }, { selectedTab = it })
+  }
+  val activity = LocalActivity.current
   val current = settings
   // Re-read on every phase change, so the label updates once an ask has renewed the conversation.
   val expiresAt = remember(state) { graph.conversation.expiresAt(System.currentTimeMillis()) }
@@ -85,105 +100,129 @@ fun AppUi(graph: AppGraph) {
       if (!ready || current == null) {
         Text("準備中…", Modifier.safeDrawingPadding())
       } else {
-        NavDisplay(
-          backStack = backStack,
-          onBack = { backStack.removeLastOrNull() },
-          entryProvider = entryProvider {
-            entry<HomeKey> {
-              val volume = rememberMediaVolume(volumeReadable(state.phase)) { graph.audioRoute.mediaVolume() }
-              val ui = HomeUi(
-                userName = current.userName,
-                banner = homeBanner(
-                  hasKey = apiKey != null,
-                  returnAppMissing = current.returnEnabled && current.returnApp == null,
-                  volumeLow = volumeWarning(volume, volumeDismissedAt),
-                  storeFailed = storeFailed || askStoreFailed,
-                ),
-                conversation = conversationLabel(expiresAt, System.currentTimeMillis()),
-              )
-              HomeScreen(
-                ui = ui,
-                onTapToTalk = graph::tapToTalk,
-                onUser = { backStack.add(UserKey) },
-                onBanner = { backStack.add(if (it == Banner.NO_KEY) ConnectionKey else ReturnAppKey) },
-                onNewConversation = graph.controller::resetConversation,
-                modifier = Modifier.safeDrawingPadding(),
-                onDismissVolume = { volume?.let { graph.dismissVolumeWarning(it.current) } },
-                ride = {
-                  RideCard(
-                    ride?.let { rideCard(it, now, questions) },
-                    onStart = { sheet = RideSheet.START },
-                    onPause = {
-                      scope.launch { graph.rides.pause() }
-                      Toast.makeText(context, "一時停止しました", Toast.LENGTH_SHORT).show()
-                    },
-                    onResume = {
-                      scope.launch { graph.rides.resume() }
-                      Toast.makeText(context, "再開しました", Toast.LENGTH_SHORT).show()
-                    },
-                    onEnd = { sheet = RideSheet.END },
-                  )
-                },
-              )
-            }
-            entry<SettingsKey> {
-              SettingsScreen(
-                current, apiKey,
-                onConnection = { backStack.add(ConnectionKey) },
-                onUser = { backStack.add(UserKey) },
-                onRideRecording = { backStack.add(RideRecordingKey) },
-                onReturnApp = { backStack.add(ReturnAppKey) },
-                onVolume = { backStack.add(VolumeKey) },
-                onRecordings = { backStack.add(RecordingsKey) },
-                version = BuildConfig.VERSION_NAME,
-                modifier = Modifier.safeDrawingPadding(),
-              )
-            }
-            entry<VolumeKey> {
-              VolumeScreen(current, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
-            }
-            entry<RecordingsKey> {
-              val check = graph.recordingCheck
-              val trial by graph.trialState.collectAsStateWithLifecycle()
-              val items by check.items.collectAsStateWithLifecycle()
-              val playing by check.playing.collectAsStateWithLifecycle()
-              val message by check.message.collectAsStateWithLifecycle()
-              // Leaving SC-12 drops the trial and its playback; an answer being read out goes on.
-              DisposableEffect(Unit) { onDispose { check.leave() } }
-              RecordingsScreen(
-                RecordingsUi(trial, items, playing, isBusy(state), message),
-                onTrial = check::toggleTrial,
-                onPlay = check::play,
-                onStop = check::stopPlaying,
-                onDeleteAll = check::deleteAll,
-                modifier = Modifier.safeDrawingPadding(),
-              )
-            }
-            entry<ConnectionKey> {
-              ConnectionScreen(
-                apiKey = apiKey,
-                urlMissing = graph.apiBaseUrl.isEmpty(),
-                check = { key -> ApiClient(graph.apiBaseUrl, key, current.userName, graph.http).checkKey() },
-                save = { graph.apiKeys.save(it) },
-                modifier = Modifier.safeDrawingPadding(),
-              )
-            }
-            entry<UserKey> {
-              UserScreen(current.userName, { name -> scope.launch { graph.settings.update(current.copy(userName = name)) } }, Modifier.safeDrawingPadding())
-            }
-            entry<ReturnAppKey> {
-              var apps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }
-              LaunchedEffect(Unit) { apps = graph.launcher.launchableApps() }
-              ReturnAppScreen(current, apps, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
-            }
-          },
-        )
+        // NavDisplay handles Back within a stack; on the first screen of Records or Settings, Back goes to Home.
+        BackHandler(enabled = tabs.current.size == 1 && tabs.tab != Tab.HOME) { tabs.back() }
+        Scaffold(
+          containerColor = MaterialTheme.colorScheme.background,
+          bottomBar = { if (tabsShown(state.phase)) TabBar(tabs.tab, tabs::press) },
+        ) { inner ->
+          NavDisplay(
+            backStack = tabs.current,
+            onBack = { if (!tabs.back()) activity?.finish() },
+            modifier = Modifier.padding(inner).consumeWindowInsets(inner),
+            entryProvider = entryProvider {
+              entry<HomeKey> {
+                val volume = rememberMediaVolume(volumeReadable(state.phase)) { graph.audioRoute.mediaVolume() }
+                val ui = HomeUi(
+                  userName = current.userName,
+                  banner = homeBanner(
+                    hasKey = apiKey != null,
+                    returnAppMissing = current.returnEnabled && current.returnApp == null,
+                    volumeLow = volumeWarning(volume, volumeDismissedAt),
+                    storeFailed = storeFailed || askStoreFailed,
+                  ),
+                  conversation = conversationLabel(expiresAt, System.currentTimeMillis()),
+                )
+                HomeScreen(
+                  ui = ui,
+                  onTapToTalk = graph::tapToTalk,
+                  onUser = { tabs.open(Tab.SETTINGS, UserKey) },
+                  onBanner = { tabs.open(Tab.SETTINGS, if (it == Banner.NO_KEY) ConnectionKey else ReturnAppKey) },
+                  onNewConversation = graph.controller::resetConversation,
+                  modifier = Modifier.safeDrawingPadding(),
+                  onDismissVolume = { volume?.let { graph.dismissVolumeWarning(it.current) } },
+                  ride = {
+                    RideCard(
+                      ride?.let { rideCard(it, now, questions) },
+                      onStart = { sheet = RideSheet.START },
+                      // Only a change that happened is told (Android #19).
+                      onPause = {
+                        scope.launch { if (graph.rides.pause()) Toast.makeText(context, "一時停止しました", Toast.LENGTH_SHORT).show() }
+                      },
+                      onResume = {
+                        scope.launch { if (graph.rides.resume()) Toast.makeText(context, "再開しました", Toast.LENGTH_SHORT).show() }
+                      },
+                      onEnd = { sheet = RideSheet.END },
+                    )
+                  },
+                )
+              }
+              entry<RecordsKey> { RecordsPlaceholder(Modifier.safeDrawingPadding()) }
+              entry<SettingsKey> {
+                SettingsScreen(
+                  current, apiKey,
+                  onConnection = { tabs.current.add(ConnectionKey) },
+                  onUser = { tabs.current.add(UserKey) },
+                  onRideRecording = { tabs.current.add(RideRecordingKey) },
+                  onReturnApp = { tabs.current.add(ReturnAppKey) },
+                  onVolume = { tabs.current.add(VolumeKey) },
+                  onRecordings = { tabs.current.add(RecordingsKey) },
+                  version = BuildConfig.VERSION_NAME,
+                  modifier = Modifier.safeDrawingPadding(),
+                )
+              }
+              entry<RideRecordingKey> {
+                RideRecordingScreen(
+                  current,
+                  { next ->
+                    scope.launch {
+                      graph.settings.update(next)
+                      // The recording ride's deadline follows at once (US-C-08.005).
+                      graph.rides.maxRecordingChanged()
+                    }
+                  },
+                  Modifier.safeDrawingPadding(),
+                )
+              }
+              entry<VolumeKey> {
+                VolumeScreen(current, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
+              }
+              entry<RecordingsKey> {
+                val check = graph.recordingCheck
+                val trial by graph.trialState.collectAsStateWithLifecycle()
+                val items by check.items.collectAsStateWithLifecycle()
+                val playing by check.playing.collectAsStateWithLifecycle()
+                val message by check.message.collectAsStateWithLifecycle()
+                // Leaving SC-12 drops the trial and its playback; an answer being read out goes on.
+                DisposableEffect(Unit) { onDispose { check.leave() } }
+                RecordingsScreen(
+                  RecordingsUi(trial, items, playing, isBusy(state), message),
+                  onTrial = check::toggleTrial,
+                  onPlay = check::play,
+                  onStop = check::stopPlaying,
+                  onDeleteAll = check::deleteAll,
+                  modifier = Modifier.safeDrawingPadding(),
+                )
+              }
+              entry<ConnectionKey> {
+                ConnectionScreen(
+                  apiKey = apiKey,
+                  urlMissing = graph.apiBaseUrl.isEmpty(),
+                  check = { key -> ApiClient(graph.apiBaseUrl, key, current.userName, graph.http).checkKey() },
+                  save = { graph.apiKeys.save(it) },
+                  modifier = Modifier.safeDrawingPadding(),
+                )
+              }
+              entry<UserKey> {
+                UserScreen(current.userName, { name -> scope.launch { graph.settings.update(current.copy(userName = name)) } }, Modifier.safeDrawingPadding())
+              }
+              entry<ReturnAppKey> {
+                var apps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }
+                LaunchedEffect(Unit) { apps = graph.launcher.launchableApps() }
+                ReturnAppScreen(current, apps, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
+              }
+            },
+          )
+        }
         when (sheet) {
           RideSheet.START -> StartRideSheet(
             locationAllowed = context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED,
             onStart = { name ->
               sheet = null
-              scope.launch { graph.rides.start(name) }
+              scope.launch {
+                // Another ride may have been resumed meanwhile, or the database not yet read (Android #19).
+                if (!graph.rides.start(name)) Toast.makeText(context, "走行を開始できませんでした", Toast.LENGTH_SHORT).show()
+              }
             },
             onDismiss = { sheet = null },
           )
