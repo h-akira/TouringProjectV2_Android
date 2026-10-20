@@ -28,6 +28,8 @@ private class World(var now: Long = 1_000, var boot: Int? = 7) {
   var gate: CompletableDeferred<Unit>? = null
   val events = mutableListOf<String>()
   val autoEnded = mutableListOf<Ride>()
+  var changes = 0
+  var pointsAdded = 0
   private var ids = 0
 
   val store = object : RideStore {
@@ -74,6 +76,8 @@ private class World(var now: Long = 1_000, var boot: Int? = 7) {
       },
       recording = { events += "recording:$it" },
       autoEnded = { autoEnded += it },
+      changed = { changes += 1 },
+      pointAdded = { pointsAdded += 1 },
       log = { _, _ -> },
     ),
   )
@@ -422,5 +426,36 @@ class RideControllerTest {
     w.failWrites = false
     w.controller.onFix(fix(7_000, 35.001))
     assertFalse(w.controller.storeFailed.value)
+  }
+
+  @Test
+  fun every_saved_change_asks_for_a_send_and_a_failed_one_does_not() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    w.controller.pause()
+    w.now = 9_000
+    w.controller.resume()
+    w.now = 12_000
+    w.controller.end("箱根")
+    assertEquals(4, w.changes)
+    w.failWrites = true
+    w.controller.start("御殿場")
+    assertEquals(4, w.changes)
+  }
+
+  @Test
+  fun each_saved_point_is_reported_and_a_dropped_or_failed_one_is_not() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 6_000
+    w.controller.onFix(fix(6_000, 35.0))
+    w.controller.onFix(fix(7_000, 35.001, accuracy = 80.0))
+    assertEquals(1, w.pointsAdded)
+    w.failWrites = true
+    w.controller.onFix(fix(8_000, 35.002))
+    assertEquals(1, w.pointsAdded)
   }
 }

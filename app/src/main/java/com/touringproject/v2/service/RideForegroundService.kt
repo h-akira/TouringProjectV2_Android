@@ -15,9 +15,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.touringproject.v2.MainActivity
 import com.touringproject.v2.TouringApp
-import com.touringproject.v2.location.Subscription
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -42,8 +40,7 @@ class RideForegroundService : Service(), RunningService {
   private val graph get() = (application as TouringApp).graph
   private lateinit var scope: CoroutineScope
   private var foreground = false
-  private var route: Subscription? = null
-  private var heartbeat: Job? = null
+  private lateinit var recording: RecordingWatch
 
   private val shutdown = object : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -63,6 +60,19 @@ class RideForegroundService : Service(), RunningService {
   override fun onCreate() {
     super.onCreate()
     scope = MainScope()
+    val rides = graph.rides
+    recording = RecordingWatch(
+      graph.routeSource,
+      onFix = { fix -> scope.launch { rides.onFix(fix) } },
+      startHeartbeat = {
+        scope.launch {
+          while (true) {
+            delay(HEARTBEAT_MS)
+            rides.heartbeat()
+          }
+        }
+      },
+    ) { message, e -> Log.w("trv2.route", message, e) }
     ContextCompat.registerReceiver(this, shutdown, IntentFilter(Intent.ACTION_SHUTDOWN), ContextCompat.RECEIVER_NOT_EXPORTED)
     graph.serviceCoordinator.attach(this)
   }
@@ -92,39 +102,18 @@ class RideForegroundService : Service(), RunningService {
     }
     startForeground(NOTIFICATION_ID, notification(uses), serviceTypes(uses))
     foreground = true
-    if (ServiceUse.LOCATION in uses) watch() else unwatch()
+    if (ServiceUse.LOCATION in uses) recording.start() else recording.stop()
   }
 
   private fun stop() {
     // From here on a new request starts the service again instead of reaching this stopping one.
     graph.serviceCoordinator.detach(this)
-    unwatch()
+    recording.stop()
     // A service started with startForegroundService must reach the foreground once, even to stop at once.
     if (!foreground) runCatching { startForeground(NOTIFICATION_ID, notification(emptySet()), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK) }
     stopForeground(STOP_FOREGROUND_REMOVE)
     foreground = false
     stopSelf()
-  }
-
-  private fun watch() {
-    if (route != null) return
-    val rides = graph.rides
-    route = runCatching { graph.routeSource.watch { fix -> scope.launch { rides.onFix(fix) } } }
-      .onFailure { Log.w("trv2.route", "route watch failed", it) }
-      .getOrNull()
-    heartbeat = scope.launch {
-      while (true) {
-        delay(HEARTBEAT_MS)
-        rides.heartbeat()
-      }
-    }
-  }
-
-  private fun unwatch() {
-    route?.remove()
-    route = null
-    heartbeat?.cancel()
-    heartbeat = null
   }
 
   private fun notification(uses: Set<ServiceUse>): Notification {
@@ -141,7 +130,7 @@ class RideForegroundService : Service(), RunningService {
   }
 
   override fun onDestroy() {
-    unwatch()
+    recording.stop()
     unregisterReceiver(shutdown)
     graph.serviceCoordinator.detach(this)
     scope.cancel()

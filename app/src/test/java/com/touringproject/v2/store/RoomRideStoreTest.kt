@@ -16,6 +16,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -62,11 +63,14 @@ class RoomRideStoreTest {
   }
 
   @Test
-  fun saving_again_keeps_what_the_backend_has_accepted() = runBlocking {
+  fun saving_again_keeps_what_the_backend_has_accepted_or_refused() = runBlocking {
     store.save(ride)
-    dao.upsertRide(dao.ride("r1")!!.copy(sentUpdatedAt = 1_000))
+    dao.upsertRide(dao.ride("r1")!!.copy(sentUpdatedAt = 1_000, rejectedUpdatedAt = 900, routeRejected = true))
     store.save(ride.pause(5_000))
-    assertEquals(1_000L, dao.ride("r1")?.sentUpdatedAt)
+    val saved = dao.ride("r1")!!
+    assertEquals(1_000L, saved.sentUpdatedAt)
+    assertEquals(900L, saved.rejectedUpdatedAt)
+    assertTrue(saved.routeRejected)
     assertEquals(RideStatus.PAUSED, store.active()?.status)
   }
 }

@@ -86,6 +86,15 @@ class RideScreensTest {
   }
 
   @Test
+  fun a_pasted_name_is_never_cut_inside_an_emoji() {
+    var started: String? = null
+    rule.setContent { StartRideSheet(locationAllowed = true, onStart = { started = it }, onDismiss = {}) }
+    rule.onNodeWithTag("rideName").performTextInput("あ".repeat(39) + "😀😀")
+    rule.onNodeWithTag("startGo").performClick()
+    assertEquals("あ".repeat(39) + "😀", started)
+  }
+
+  @Test
   fun the_start_sheet_says_why_without_the_location_permission() {
     rule.setContent { StartRideSheet(locationAllowed = false, onStart = {}, onDismiss = {}) }
     rule.onNodeWithTag("noLocation").assertExists()

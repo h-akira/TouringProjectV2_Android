@@ -1,0 +1,76 @@
+package com.touringproject.v2.ask
+
+import com.touringproject.v2.api.AskResult
+import com.touringproject.v2.location.Fix
+import java.time.OffsetDateTime
+
+// What the device keeps of an ask (slice 2 spec §5.2). The Backend makes the record; the app keeps its own copy and
+// never sends it back (07 UC-7).
+
+enum class AskOutcome { ANSWERED, FAILED }
+
+/** Slice 2 asks only by voice; text asks come in slice 4. */
+const val ASK_INPUT_VOICE = "voice"
+
+const val TIMEOUT_FAILURE = "timeout"
+
+data class AskRecord(
+  val askId: String,
+  val askedAt: Long,
+  /** When the answer arrived; null for a failed ask. */
+  val answeredAt: Long?,
+  val transcript: String?,
+  val answer: String?,
+  val latitude: Double?,
+  val longitude: Double?,
+  val address: String?,
+  val headingDegrees: Double?,
+  val input: String,
+  val conversationId: String,
+  /** True for the first ask of a conversation: the conversation breaks just before it (US-C-03.004). */
+  val newConversation: Boolean,
+  val outcome: AskOutcome,
+  /** The Backend's error, or "timeout"; null when answered. */
+  val failure: String?,
+  /** The ride that was recording when the ask started (slice 2 spec §4.6). */
+  val rideId: String?,
+)
+
+/** What the loop knows once the Backend has taken the ask in. */
+data class SentAsk(
+  val askId: String,
+  val conversationId: String,
+  val newConversation: Boolean,
+  val sentAt: Long,
+  val here: Fix?,
+  val rideId: String?,
+)
+
+/** An answer the rider can hear: a completed one, or text whose speech the Backend failed to make. */
+fun readable(result: AskResult): Boolean = result.status == "completed" || (result.error == "tts_failed" && !result.answer.isNullOrEmpty())
+
+/** result is the finished result, or null when polling gave up at 120 s (kept as a timeout). */
+fun askRecord(sent: SentAsk, result: AskResult?, now: Long): AskRecord {
+  val answered = result != null && readable(result)
+  return AskRecord(
+    askId = sent.askId,
+    askedAt = result?.askedAt?.let { runCatching { OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() } ?: sent.sentAt,
+    answeredAt = if (answered) now else null,
+    transcript = result?.transcript,
+    answer = result?.answer,
+    latitude = sent.here?.latitude,
+    longitude = sent.here?.longitude,
+    address = result?.address,
+    headingDegrees = result?.headingDegrees,
+    input = ASK_INPUT_VOICE,
+    conversationId = sent.conversationId,
+    newConversation = sent.newConversation,
+    outcome = if (answered) AskOutcome.ANSWERED else AskOutcome.FAILED,
+    failure = when {
+      answered -> null
+      result == null -> TIMEOUT_FAILURE
+      else -> result.error ?: "agent_failed"
+    },
+    rideId = sent.rideId,
+  )
+}

@@ -4,6 +4,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -182,10 +183,18 @@ class SettingsScreensTest {
   @Test
   fun the_settings_list_leads_to_the_volume_and_the_recordings() {
     val opened = mutableListOf<String>()
-    rule.setContent { SettingsScreen(Settings("rider01", answerVolumeDb = 3), null, {}, {}, {}, { opened += "volume" }, { opened += "recordings" }) }
+    rule.setContent { SettingsScreen(Settings("rider01", answerVolumeDb = 3), null, {}, {}, {}, { opened += "volume" }, { opened += "recordings" }, "0.2.0") }
     rule.onNodeWithText("+3dB").performClick()
     rule.onNodeWithText("録音の確認").performClick()
     assertEquals(listOf("volume", "recordings"), opened)
+  }
+
+  @Test
+  fun the_settings_list_shows_the_app_version_as_a_row_that_leads_nowhere() {
+    rule.setContent { SettingsScreen(Settings("rider01"), null, {}, {}, {}, {}, {}, "0.2.0") }
+    rule.onNodeWithText("バージョン").assertExists()
+    rule.onNodeWithText("0.2.0").assertExists()
+    rule.onNodeWithTag("versionRow").assertHasNoClickAction()
   }
 
   @Test

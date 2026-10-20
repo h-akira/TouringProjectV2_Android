@@ -27,6 +27,7 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import com.touringproject.v2.AppGraph
+import com.touringproject.v2.BuildConfig
 import com.touringproject.v2.api.ApiClient
 import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.settings.LaunchableApp
@@ -67,6 +68,7 @@ fun AppUi(graph: AppGraph) {
   val volumeDismissedAt by graph.volumeDismissedAt.collectAsStateWithLifecycle()
   val ride by graph.rides.active.collectAsStateWithLifecycle()
   val storeFailed by graph.rides.storeFailed.collectAsStateWithLifecycle()
+  val askStoreFailed by graph.askLog.failed.collectAsStateWithLifecycle()
   var sheet by remember { mutableStateOf<RideSheet?>(null) }
   val now = rememberNow(ride != null)
   val context = LocalContext.current
@@ -92,7 +94,7 @@ fun AppUi(graph: AppGraph) {
                   hasKey = apiKey != null,
                   returnAppMissing = current.returnEnabled && current.returnApp == null,
                   volumeLow = volumeWarning(volume, volumeDismissedAt),
-                  storeFailed = storeFailed,
+                  storeFailed = storeFailed || askStoreFailed,
                 ),
                 conversation = conversationLabel(expiresAt, System.currentTimeMillis()),
               )
@@ -130,6 +132,7 @@ fun AppUi(graph: AppGraph) {
                 onReturnApp = { backStack.add(ReturnAppKey) },
                 onVolume = { backStack.add(VolumeKey) },
                 onRecordings = { backStack.add(RecordingsKey) },
+                version = BuildConfig.VERSION_NAME,
                 modifier = Modifier.safeDrawingPadding(),
               )
             }
@@ -157,7 +160,7 @@ fun AppUi(graph: AppGraph) {
               ConnectionScreen(
                 apiKey = apiKey,
                 urlMissing = graph.apiBaseUrl.isEmpty(),
-                check = { key -> ApiClient(graph.apiBaseUrl, key, current.userName).checkKey() },
+                check = { key -> ApiClient(graph.apiBaseUrl, key, current.userName, graph.http).checkKey() },
                 save = { graph.apiKeys.save(it) },
                 modifier = Modifier.safeDrawingPadding(),
               )

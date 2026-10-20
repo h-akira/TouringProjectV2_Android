@@ -42,6 +42,11 @@ interface RecordingSink {
   fun transcribed(name: String, transcript: String)
 }
 
+/** Fire and forget: a failure to keep an ask must not end it. */
+fun interface AskLog {
+  fun keep(record: AskRecord)
+}
+
 interface Positions {
   fun begin()
   fun end(): Pair<Fix?, List<Fix>>
@@ -88,6 +93,10 @@ class AskDeps(
   val route: RouteControl,
   val recorder: Recorder,
   val recordings: RecordingSink,
+  /** Where the asks that reached the Backend are kept (slice 2 spec §5.2). */
+  val asks: AskLog,
+  /** The id of the ride that is recording now, or null (paused or none: slice 2 spec §4.6). */
+  val rideId: () -> String?,
   val location: Positions,
   val service: KeepAlive,
   val nav: NavReturn,

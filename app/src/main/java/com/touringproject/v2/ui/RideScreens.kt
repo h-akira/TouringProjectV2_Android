@@ -28,7 +28,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.touringproject.v2.ride.RIDE_NAME_MAX
+import com.touringproject.v2.ride.cutRideName
 import com.touringproject.v2.ride.rideName
 
 /** SC-02's ride card (slice 2 spec §7.2). Memo buttons wait for slice 3; the question count waits for plan 3. */
@@ -73,7 +73,7 @@ private fun Stat(value: String, label: String, modifier: Modifier = Modifier) {
 private fun NameField(name: String, onChange: (String) -> Unit, placeholder: String?) {
   OutlinedTextField(
     value = name,
-    onValueChange = { onChange(it.take(RIDE_NAME_MAX)) },
+    onValueChange = { onChange(cutRideName(it)) },
     label = { Text("この走行の名前") },
     placeholder = placeholder?.let { { Text(it) } },
     singleLine = true,

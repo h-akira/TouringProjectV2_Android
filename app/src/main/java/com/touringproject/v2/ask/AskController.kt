@@ -2,7 +2,6 @@ package com.touringproject.v2.ask
 
 import com.touringproject.v2.api.ApiError
 import com.touringproject.v2.api.ApiErrorKind
-import com.touringproject.v2.api.AskAccepted
 import com.touringproject.v2.api.AskApi
 import com.touringproject.v2.api.AskBody
 import com.touringproject.v2.api.AskResult
@@ -118,10 +117,12 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
         return
       }
       serviceRunning = true
+      // Read when the ask starts: pausing while it waits does not take it out of the ride.
+      val rideId = d.rideId()
       val recording = record(run) ?: return
-      val accepted = send(recording, api, run) ?: return
+      val sent = send(recording, rideId, api, run) ?: return
       maybeReturn(ReturnTiming.SENT, settings, run)
-      val result = waitForAnswer(accepted.askId, recording.name, api, run) ?: return
+      val result = waitForAnswer(sent, recording.name, api, run) ?: return
       speak(result, settings, run)
     } finally {
       // A newer ask (or a cancel) owns the screen state and the foreground service; leave both to it.
@@ -227,7 +228,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, currentFix, fixes)
   }
 
-  private suspend fun send(recording: Recording, api: AskApi, run: Run): AskAccepted? {
+  private suspend fun send(recording: Recording, rideId: String?, api: AskApi, run: Run): SentAsk? {
     val d = deps
     val here = recording.current
     val body = AskBody(
@@ -236,6 +237,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       location = here?.let { Point(it.latitude, it.longitude) },
       headingSample = here?.let { pickHeadingSample(recording.fixes, it) },
       conversationId = d.conversation.current(d.now()),
+      rideId = rideId,
     )
     val accepted = try {
       api.postAsk(body)
@@ -249,10 +251,10 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     if (!isCurrent(run)) return null
     dispatch(FlowEvent.Sent(accepted.askId, d.now()))
     d.cues.sent()
-    return accepted
+    return SentAsk(accepted.askId, accepted.conversationId, body.conversationId == null, d.now(), here, rideId)
   }
 
-  private suspend fun waitForAnswer(askId: String, recordingName: String, api: AskApi, run: Run): AskResult? {
+  private suspend fun waitForAnswer(sent: SentAsk, recordingName: String, api: AskApi, run: Run): AskResult? {
     val d = deps
     var sinceCue = 0L
     val sleep: suspend (Long) -> Unit = { ms ->
@@ -264,20 +266,25 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       }
     }
     val outcome = try {
-      pollUntilDone({ api.getAsk(askId) }, sleep, d.now) { !isCurrent(run) }
+      pollUntilDone({ api.getAsk(sent.askId) }, sleep, d.now) { !isCurrent(run) }
     } catch (e: Exception) {
       fail(reasonFor(e), run)
       return null
     }
     if (outcome is PollOutcome.Done) outcome.result.transcript?.let { d.recordings.transcribed(recordingName, it) }
+    // Kept even when the rider has cancelled meanwhile: the Backend has the ask either way.
+    when (outcome) {
+      is PollOutcome.Done -> d.asks.keep(askRecord(sent, outcome.result, d.now()))
+      PollOutcome.Timeout -> d.asks.keep(askRecord(sent, null, d.now()))
+      PollOutcome.Cancelled -> Unit
+    }
     if (outcome is PollOutcome.Cancelled || !isCurrent(run)) return null
     if (outcome is PollOutcome.Timeout) {
       fail(FailureReason.TIMEOUT, run)
       return null
     }
     val result = (outcome as PollOutcome.Done).result
-    val readable = result.status == "completed" || (result.error == "tts_failed" && !result.answer.isNullOrEmpty())
-    if (!readable) {
+    if (!readable(result)) {
       fail(failureFromServer(result.error), run)
       return null
     }

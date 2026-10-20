@@ -36,6 +36,7 @@ import com.touringproject.v2.recordings.TrialState
 import com.touringproject.v2.ride.DEFAULT_MAX_RECORDING_MS
 import com.touringproject.v2.ride.RideController
 import com.touringproject.v2.ride.RideDeps
+import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.service.AlarmDeadline
 import com.touringproject.v2.service.ContextServiceLauncher
 import com.touringproject.v2.service.RideNotices
@@ -45,7 +46,10 @@ import com.touringproject.v2.settings.DataStoreKeyValueStore
 import com.touringproject.v2.settings.KeystoreCipher
 import com.touringproject.v2.settings.SettingsRepository
 import com.touringproject.v2.store.RideDatabase
+import com.touringproject.v2.store.RoomAskLog
 import com.touringproject.v2.store.RoomRideStore
+import com.touringproject.v2.store.RoomSyncStore
+import com.touringproject.v2.sync.RideSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -53,12 +57,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 import java.io.File
 import java.util.UUID
 
 /** Builds the app's parts by hand (no DI library) and owns them for the life of the process. */
 class AppGraph(private val context: Context, val scope: CoroutineScope = MainScope()) {
   val apiBaseUrl: String = BuildConfig.API_BASE_URL
+  /** The one HTTP client of the app: every ApiClient shares its connections and threads (Android #12). */
+  val http = OkHttpClient()
   private val store = DataStoreKeyValueStore(context)
   val settings = SettingsRepository(store)
   val apiKeys = ApiKeyStore(store, KeystoreCipher())
@@ -73,7 +80,19 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val routeSource: RouteSource = FusedRouteSource(context)
   private val database = RideDatabase.open(context)
   val rideStore = RoomRideStore(database.rides())
+  val askLog = RoomAskLog(database.asks(), scope) { message, e -> Log.w("trv2.ask", message, e) }
   private val notices = RideNotices(context)
+
+  /** Sends rides and routes; a pass runs on each trigger (slice 2 spec §5.3). */
+  val sync = RideSync(
+    RoomSyncStore(database.rides()),
+    api = {
+      val key = apiKeys.current()
+      val user = settings.settings.value?.userName
+      if (apiBaseUrl.isEmpty() || key == null || user == null) null else ApiClient(apiBaseUrl, key, user, http)
+    },
+    log = { event, data -> Log.i("trv2.sync", "$event $data") },
+  )
 
   val rides = RideController(
     RideDeps(
@@ -85,6 +104,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       alarm = AlarmDeadline(context),
       recording = serviceCoordinator::setRecording,
       autoEnded = notices::autoEnded,
+      changed = sync::request,
+      pointAdded = sync::pointAdded,
       log = { event, data -> Log.i("trv2.ride", "$event $data") },
     ),
   )
@@ -105,11 +126,13 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       apiKey = { if (apiBaseUrl.isEmpty()) null else apiKeys.current() },
       micAllowed = micAllowed,
       mediaVolume = { runCatching { audioRoute.mediaVolume() }.getOrNull() },
-      api = { key, user -> ApiClient(apiBaseUrl, key, user) },
+      api = { key, user -> ApiClient(apiBaseUrl, key, user, http) },
       conversation = conversation,
       route = AudioRouteControl(audioRoute),
       recorder = PcmRecorder(),
       recordings = RecordingKeeper(recordingStore, scope) { message, e -> Log.w("trv2.recordings", message, e) },
+      asks = askLog,
+      rideId = { rides.active.value?.takeIf { it.status == RideStatus.RECORDING }?.id },
       location = PositionTracker(FusedPositionSource(context)),
       service = serviceCoordinator.keepAlive,
       nav = launcher,
@@ -174,11 +197,14 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     audioRoute.onVoiceRecognitionEnded = { router.recognitionEnded() }
     // Settles a ride left recording or paused before this process started (slice 2 spec §4.5).
     scope.launch { rides.load() }
+    scope.launch { sync.run() }
     scope.launch {
       settings.load()
       apiKeys.load()
       loaded = true
       openWhenReady()
+      // The start of the app is a trigger; before this the key and the user name are not known.
+      sync.request()
     }
   }
 
