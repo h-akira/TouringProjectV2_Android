@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.touringproject.v2.ask.AskRecord
@@ -19,7 +18,6 @@ import com.touringproject.v2.ride.RoutePoint
 import com.touringproject.v2.settings.Settings
 import com.touringproject.v2.store.RoomRecords
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
 import java.time.ZoneId
 
 // Reads what SC-06 and SC-07 show from the device's records and hands it to the screens. Nothing is drawn until the
@@ -67,7 +65,6 @@ fun RideDetailRoute(
   val ride = readRide(records, rideId) ?: return
   val asks = readAsks(records, rideId) ?: return
   val route = readRoute(records, rideId) ?: return
-  val scope = rememberCoroutineScope()
   val ui = remember(ride, asks, route) {
     ride.value?.let { rideDetailUi(it, asks, route, System.currentTimeMillis(), ZoneId.systemDefault()) }
   }
@@ -77,7 +74,7 @@ fun RideDetailRoute(
     onShowPins = { updateSettings(settings.copy(showAskPins = it)) },
     onBack = onBack,
     onAsk = onAsk,
-    onRename = { name -> scope.launch { rides.rename(rideId, name) } },
+    onRename = { name -> rides.rename(rideId, name) },
     onFullMap = onFullMap,
     modifier = modifier,
   )

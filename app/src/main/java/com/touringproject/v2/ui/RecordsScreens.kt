@@ -1,5 +1,6 @@
 package com.touringproject.v2.ui
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,11 +33,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,6 +48,7 @@ import androidx.compose.ui.unit.sp
 import com.touringproject.v2.map.MapData
 import com.touringproject.v2.ride.cutRideName
 import com.touringproject.v2.ride.rideName
+import kotlinx.coroutines.launch
 
 // SC-05, SC-06 and SC-07 (slice 2 spec §7.4–§7.6). The map comes in as a slot, so these screens are tested without
 // MapLibre, which needs a real device.
@@ -113,7 +117,8 @@ data class RideDetailUi(
 
 /**
  * SC-06. The map can fill the screen (onFullMap tells AppUi to hide the tabs), its pins can be hidden (showPins is
- * kept in the settings), and a tapped pin shows its card above the map's bottom edge.
+ * kept in the settings), and a tapped pin shows its card above the map's bottom edge. onRename says whether the new
+ * name was saved; one that was not is told (Android #46).
  */
 @Composable
 fun RideDetailScreen(
@@ -123,7 +128,7 @@ fun RideDetailScreen(
   onShowPins: (Boolean) -> Unit,
   onBack: () -> Unit,
   onAsk: (String) -> Unit,
-  onRename: (String) -> Unit,
+  onRename: suspend (String) -> Boolean,
   onFullMap: (Boolean) -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -138,6 +143,8 @@ fun RideDetailScreen(
   var full by rememberSaveable { mutableStateOf(false) }
   var menu by rememberSaveable { mutableStateOf(false) }
   var renaming by rememberSaveable { mutableStateOf<String?>(null) }
+  val scope = rememberCoroutineScope()
+  val context = LocalContext.current
   LaunchedEffect(full) { onFullMap(full) }
   DisposableEffect(Unit) { onDispose { onFullMap(false) } }
   BackHandler(enabled = full) { full = false }
@@ -193,7 +200,12 @@ fun RideDetailScreen(
       },
       confirmButton = {
         TextButton(
-          onClick = { rideName(name)?.let(onRename); renaming = null },
+          onClick = {
+            rideName(name)?.let { clean ->
+              scope.launch { if (!onRename(clean)) Toast.makeText(context, "名前を変えられませんでした", Toast.LENGTH_SHORT).show() }
+            }
+            renaming = null
+          },
           enabled = rideName(name) != null,
           modifier = Modifier.testTag("renameGo"),
         ) { Text("変える") }
