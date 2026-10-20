@@ -51,6 +51,7 @@ private class World(var now: Long = 1_000, var boot: Int? = 7) {
       }
       rides[ride.id] = ride
     }
+    override suspend fun ride(id: String): Ride? = rides[id]
     override suspend fun lastPoint(rideId: String) = points[rideId]?.lastOrNull()
     override suspend fun addPoint(rideId: String, point: RoutePoint, distanceMeters: Double, aliveAt: Long) {
       if (failWrites) throw IOException("disk full")
@@ -549,5 +550,59 @@ class RideControllerTest {
     w.now = 9_000
     w.controller.resume()
     assertEquals(9_000 + 6 * HOUR_MS, w.stored().deadline)
+  }
+
+  // Android #36: each change works from the segment's start, and only the last one counts.
+  @Test
+  fun a_limit_changed_again_and_again_keeps_only_the_last_one() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5 * HOUR_MS
+    w.max = 6 * HOUR_MS
+    w.controller.maxRecordingChanged()
+    assertEquals(RideStatus.RECORDING, w.stored().status)
+    w.max = 48 * HOUR_MS
+    w.controller.maxRecordingChanged()
+    assertEquals(1_000 + 48 * HOUR_MS, w.stored().deadline)
+    assertEquals("alarm:${1_000 + 48 * HOUR_MS}", w.events.last())
+  }
+
+  @Test
+  fun an_ended_ride_can_be_renamed_and_the_new_name_is_sent() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    w.controller.end("箱根")
+    val before = w.stored()
+    val changes = w.changes
+    w.now = 9_000
+    assertTrue(w.controller.rename("r1", " 御殿場 "))
+    assertEquals("御殿場", w.stored().name)
+    assertEquals(9_000L, w.stored().updatedAt)
+    assertEquals(before.segments, w.stored().segments)
+    assertEquals(changes + 1, w.changes)
+  }
+
+  @Test
+  fun renaming_the_active_ride_keeps_it_recording_under_the_new_name() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    assertTrue(w.controller.rename("r1", "御殿場"))
+    assertEquals("御殿場", w.controller.active.value?.name)
+    assertEquals(RideStatus.RECORDING, w.stored().status)
+  }
+
+  @Test
+  fun a_name_that_cannot_name_a_ride_or_a_ride_that_is_not_kept_is_not_renamed() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    assertFalse(w.controller.rename("r1", "  "))
+    assertFalse(w.controller.rename("r9", "御殿場"))
+    assertEquals("箱根", w.stored().name)
   }
 }

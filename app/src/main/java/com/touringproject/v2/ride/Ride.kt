@@ -90,6 +90,9 @@ fun Ride.end(at: Long, reason: EndReason, now: Long, name: String = this.name): 
   return copy(name = name, status = RideStatus.ENDED, segments = closeOpenSegment(at), endReason = reason, deadline = null, updatedAt = touched(now))
 }
 
+/** SC-04 and SC-06: a new name is a change the Backend takes, so updatedAt moves on. */
+fun Ride.rename(name: String, now: Long): Ride = copy(name = name, updatedAt = touched(now))
+
 /** The time spent recording; an open segment counts up to now (US-C-07.006). */
 fun Ride.recordedMs(now: Long): Long = segments.sumOf { (it.endedAt ?: maxOf(now, it.startedAt)) - it.startedAt }
 
