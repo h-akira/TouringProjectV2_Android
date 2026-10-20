@@ -81,7 +81,6 @@ fun AppUi(graph: AppGraph) {
   val storeFailed by graph.rides.storeFailed.collectAsStateWithLifecycle()
   val askStoreFailed by graph.askLog.failed.collectAsStateWithLifecycle()
   val questions by graph.activeAskCount.collectAsStateWithLifecycle()
-  val rideList by graph.records.list.collectAsStateWithLifecycle(null)
   // SC-06 tells while its map fills the screen; the tabs go with it (slice 2 spec §7.1).
   var mapFull by remember { mutableStateOf(false) }
   // Saveable: SC-17 and SC-04 stay open when the activity is recreated, e.g. on rotation (Android #20).
@@ -150,6 +149,8 @@ fun AppUi(graph: AppGraph) {
                 )
               }
               entry<RecordsKey> {
+                // Read only while the list is shown: Room runs the query again for every route point (Android #42).
+                val rideList by graph.records.list.collectAsStateWithLifecycle(null)
                 RideListScreen(
                   rideList?.let { rideSections(it, System.currentTimeMillis(), ZoneId.systemDefault()) },
                   onRide = { tabs.push(RideKey(it)) },
