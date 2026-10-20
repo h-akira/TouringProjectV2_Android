@@ -103,13 +103,15 @@ class RideController(private val deps: RideDeps) {
     storeFailing.value = true
   }
 
-  private suspend fun save(ride: Ride) {
+  /** False when the write failed: the ride stays unsaved and the next call writes it again first. */
+  private suspend fun save(ride: Ride): Boolean {
     unsaved = ride
     val saved = write("save") {
       deps.store.save(ride)
       unsaved = null
     }
     if (saved) deps.changed()
+    return saved
   }
 
   // The active ride's points and alive time have moved on since its save failed: save its current state, not the old one.
@@ -190,8 +192,9 @@ class RideController(private val deps: RideDeps) {
   }
 
   /**
-   * SC-06 (and SC-04 through end): gives any kept ride a new name. Returns false when the name is not usable or the
-   * ride is not kept. The active ride stays as it is but for its name.
+   * SC-06 (and SC-04 through end): gives any kept ride a new name. Returns false when the name is not usable, the
+   * ride is not kept, or the new name could not be written now (it is written again with the next call; Android #46).
+   * The active ride stays as it is but for its name.
    */
   suspend fun rename(rideId: String, name: String): Boolean = locked {
     val clean = rideName(name) ?: return@locked false
@@ -199,13 +202,12 @@ class RideController(private val deps: RideDeps) {
     val active = activeRide.value
     if (active?.id == rideId) {
       val renamed = active.rename(clean, now)
-      save(renamed)
+      val saved = save(renamed)
       activeRide.value = renamed
-      return@locked true
+      return@locked saved
     }
     val ride = read("ride") { deps.store.ride(rideId) } ?: return@locked false
     save(ride.rename(clean, now))
-    true
   }
 
   /**
