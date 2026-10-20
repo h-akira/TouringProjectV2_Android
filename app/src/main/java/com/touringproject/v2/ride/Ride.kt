@@ -12,9 +12,6 @@ enum class EndReason { MANUAL, AUTO, SHUTDOWN }
 
 const val HOUR_MS = 3_600_000L
 
-/** US-C-08.003. SC-16 (slice 2 plan 3) lets the rider choose another one. */
-const val DEFAULT_MAX_RECORDING_MS = 24 * HOUR_MS
-
 /** SC-17. */
 const val RIDE_NAME_MAX = 40
 

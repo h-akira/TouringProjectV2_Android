@@ -37,14 +37,14 @@ class SettingsTest {
   fun saved_settings_round_trip() = runTest {
     val store = FakeStore()
     val repo = SettingsRepository(store)
-    val s = Settings("rider01", returnEnabled = false, returnApp = maps, returnTiming = ReturnTiming.SPOKEN, recentApps = listOf(maps), answerVolumeDb = 3)
+    val s = Settings("rider01", returnEnabled = false, returnApp = maps, returnTiming = ReturnTiming.SPOKEN, recentApps = listOf(maps), answerVolumeDb = 3, maxRecordingHours = 6)
     repo.update(s)
     assertEquals(s, SettingsRepository(store).load())
   }
 
   @Test
   fun broken_values_fall_back_to_defaults() {
-    val raw = """{"userName":"NO","returnEnabled":"yes","returnApp":{"packageName":1},"returnTiming":"later","recentApps":[{"packageName":"a","label":"A"},3],"answerVolumeDb":12}"""
+    val raw = """{"userName":"NO","returnEnabled":"yes","returnApp":{"packageName":1},"returnTiming":"later","recentApps":[{"packageName":"a","label":"A"},3],"answerVolumeDb":12,"maxRecordingHours":72}"""
     val (s, needsSave) = decodeSettings(raw, Random(2))
     assertTrue(needsSave)
     assertTrue(s.returnEnabled)
@@ -52,6 +52,13 @@ class SettingsTest {
     assertEquals(ReturnTiming.SENT, s.returnTiming)
     assertEquals(listOf(LaunchableApp("a", "A")), s.recentApps)
     assertEquals(DEFAULT_VOLUME_DB, s.answerVolumeDb)
+    assertEquals(DEFAULT_MAX_RECORDING_HOURS, s.maxRecordingHours)
+  }
+
+  @Test
+  fun the_longest_recording_time_is_24_hours_until_chosen_from_6_12_24_48() {
+    assertEquals(24, decodeSettings("""{"userName":"rider01"}""").first.maxRecordingHours)
+    assertEquals(listOf(6, 12, 24, 48), MAX_RECORDING_HOURS_CHOICES)
   }
 
   @Test
