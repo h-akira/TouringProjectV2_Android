@@ -3,6 +3,7 @@ package com.touringproject.v2.store
 import android.content.Context
 import androidx.room.ColumnInfo
 import androidx.room.Dao
+import androidx.room.Embedded
 import androidx.room.Database
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -10,6 +11,7 @@ import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.Relation
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
@@ -109,7 +111,24 @@ interface AskDao {
   /** How many of the ride's asks are kept, answered or failed; follows every new one (SC-02, SC-04). */
   @Query("SELECT COUNT(*) FROM asks WHERE rideId = :rideId")
   fun countForRide(rideId: String): Flow<Int>
+
+  /** The ride's asks in the order they were asked (SC-06, SC-07). */
+  @Query("SELECT * FROM asks WHERE rideId = :rideId ORDER BY askedAt")
+  fun forRide(rideId: String): Flow<List<AskEntity>>
 }
+
+data class RideWithSegments(
+  @Embedded val ride: RideEntity,
+  @Relation(parentColumn = "id", entityColumn = "rideId") val segments: List<SegmentEntity>,
+)
+
+/** A ride as SC-05 lists it. pointsLeft is true while one of its points has not been taken (unsent or refused). */
+data class RideRow(
+  @Embedded val ride: RideEntity,
+  @Relation(parentColumn = "id", entityColumn = "rideId") val segments: List<SegmentEntity>,
+  val questions: Int,
+  val pointsLeft: Boolean,
+)
 
 @Dao
 interface RideDao {
@@ -121,6 +140,19 @@ interface RideDao {
 
   @Query("SELECT * FROM ride_segments WHERE rideId = :rideId ORDER BY seq")
   suspend fun segments(rideId: String): List<SegmentEntity>
+
+  // Records (SC-05, SC-06). Each EXISTS reads one index of route_points, so the list stays quick while a ride records.
+  @Transaction
+  @Query(
+    "SELECT *, (SELECT COUNT(*) FROM asks WHERE asks.rideId = rides.id) AS questions, " +
+      "(EXISTS (SELECT 1 FROM route_points WHERE chunk IS NULL AND route_points.rideId = rides.id) OR " +
+      "EXISTS (SELECT 1 FROM route_points WHERE refused = 1 AND route_points.rideId = rides.id)) AS pointsLeft FROM rides",
+  )
+  fun rows(): Flow<List<RideRow>>
+
+  @Transaction
+  @Query("SELECT * FROM rides WHERE id = :id")
+  fun watch(id: String): Flow<RideWithSegments?>
 
   @Upsert
   suspend fun upsertRide(ride: RideEntity)

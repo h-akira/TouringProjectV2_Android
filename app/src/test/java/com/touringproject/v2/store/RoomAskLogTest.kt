@@ -57,6 +57,7 @@ class RoomAskLogTest {
       override suspend fun upsert(ask: AskEntity) = if (full) throw IOException("disk full") else Unit
       override suspend fun ask(askId: String): AskEntity? = null
       override fun countForRide(rideId: String) = kotlinx.coroutines.flow.flowOf(0)
+      override fun forRide(rideId: String) = kotlinx.coroutines.flow.flowOf(emptyList<AskEntity>())
     }
     val failing = RoomAskLog(dao, kotlinx.coroutines.MainScope()) { message, _ -> errors += message }
     failing.save(record)
