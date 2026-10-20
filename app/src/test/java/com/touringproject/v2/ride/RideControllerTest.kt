@@ -605,4 +605,27 @@ class RideControllerTest {
     assertFalse(w.controller.rename("r9", "御殿場"))
     assertEquals("箱根", w.stored().name)
   }
+
+  // Final review (Android #46): a new name the device could not write is reported, so SC-06 can say so.
+  @Test
+  fun a_rename_whose_save_fails_reports_it() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    w.controller.end("箱根")
+    w.failSaves = 1
+    assertFalse(w.controller.rename("r1", "御殿場"))
+    assertEquals("箱根", w.stored().name)
+  }
+
+  @Test
+  fun a_rename_of_the_active_ride_whose_save_fails_reports_it_and_keeps_the_name_to_save_later() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.failSaves = 1
+    assertFalse(w.controller.rename("r1", "御殿場"))
+    assertEquals("御殿場", w.controller.active.value?.name)
+  }
 }

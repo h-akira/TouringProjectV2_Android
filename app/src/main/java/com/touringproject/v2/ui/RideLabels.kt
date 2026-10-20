@@ -34,6 +34,16 @@ fun periodLabel(start: Long, end: Long, zone: ZoneId): String {
 fun pausesLabel(pauses: Pauses): String? =
   if (pauses.count == 0) null else "一時停止 ${pauses.count}回（${pauses.totalMs / 60_000}分）は走行時間に含めません"
 
+/**
+ * What Home says under the intercom line when no ask can start (slice 2 spec §4.7, §7.2): null while a ride records,
+ * so the line says the intercom is ready.
+ */
+fun askHint(ride: Ride?): String? = when (ride?.status) {
+  RideStatus.RECORDING -> null
+  RideStatus.PAUSED -> "再開すると、インカムのボタンで話せます"
+  else -> "走行を開始すると、インカムのボタンで話せます"
+}
+
 /** questions is how many of the ride's asks the device has kept (answered or failed; slice 2 spec §7.2). */
 data class RideCardUi(val name: String, val paused: Boolean, val elapsed: String, val distance: String, val questions: String)
 

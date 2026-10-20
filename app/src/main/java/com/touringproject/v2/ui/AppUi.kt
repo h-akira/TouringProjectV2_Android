@@ -81,7 +81,6 @@ fun AppUi(graph: AppGraph) {
   val storeFailed by graph.rides.storeFailed.collectAsStateWithLifecycle()
   val askStoreFailed by graph.askLog.failed.collectAsStateWithLifecycle()
   val questions by graph.activeAskCount.collectAsStateWithLifecycle()
-  val rideList by graph.records.list.collectAsStateWithLifecycle(null)
   // SC-06 tells while its map fills the screen; the tabs go with it (slice 2 spec §7.1).
   var mapFull by remember { mutableStateOf(false) }
   // Saveable: SC-17 and SC-04 stay open when the activity is recreated, e.g. on rotation (Android #20).
@@ -123,6 +122,7 @@ fun AppUi(graph: AppGraph) {
                     storeFailed = storeFailed || askStoreFailed,
                   ),
                   conversation = conversationLabel(expiresAt, System.currentTimeMillis()),
+                  askHint = askHint(ride),
                 )
                 HomeScreen(
                   ui = ui,
@@ -149,9 +149,11 @@ fun AppUi(graph: AppGraph) {
                 )
               }
               entry<RecordsKey> {
+                // Read only while the list is shown: Room runs the query again for every route point (Android #42).
+                val rideList by graph.records.list.collectAsStateWithLifecycle(null)
                 RideListScreen(
                   rideList?.let { rideSections(it, System.currentTimeMillis(), ZoneId.systemDefault()) },
-                  onRide = { tabs.current.add(RideKey(it)) },
+                  onRide = { tabs.push(RideKey(it)) },
                   modifier = Modifier.safeDrawingPadding(),
                 )
               }
@@ -161,7 +163,7 @@ fun AppUi(graph: AppGraph) {
                   updateSettings = { next -> scope.launch { graph.settings.update(next) } },
                   rideId = key.rideId,
                   onBack = { tabs.back() },
-                  onAsk = { tabs.current.add(AskKey(key.rideId, it)) },
+                  onAsk = { tabs.push(AskKey(key.rideId, it)) },
                   onFullMap = { mapFull = it },
                   modifier = Modifier.safeDrawingPadding(),
                 )
@@ -178,12 +180,12 @@ fun AppUi(graph: AppGraph) {
               entry<SettingsKey> {
                 SettingsScreen(
                   current, apiKey,
-                  onConnection = { tabs.current.add(ConnectionKey) },
-                  onUser = { tabs.current.add(UserKey) },
-                  onRideRecording = { tabs.current.add(RideRecordingKey) },
-                  onReturnApp = { tabs.current.add(ReturnAppKey) },
-                  onVolume = { tabs.current.add(VolumeKey) },
-                  onRecordings = { tabs.current.add(RecordingsKey) },
+                  onConnection = { tabs.push(ConnectionKey) },
+                  onUser = { tabs.push(UserKey) },
+                  onRideRecording = { tabs.push(RideRecordingKey) },
+                  onReturnApp = { tabs.push(ReturnAppKey) },
+                  onVolume = { tabs.push(VolumeKey) },
+                  onRecordings = { tabs.push(RecordingsKey) },
                   version = BuildConfig.VERSION_NAME,
                   modifier = Modifier.safeDrawingPadding(),
                 )

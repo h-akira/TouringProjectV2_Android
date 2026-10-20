@@ -11,6 +11,8 @@ fun spokenMessage(reason: FailureReason): String = when (reason) {
   FailureReason.INVALID_KEY, FailureReason.NO_KEY -> "接続キーを確かめてください。"
   FailureReason.MIC -> "録音できませんでした。"
   FailureReason.SERVICE -> "準備できなかったため、質問できませんでした。もう一度お試しください。"
+  FailureReason.NOT_RECORDING -> "走行を記録していないので、質問できません。"
+  FailureReason.PAUSED -> "一時停止中は質問できません。再開すると質問できます。"
 }
 
 private val SERVER_REASONS = mapOf(

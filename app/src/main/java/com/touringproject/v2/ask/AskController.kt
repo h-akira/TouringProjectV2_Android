@@ -96,6 +96,19 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     runsStarted += 1
     dispatch(FlowEvent.Start(source, d.now(), d.mediaVolume()))
     try {
+      // Slice 2 spec §4.7: only a recording ride takes asks. Read once, so pausing meanwhile neither stops the ask nor
+      // takes it out of the ride.
+      val rideId = when (val ride = d.ride()) {
+        is RideNow.Recording -> ride.rideId
+        RideNow.Paused -> {
+          fail(FailureReason.PAUSED, run)
+          return
+        }
+        RideNow.NotRecording -> {
+          fail(FailureReason.NOT_RECORDING, run)
+          return
+        }
+      }
       val apiKey = d.apiKey()
       if (apiKey == null) {
         fail(FailureReason.NO_KEY, run)
@@ -117,8 +130,6 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
         return
       }
       serviceRunning = true
-      // Read when the ask starts: pausing while it waits does not take it out of the ride.
-      val rideId = d.rideId()
       val recording = record(run) ?: return
       val sent = send(recording, rideId, api, run) ?: return
       maybeReturn(ReturnTiming.SENT, settings, run)

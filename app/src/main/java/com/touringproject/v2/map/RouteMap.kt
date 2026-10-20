@@ -32,6 +32,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -132,17 +134,22 @@ private fun addLayers(style: Style, faint: Boolean, dark: Boolean) {
   )
 }
 
-private fun draw(style: Style, data: MapData, selected: String?, density: Float) {
+/** The GeoJSON of each source, made off the main thread (Android #42). */
+private class MapJson(val routes: String, val pauses: String, val ends: String, val pins: String)
+
+private fun mapJson(data: MapData, selected: String?) = MapJson(routesJson(data), pausesJson(data), endsJson(data), pinsJson(data, selected))
+
+private fun draw(style: Style, data: MapData, json: MapJson, density: Float) {
   data.pins.forEach { pin ->
     listOf(false, true).forEach { sel ->
       val name = pinIcon(pin.number, sel)
       if (style.getImage(name) == null) style.addImage(name, pinBitmap(pin.number, sel, density))
     }
   }
-  style.getSourceAs<GeoJsonSource>("routes")?.setGeoJson(routesJson(data))
-  style.getSourceAs<GeoJsonSource>("pauses")?.setGeoJson(pausesJson(data))
-  style.getSourceAs<GeoJsonSource>("ends")?.setGeoJson(endsJson(data))
-  style.getSourceAs<GeoJsonSource>(PINS_LAYER)?.setGeoJson(pinsJson(data, selected))
+  style.getSourceAs<GeoJsonSource>("routes")?.setGeoJson(json.routes)
+  style.getSourceAs<GeoJsonSource>("pauses")?.setGeoJson(json.pauses)
+  style.getSourceAs<GeoJsonSource>("ends")?.setGeoJson(json.ends)
+  style.getSourceAs<GeoJsonSource>(PINS_LAYER)?.setGeoJson(json.pins)
 }
 
 /** Takes in the whole route and every pin; a single place is shown close up (slice 2 spec §7.5). */
@@ -232,11 +239,15 @@ fun RouteMap(
   }
   LaunchedEffect(loaded, data, selected) {
     val (map, style) = loaded ?: return@LaunchedEffect
-    draw(style, data, selected, density)
-    // Until the first places arrive the map shows Japan, and the camera fits again once they do.
-    if (!fitted) {
-      fit(map, data.extent, (48 * density).toInt())
-      fitted = data.extent.isNotEmpty()
+    val json = withContext(Dispatchers.Default) { mapJson(data, selected) }
+    // MapLibre is touched only on the UI thread; where the effect resumes is not left to chance.
+    withContext(Dispatchers.Main) {
+      draw(style, data, json, density)
+      // Until the first places arrive the map shows Japan, and the camera fits again once they do.
+      if (!fitted) {
+        fit(map, data.extent, (48 * density).toInt())
+        fitted = data.extent.isNotEmpty()
+      }
     }
   }
   Box(modifier) {

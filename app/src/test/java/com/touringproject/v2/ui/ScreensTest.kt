@@ -7,6 +7,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -42,6 +44,23 @@ class HomeScreenTest {
     rule.setContent { HomeScreen(HomeUi("rider01", null, "新しい会話です"), { taps++ }, {}, {}, {}) }
     rule.onNodeWithTag("tapToTalk").performClick()
     assertEquals(1, taps)
+  }
+
+  // Slice 2 spec §4.7: without a recording ride the button stays where it is but cannot be pressed, and says why.
+  @Test
+  fun without_a_recording_ride_tap_to_talk_cannot_be_pressed_and_the_hint_says_why() {
+    var taps = 0
+    rule.setContent { HomeScreen(HomeUi("rider01", null, "新しい会話です", askHint = "再開すると、インカムのボタンで話せます"), { taps++ }, {}, {}, {}) }
+    rule.onNodeWithTag("tapToTalk").assertIsNotEnabled().performClick()
+    assertEquals(0, taps)
+    rule.onNodeWithTag("askHint").assertTextEquals("再開すると、インカムのボタンで話せます")
+  }
+
+  @Test
+  fun while_a_ride_records_the_hint_says_the_intercom_is_ready() {
+    rule.setContent { HomeScreen(HomeUi("rider01", null, "新しい会話です"), {}, {}, {}, {}) }
+    rule.onNodeWithTag("tapToTalk").assertIsEnabled()
+    rule.onNodeWithTag("askHint").assertTextEquals("インカムのボタンで話せます")
   }
 
   @Test

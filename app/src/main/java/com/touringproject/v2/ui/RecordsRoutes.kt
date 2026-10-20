@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.touringproject.v2.ask.AskRecord
@@ -18,8 +17,9 @@ import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.ride.RoutePoint
 import com.touringproject.v2.settings.Settings
 import com.touringproject.v2.store.RoomRecords
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.ZoneId
 
 // Reads what SC-06 and SC-07 show from the device's records and hands it to the screens. Nothing is drawn until the
@@ -67,17 +67,17 @@ fun RideDetailRoute(
   val ride = readRide(records, rideId) ?: return
   val asks = readAsks(records, rideId) ?: return
   val route = readRoute(records, rideId) ?: return
-  val scope = rememberCoroutineScope()
-  val ui = remember(ride, asks, route) {
-    ride.value?.let { rideDetailUi(it, asks, route, System.currentTimeMillis(), ZoneId.systemDefault()) }
-  }
+  // A long ride has tens of thousands of points: the map's data is made off the main thread (Android #42).
+  val ui = produceState<Read<RideDetailUi?>?>(null, ride, asks, route) {
+    value = Read(withContext(Dispatchers.Default) { ride.value?.let { rideDetailUi(it, asks, route, System.currentTimeMillis(), ZoneId.systemDefault()) } })
+  }.value ?: return
   RideDetailScreen(
-    ui, routeMap,
+    ui.value, routeMap,
     showPins = settings.showAskPins,
     onShowPins = { updateSettings(settings.copy(showAskPins = it)) },
     onBack = onBack,
     onAsk = onAsk,
-    onRename = { name -> scope.launch { rides.rename(rideId, name) } },
+    onRename = { name -> rides.rename(rideId, name) },
     onFullMap = onFullMap,
     modifier = modifier,
   )

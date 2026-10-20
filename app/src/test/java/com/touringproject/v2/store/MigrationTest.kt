@@ -30,7 +30,7 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 2, true, MIGRATION_1_2).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
       .allowMainThreadQueries()
       .build()
     runBlocking {
@@ -56,12 +56,34 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 3, true, MIGRATION_2_3).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
       .allowMainThreadQueries()
       .build()
     runBlocking {
       assertEquals(listOf(true, false), db.rides().points("r1").map { it.refused })
       assertEquals(listOf(false), db.rides().points("r2").map { it.refused })
+    }
+    db.close()
+  }
+
+  // Slice 2 spec §4.7 (adr/0008): asks are taken only while a ride records, and the ones kept without a ride go.
+  @Test
+  fun version_3_moves_to_4_dropping_the_asks_kept_without_a_ride() {
+    helper.createDatabase(DB, 3).apply {
+      execSQL("INSERT INTO rides VALUES ('r1', '箱根', 'ended', 'manual', NULL, 5000, 120.0, 6000, 6000, NULL, 0)")
+      val columns = "(askId, askedAt, answeredAt, transcript, answer, latitude, longitude, address, headingDegrees, input, conversationId, newConversation, status, failure, rideId)"
+      execSQL("INSERT INTO asks $columns VALUES ('a1', 1000, 2000, 'Q', 'A', 35.0, 139.0, '箱根町', 90.0, 'voice', 'c1', 1, 'answered', NULL, 'r1')")
+      execSQL("INSERT INTO asks $columns VALUES ('a2', 3000, 4000, 'Q', 'A', 35.0, 139.0, '箱根町', 90.0, 'voice', 'c1', 0, 'answered', NULL, NULL)")
+      close()
+    }
+    helper.runMigrationsAndValidate(DB, 4, true, MIGRATION_3_4).close()
+    val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+      .allowMainThreadQueries()
+      .build()
+    runBlocking {
+      assertEquals("r1", db.asks().ask("a1")?.rideId)
+      assertNull(db.asks().ask("a2"))
     }
     db.close()
   }

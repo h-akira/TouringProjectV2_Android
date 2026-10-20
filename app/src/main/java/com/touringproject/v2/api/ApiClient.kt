@@ -32,7 +32,7 @@ data class AskBody(
   val headingSample: HeadingSample? = null,
   val conversationId: String? = null,
   val volumeDb: Int? = null,
-  /** Only for an ask started while a ride is recording (slice 2 spec §4.6). */
+  /** The recording ride the ask belongs to; every ask has one since asks need a recording ride (slice 2 spec §4.7). */
   val rideId: String? = null,
 )
 

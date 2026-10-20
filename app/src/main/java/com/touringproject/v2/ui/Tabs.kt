@@ -42,6 +42,12 @@ class TabStacks<K>(
     return true
   }
 
+  /** Opens key in the tab shown, unless it is already on top: a quick second tap adds nothing (Android #43). */
+  fun push(key: K) {
+    val stack = current
+    if (stack.lastOrNull() != key) stack += key
+  }
+
   /** Shows key above the first screen of tab, e.g. the user name from Home's user chip. */
   fun open(tab: Tab, key: K) {
     val stack = stacks.getValue(tab)

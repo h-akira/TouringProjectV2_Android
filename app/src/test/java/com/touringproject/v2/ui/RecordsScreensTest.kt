@@ -33,6 +33,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.shadows.ShadowToast
 
 @RunWith(AndroidJUnit4::class)
 class RecordsScreensTest {
@@ -84,7 +85,7 @@ class RecordsScreensTest {
   @Test
   fun the_detail_shows_the_summary_and_the_timeline_and_a_row_opens_its_ask() {
     val asked = mutableListOf<String>()
-    rule.setContent { RideDetailScreen(detail(), fakeMap, true, {}, {}, { asked += it }, {}, {}) }
+    rule.setContent { RideDetailScreen(detail(), fakeMap, true, {}, {}, { asked += it }, { true }, {}) }
     rule.onNodeWithTag("summaryQuestions").onChildAt(0).assertTextEquals("2")
     // Robolectric's screen is small: the timeline under the map is scrolled to each row.
     val timeline = rule.onNodeWithTag("timeline")
@@ -98,7 +99,7 @@ class RecordsScreensTest {
   @Test
   fun a_tapped_pin_shows_its_card_which_opens_the_ask() {
     val asked = mutableListOf<String>()
-    rule.setContent { RideDetailScreen(detail(), fakeMap, true, {}, {}, { asked += it }, {}, {}) }
+    rule.setContent { RideDetailScreen(detail(), fakeMap, true, {}, {}, { asked += it }, { true }, {}) }
     rule.onNodeWithTag("pin-a1").performClick()
     rule.onNodeWithTag("mapState").assertTextEquals("pins 2 selected a1")
     rule.onNodeWithText("金時山です。").assertExists()
@@ -109,7 +110,7 @@ class RecordsScreensTest {
   @Test
   fun the_pins_can_be_hidden_and_the_choice_goes_to_the_settings() {
     var shown by mutableStateOf(true)
-    rule.setContent { RideDetailScreen(detail(), fakeMap, shown, { shown = it }, {}, {}, {}, {}) }
+    rule.setContent { RideDetailScreen(detail(), fakeMap, shown, { shown = it }, {}, {}, { true }, {}) }
     rule.onNodeWithTag("pin-a1").performClick()
     rule.onNodeWithTag("pinToggle").performClick()
     rule.onNodeWithTag("mapState").assertTextEquals("pins 0 selected null")
@@ -119,7 +120,7 @@ class RecordsScreensTest {
   @Test
   fun the_map_fills_the_screen_until_back_and_tells_so() {
     val full = mutableListOf<Boolean>()
-    rule.setContent { RideDetailScreen(detail(), fakeMap, true, {}, {}, {}, {}, { full += it }) }
+    rule.setContent { RideDetailScreen(detail(), fakeMap, true, {}, {}, {}, { true }, { full += it }) }
     rule.onNodeWithTag("fullMap").performClick()
     rule.waitForIdle()
     rule.onNodeWithTag("timeline").assertDoesNotExist()
@@ -133,7 +134,7 @@ class RecordsScreensTest {
   @Test
   fun the_menu_renames_the_ride_but_not_to_an_empty_name() {
     val names = mutableListOf<String>()
-    rule.setContent { RideDetailScreen(detail(), fakeMap, true, {}, {}, {}, { names += it }, {}) }
+    rule.setContent { RideDetailScreen(detail(), fakeMap, true, {}, {}, {}, { names += it; true }, {}) }
     rule.onNodeWithTag("rideMenu").performClick()
     rule.onNodeWithTag("renameRide").performClick()
     rule.onNodeWithTag("renameInput").performTextReplacement("  ")
@@ -143,9 +144,21 @@ class RecordsScreensTest {
     assertEquals(listOf("御殿場"), names)
   }
 
+  // Android #46: a name the device could not save is told, not silently lost.
+  @Test
+  fun a_rename_that_could_not_be_saved_is_told() {
+    rule.setContent { RideDetailScreen(detail(), fakeMap, true, {}, {}, {}, { false }, {}) }
+    rule.onNodeWithTag("rideMenu").performClick()
+    rule.onNodeWithTag("renameRide").performClick()
+    rule.onNodeWithTag("renameInput").performTextReplacement("御殿場")
+    rule.onNodeWithTag("renameGo").performClick()
+    rule.waitForIdle()
+    assertEquals("名前を変えられませんでした", ShadowToast.getTextOfLatestToast())
+  }
+
   @Test
   fun a_ride_ended_by_its_longest_time_says_so() {
-    rule.setContent { RideDetailScreen(detail(autoEnded = true), fakeMap, true, {}, {}, {}, {}, {}) }
+    rule.setContent { RideDetailScreen(detail(autoEnded = true), fakeMap, true, {}, {}, {}, { true }, {}) }
     rule.onNodeWithTag("autoEnded").assertExists()
   }
 
@@ -184,7 +197,7 @@ class RecordsScreensTest {
       }
       fakeMap(data, selected, onPin, modifier)
     }
-    rule.setContent { RideDetailScreen(detail(), countingMap, true, {}, {}, {}, {}, {}) }
+    rule.setContent { RideDetailScreen(detail(), countingMap, true, {}, {}, {}, { true }, {}) }
     rule.onNodeWithTag("fullMap").performClick()
     rule.waitForIdle()
     back()
@@ -203,7 +216,7 @@ class RecordsScreensTest {
         onBack = { stack.removeAt(stack.lastIndex) },
         entryProvider = { key ->
           NavEntry(key) {
-            if (key == "list") Text("list") else RideDetailScreen(detail(), fakeMap, true, {}, {}, {}, {}, {})
+            if (key == "list") Text("list") else RideDetailScreen(detail(), fakeMap, true, {}, {}, {}, { true }, {})
           }
         },
       )

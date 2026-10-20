@@ -125,8 +125,10 @@ fun askPins(asks: List<AskRecord>): List<MapPin> {
   }
 }
 
-/** The mock's short place: the address without its prefecture. */
-fun shortPlace(address: String?): String = address?.replace(Regex("^(東京都|.+?[県府道])"), "")?.ifBlank { null } ?: "場所不明"
+private val PREFECTURE = Regex("^(東京都|北海道|(京都|大阪)府|.{2,3}県)")
+
+/** The mock's short place: the address without its prefecture; an address that starts otherwise is kept whole (Android #45). */
+fun shortPlace(address: String?): String = address?.replace(PREFECTURE, "")?.ifBlank { null } ?: "場所不明"
 
 /** What a list shows of an ask: what was heard, or why nothing was. */
 fun askText(ask: AskRecord): String = ask.transcript?.takeIf { it.isNotBlank() } ?: when {
@@ -167,7 +169,9 @@ fun rideTimeline(ride: Ride, asks: List<AskRecord>, zone: ZoneId): List<Timeline
   val open = if (ride.status == RideStatus.PAUSED) listOfNotNull(ride.segments.last().endedAt?.let { Event.PauseAt(it, null) }) else emptyList()
   // An ask comes before a pause that starts at the same moment.
   val events = (asks.map { Event.AskAt(it.askedAt, it) } + pauses + open).sortedWith(compareBy<Event> { it.t }.thenBy { if (it is Event.AskAt) 0 else 1 })
-  val days = (events.map { it.t } + ride.startedAt()).map { at(it, zone).toLocalDate() }.toSet()
+  // Every day the ride recorded on counts, not only the days with an ask or a pause (Android #41).
+  val recorded = ride.segments.flatMap { listOfNotNull(it.startedAt, it.endedAt) }
+  val days = (events.map { it.t } + recorded).map { at(it, zone).toLocalDate() }.toSet()
   val rows = mutableListOf<TimelineRow>()
   var day: LocalDate? = null
   var asked = false

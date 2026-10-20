@@ -48,6 +48,17 @@ class TabsTest {
     assertEquals(Tab.HOME, selected)
   }
 
+  // Android #43: a second tap before the screen has moved does not stack the same screen twice.
+  @Test
+  fun pushing_the_screen_already_on_top_adds_nothing() {
+    tabs.press(Tab.SETTINGS)
+    tabs.push("volume")
+    tabs.push("volume")
+    assertEquals(listOf("settings", "volume"), tabs.current)
+    tabs.push("user")
+    assertEquals(listOf("settings", "volume", "user"), tabs.current)
+  }
+
   @Test
   fun opening_a_screen_of_another_tab_shows_it_above_that_tabs_first_screen() {
     tabs.press(Tab.SETTINGS)

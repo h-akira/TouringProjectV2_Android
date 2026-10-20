@@ -12,6 +12,9 @@ import com.touringproject.v2.api.Point
 import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.audio.MediaVolume
 import com.touringproject.v2.location.Fix
+import com.touringproject.v2.ride.HOUR_MS
+import com.touringproject.v2.ride.newRide
+import com.touringproject.v2.ride.pause
 import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.ReturnTiming
 import com.touringproject.v2.settings.Settings
@@ -57,7 +60,8 @@ private class Harness(
   val serviceError: Exception? = null,
   val device: InputDevice? = InputDevice(InputDevice.Type.BLUETOOTH, "M1-S PRO"),
   val pcm: ByteArray = byteArrayOf(1, 2, 3),
-  var rideId: String? = null,
+  /** Asks start only while a ride records (slice 2 spec §4.7); most tests ride. */
+  var ride: RideNow = RideNow.Recording("r1"),
 ) {
   val log = mutableListOf<String>()
   val states = mutableListOf<FlowState>()
@@ -112,7 +116,7 @@ private class Harness(
       override fun transcribed(name: String, transcript: String) { transcripts += name to transcript }
     },
     asks = { kept += it },
-    rideId = { rideId },
+    ride = { ride },
     location = object : Positions {
       override fun begin() { log += "loc:begin" }
       override fun end() = HERE to listOf(BEHIND, HERE)
@@ -178,6 +182,7 @@ class AskControllerTest {
         location = Point(35.6812, 139.7671),
         headingSample = HeadingSample(35.6806, 139.7671, "1970-01-01T00:01:30Z"),
         conversationId = null,
+        rideId = "r1",
       ),
       h.bodies[0],
     )
@@ -542,7 +547,7 @@ class AskControllerTest {
     assertEquals(HERE.latitude, kept.latitude!!, 0.0)
     assertEquals("c1", kept.conversationId)
     assertTrue(kept.newConversation)
-    assertEquals(null, kept.rideId)
+    assertEquals("r1", kept.rideId)
   }
 
   @Test
@@ -589,20 +594,39 @@ class AskControllerTest {
 
   @Test
   fun an_ask_started_while_a_ride_records_goes_with_the_ride() = runTest {
-    val h = Harness(this, stopAfterMs = 1_000, rideId = "r1")
+    val h = Harness(this, stopAfterMs = 1_000, ride = RideNow.Recording("r7"))
     h.controller.run(Source.HANDSFREE)
-    assertEquals("r1", h.bodies.single().rideId)
-    assertEquals("r1", h.kept.single().rideId)
+    assertEquals("r7", h.bodies.single().rideId)
+    assertEquals("r7", h.kept.single().rideId)
   }
 
   @Test
-  fun the_ride_is_read_when_the_ask_starts_so_a_pause_meanwhile_does_not_drop_it() = runTest {
-    val h = Harness(this, stopAfterMs = 1_000, rideId = "r1")
+  fun the_ride_is_read_when_the_ask_starts_so_a_pause_meanwhile_neither_stops_nor_drops_it() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000)
     launch { h.controller.run(Source.HANDSFREE) }
     h.until { h.phase == Phase.RECORDING }
-    h.rideId = null
+    h.ride = RideNow.Paused
     advanceUntilIdle()
     assertEquals("r1", h.bodies.single().rideId)
+    assertEquals(AskOutcome.ANSWERED, h.kept.single().outcome)
+  }
+
+  // Slice 2 spec §4.7: no ride recording, no ask. The rider hears why, and the nav app comes back as after any failure.
+  @Test
+  fun without_a_recording_ride_the_button_starts_nothing_and_says_so() = runTest {
+    val h = Harness(this, ride = RideNow.NotRecording)
+    h.controller.run(Source.HANDSFREE)
+    assertEquals(listOf("vol:read", "cue:failure", "say:走行を記録していないので、質問できません。", "return:maps"), h.log)
+    assertTrue(h.states.any { it.phase == Phase.FAILED && it.failure == FailureReason.NOT_RECORDING })
+    assertTrue(h.kept.isEmpty())
+  }
+
+  @Test
+  fun while_the_ride_is_paused_the_button_starts_nothing_and_says_how_to_ask() = runTest {
+    val h = Harness(this, ride = RideNow.Paused)
+    h.controller.run(Source.HANDSFREE)
+    assertEquals(listOf("vol:read", "cue:failure", "say:一時停止中は質問できません。再開すると質問できます。", "return:maps"), h.log)
+    assertTrue(h.states.any { it.phase == Phase.FAILED && it.failure == FailureReason.PAUSED })
   }
 }
 
@@ -625,5 +649,16 @@ class AskRecordTest {
     val failed = askRecord(sent, AskResult("a1", "failed", "Q", null), 9_000)
     assertEquals(AskOutcome.FAILED, failed.outcome)
     assertEquals("agent_failed", failed.failure)
+  }
+}
+
+class RideNowTest {
+  private val ride = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS)
+
+  @Test
+  fun only_a_recording_ride_takes_asks() {
+    assertEquals(RideNow.Recording("r1"), rideNow(ride))
+    assertEquals(RideNow.Paused, rideNow(ride.pause(5_000)))
+    assertEquals(RideNow.NotRecording, rideNow(null))
   }
 }
