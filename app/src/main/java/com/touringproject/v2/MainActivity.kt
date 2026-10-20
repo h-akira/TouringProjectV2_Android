@@ -20,7 +20,7 @@ class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     handleVoiceCommand(intent, restored = savedInstanceState != null)
-    if (savedInstanceState == null) {
+    if (graph.takePermissionPrompt()) {
       permissions.launch(
         arrayOf(
           Manifest.permission.RECORD_AUDIO,

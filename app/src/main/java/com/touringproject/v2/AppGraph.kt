@@ -123,6 +123,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val isReady: StateFlow<Boolean> = ready.asStateFlow()
   private var loaded = false
   private var permissionsAsked = false
+  private var permissionPromptTaken = false
 
   val controller: AskController = AskController(
     AskDeps(
@@ -212,6 +213,16 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       // The start of the app is a trigger; before this the key and the user name are not known.
       sync.request()
     }
+  }
+
+  /**
+   * True once per process: the first activity of this process asks for permissions, whether it starts fresh or is
+   * restored after process death (Android #38). An activity recreated in the same process does not ask again.
+   */
+  fun takePermissionPrompt(): Boolean {
+    if (permissionPromptTaken) return false
+    permissionPromptTaken = true
+    return true
   }
 
   fun permissionsAnswered() {
