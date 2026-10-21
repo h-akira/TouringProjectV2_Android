@@ -33,6 +33,8 @@ data class Ride(
   val lastAliveAt: Long?,
   val distanceMeters: Double,
   val updatedAt: Long,
+  /** The ride's memo (US-D-04.002); null when there is none. */
+  val memo: String? = null,
 )
 
 /** One stored route point. segment is the seq of the segment it was recorded in. */

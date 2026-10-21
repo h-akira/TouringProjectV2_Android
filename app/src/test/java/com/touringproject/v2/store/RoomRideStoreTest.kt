@@ -73,4 +73,13 @@ class RoomRideStoreTest {
     assertTrue(saved.routeRejected)
     assertEquals(RideStatus.PAUSED, store.active()?.status)
   }
+
+  @Test
+  fun a_ride_keeps_its_memo_and_drops_it_when_saved_without_one() = runBlocking {
+    val ended = ride.end(5_000, EndReason.MANUAL, 5_000)
+    store.save(ended.copy(memo = "また来たい"))
+    assertEquals("また来たい", store.ride("r1")?.memo)
+    store.save(ended.copy(memo = null, updatedAt = 6_000))
+    assertNull(store.ride("r1")?.memo)
+  }
 }

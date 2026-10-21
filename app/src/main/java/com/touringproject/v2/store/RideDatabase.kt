@@ -45,6 +45,8 @@ data class RideEntity(
    * segments and points refer to.
    */
   @ColumnInfo(defaultValue = "0") val routeRejected: Boolean = false,
+  /** The ride's memo (US-D-04.002); null when there is none. Part of the meta that is sent (slice 3 spec §4.1). */
+  val memo: String? = null,
 )
 
 @Entity(
@@ -102,7 +104,46 @@ data class AskEntity(
    * missing for a while after a failed save.
    */
   val rideId: String?,
+  /** The conversation's memo (US-D-04.001); null when there is none. */
+  val memo: String? = null,
+  /** When the memo last changed; null while it has never had one. */
+  val memoUpdatedAt: Long? = null,
+  /** The memoUpdatedAt the Backend last accepted; null until then. */
+  val memoSentUpdatedAt: Long? = null,
+  /** The memoUpdatedAt the Backend refused (400 or 404); that version is not sent again (slice 3 spec §5.2). */
+  val memoRejectedUpdatedAt: Long? = null,
 )
+
+/**
+ * A point memo (slice 3 spec §4.1, US-D-08). Written while its ride records or is paused, and gone with the ride. The
+ * place it was written at is null when the ride had no point yet; the sample is the older point the Backend takes the
+ * heading from. address and headingDegrees are what the Backend answered; null until it has.
+ */
+@Entity(
+  tableName = "notes",
+  indices = [Index(value = ["rideId"])],
+  foreignKeys = [ForeignKey(entity = RideEntity::class, parentColumns = ["id"], childColumns = ["rideId"], onDelete = ForeignKey.CASCADE)],
+)
+data class NoteEntity(
+  @PrimaryKey val id: String,
+  val rideId: String,
+  val at: Long,
+  val latitude: Double?,
+  val longitude: Double?,
+  val sampleLatitude: Double?,
+  val sampleLongitude: Double?,
+  val sampleAt: Long?,
+  val text: String,
+  val updatedAt: Long,
+  val sentUpdatedAt: Long?,
+  val rejectedUpdatedAt: Long?,
+  val address: String?,
+  val headingDegrees: Double?,
+)
+
+/** A record deleted on the device whose deletion has not reached the Backend yet (slice 3 spec §4.2). kind: ask / ride / note. */
+@Entity(tableName = "deletions", primaryKeys = ["kind", "id"])
+data class DeletionEntity(val kind: String, val id: String, val rideId: String?, val deletedAt: Long)
 
 @Dao
 interface AskDao {
@@ -232,14 +273,18 @@ interface RideDao {
   }
 }
 
-@Database(entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class], version = 4, exportSchema = true)
+@Database(
+  entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class, NoteEntity::class, DeletionEntity::class],
+  version = 5,
+  exportSchema = true,
+)
 abstract class RideDatabase : RoomDatabase() {
   abstract fun rides(): RideDao
   abstract fun asks(): AskDao
 
   companion object {
     fun open(context: Context): RideDatabase =
-      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
   }
 }
 
@@ -284,5 +329,30 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
 val MIGRATION_3_4 = object : Migration(3, 4) {
   override fun migrate(db: SupportSQLiteDatabase) {
     db.execSQL("DELETE FROM `asks` WHERE `rideId` IS NULL")
+  }
+}
+
+/**
+ * 4 -> 5 (slice 3 spec §4.1): memos on rides and asks, the point memos and the deletions waiting to be sent. It only
+ * adds, like 1 -> 2, so it stays quick inside RideController.load() (adr/0006).
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+  override fun migrate(db: SupportSQLiteDatabase) {
+    db.execSQL("ALTER TABLE `rides` ADD COLUMN `memo` TEXT")
+    db.execSQL("ALTER TABLE `asks` ADD COLUMN `memo` TEXT")
+    db.execSQL("ALTER TABLE `asks` ADD COLUMN `memoUpdatedAt` INTEGER")
+    db.execSQL("ALTER TABLE `asks` ADD COLUMN `memoSentUpdatedAt` INTEGER")
+    db.execSQL("ALTER TABLE `asks` ADD COLUMN `memoRejectedUpdatedAt` INTEGER")
+    db.execSQL(
+      "CREATE TABLE IF NOT EXISTS `notes` (`id` TEXT NOT NULL, `rideId` TEXT NOT NULL, `at` INTEGER NOT NULL, `latitude` REAL, " +
+        "`longitude` REAL, `sampleLatitude` REAL, `sampleLongitude` REAL, `sampleAt` INTEGER, `text` TEXT NOT NULL, " +
+        "`updatedAt` INTEGER NOT NULL, `sentUpdatedAt` INTEGER, `rejectedUpdatedAt` INTEGER, `address` TEXT, `headingDegrees` REAL, " +
+        "PRIMARY KEY(`id`), FOREIGN KEY(`rideId`) REFERENCES `rides`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+    )
+    db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_rideId` ON `notes` (`rideId`)")
+    db.execSQL(
+      "CREATE TABLE IF NOT EXISTS `deletions` (`kind` TEXT NOT NULL, `id` TEXT NOT NULL, `rideId` TEXT, `deletedAt` INTEGER NOT NULL, " +
+        "PRIMARY KEY(`kind`, `id`))",
+    )
   }
 }

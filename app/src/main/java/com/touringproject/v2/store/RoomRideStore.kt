@@ -10,7 +10,7 @@ import com.touringproject.v2.ride.Segment
 private fun RideStatus.column() = name.lowercase()
 private fun EndReason.column() = name.lowercase()
 
-fun Ride.toEntity() = RideEntity(id, name, status.column(), endReason?.column(), deadline, lastAliveAt, distanceMeters, updatedAt, null)
+fun Ride.toEntity() = RideEntity(id, name, status.column(), endReason?.column(), deadline, lastAliveAt, distanceMeters, updatedAt, null, memo = memo)
 
 fun RideEntity.toRide(segments: List<SegmentEntity>) = Ride(
   id = id,
@@ -22,6 +22,7 @@ fun RideEntity.toRide(segments: List<SegmentEntity>) = Ride(
   lastAliveAt = lastAliveAt,
   distanceMeters = distanceMeters,
   updatedAt = updatedAt,
+  memo = memo,
 )
 
 fun RoutePointEntity.toPoint() = RoutePoint(segment, t, lat, lon, accuracy)
