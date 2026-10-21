@@ -173,4 +173,62 @@ class ApiClientTest {
     assertEquals(ApiErrorKind.BAD_REQUEST, error.kind)
     assertEquals(3, server.requestCount)
   }
+
+  // Android #26: the log of a refused send says why the Backend refused it.
+  @Test
+  fun a_refusal_carries_the_backends_message() = runTest {
+    server.enqueue(json(400, """{"error":"bad_request","message":"segments must not overlap"}"""))
+    val error = runCatching { client().putRoute("r1", 0, RouteBody(emptyList())) }.exceptionOrNull() as ApiError
+    assertEquals(ApiErrorKind.BAD_REQUEST, error.kind)
+    assertEquals("HTTP 400: segments must not overlap", error.message)
+    server.enqueue(json(400, "not json"))
+    val plain = runCatching { client().putRoute("r1", 0, RouteBody(emptyList())) }.exceptionOrNull() as ApiError
+    assertEquals("HTTP 400", plain.message)
+  }
+
+  // Slice 3 spec §5.4: a send to what was deleted is answered 410.
+  @Test
+  fun a_send_to_a_deleted_record_is_gone_and_not_retried() = runTest {
+    server.enqueue(json(410, """{"error":"deleted"}"""))
+    val error = runCatching { client().putAskMemo("a1", AskMemoBody("x", "2026-10-21T01:00:00Z")) }.exceptionOrNull() as ApiError
+    assertEquals(ApiErrorKind.GONE, error.kind)
+    assertEquals(1, server.requestCount)
+  }
+
+  @Test
+  fun putRide_sends_the_memo_and_leaves_it_out_when_there_is_none() = runTest {
+    server.enqueue(json(200, """{"rideId":"r1","applied":true}"""))
+    server.enqueue(json(200, """{"rideId":"r1","applied":true}"""))
+    val segments = listOf(SegmentBody("2026-10-18T01:00:00Z", "2026-10-18T02:00:00Z"))
+    client().putRide("r1", RideBody("箱根", "ended", segments, false, "2026-10-18T02:00:00Z", memo = "また来たい"))
+    client().putRide("r1", RideBody("箱根", "ended", segments, false, "2026-10-18T02:00:01Z"))
+    assertEquals("また来たい", Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject["memo"]!!.jsonPrimitive.content)
+    // The Backend takes a ride without memo as one with none, and drops the memo it had.
+    assertFalse("memo" in Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject)
+  }
+
+  @Test
+  fun putAskMemo_sends_the_memo_or_null_to_remove_it() = runTest {
+    server.enqueue(json(200, """{"askId":"a1","applied":true}"""))
+    client().putAskMemo("a1", AskMemoBody(null, "2026-10-21T01:00:00Z"))
+    val request = server.takeRequest()
+    assertEquals("PUT", request.method)
+    assertEquals("/Prod/asks/a1/memo", request.path)
+    val sent = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+    assertEquals(JsonNull, sent["memo"])
+    assertEquals("2026-10-21T01:00:00Z", sent["updatedAt"]!!.jsonPrimitive.content)
+  }
+
+  // A deletion is answered 204 with no body, and is the same however often it is sent.
+  @Test
+  fun deletions_go_to_their_record_and_are_retried_when_the_server_fails() = runTest {
+    server.enqueue(MockResponse().setResponseCode(204))
+    server.enqueue(json(503))
+    server.enqueue(MockResponse().setResponseCode(204))
+    client().deleteAsk("a1")
+    client().deleteRide("r1")
+    assertEquals("DELETE /Prod/asks/a1", server.takeRequest().let { "${it.method} ${it.path}" })
+    assertEquals("DELETE /Prod/rides/r1", server.takeRequest().let { "${it.method} ${it.path}" })
+    assertEquals(3, server.requestCount)
+  }
 }

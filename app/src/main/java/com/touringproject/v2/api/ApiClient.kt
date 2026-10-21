@@ -4,6 +4,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -16,7 +18,8 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resumeWithException
 
 // Backend API (Backend/openapi.yaml). Errors are classified so the ask loop can pick the spoken message.
-enum class ApiErrorKind { INVALID_KEY, BAD_REQUEST, NOT_FOUND, RATE_LIMITED, SERVER, NETWORK }
+// GONE is 410: the record, or its ride, was deleted (slice 3 spec §5.4); the sync treats it as sent.
+enum class ApiErrorKind { INVALID_KEY, BAD_REQUEST, NOT_FOUND, GONE, RATE_LIMITED, SERVER, NETWORK }
 
 class ApiError(val kind: ApiErrorKind, message: String? = null) : Exception(message ?: kind.name)
 
@@ -62,17 +65,34 @@ interface AskApi {
 // A ride and its route (slice 2 spec §6.2). Times are ISO 8601 with their time zone.
 @Serializable data class SegmentBody(val startedAt: String, val endedAt: String?)
 
+/** memo goes with the ride as a whole: a ride without one (memo left out) drops the memo the Backend has (slice 3 spec §6.2). */
 @Serializable
-data class RideBody(val name: String, val status: String, val segments: List<SegmentBody>, val autoEnded: Boolean, val updatedAt: String)
+data class RideBody(
+  val name: String,
+  val status: String,
+  val segments: List<SegmentBody>,
+  val autoEnded: Boolean,
+  val updatedAt: String,
+  val memo: String? = null,
+)
 
 @Serializable data class PointBody(val t: String, val lat: Double, val lon: Double, val accuracy: Double?, val segment: Int)
 
 @Serializable data class RouteBody(val points: List<PointBody>)
 
-/** Both calls may be sent again and again: the Backend keeps one copy of each. A 400 throws BAD_REQUEST. */
+/** A conversation's memo (slice 3 spec §6.2); null removes it. */
+@Serializable data class AskMemoBody(val memo: String?, val updatedAt: String)
+
+/**
+ * Every call may be sent again and again: the Backend keeps one copy of each, and a deletion is the same however often
+ * it comes. A 400 throws BAD_REQUEST, a 404 NOT_FOUND and a 410 (deleted) GONE.
+ */
 interface RideApi {
   suspend fun putRide(rideId: String, body: RideBody)
   suspend fun putRoute(rideId: String, seq: Int, body: RouteBody)
+  suspend fun putAskMemo(askId: String, body: AskMemoBody)
+  suspend fun deleteRide(rideId: String)
+  suspend fun deleteAsk(askId: String)
 }
 
 private val TRANSIENT = setOf(ApiErrorKind.RATE_LIMITED, ApiErrorKind.SERVER, ApiErrorKind.NETWORK)
@@ -84,9 +104,20 @@ private fun kindFor(status: Int): ApiErrorKind? = when {
   status == 403 -> ApiErrorKind.INVALID_KEY
   status == 400 -> ApiErrorKind.BAD_REQUEST
   status == 404 -> ApiErrorKind.NOT_FOUND
+  status == 410 -> ApiErrorKind.GONE
   status == 429 -> ApiErrorKind.RATE_LIMITED
   status >= 500 -> ApiErrorKind.SERVER
   else -> null
+}
+
+/** A refusal (400) carries the Backend's message, so the sync's log tells why it is not sent again (Android #26). */
+private fun reason(code: Int, kind: ApiErrorKind, body: String?): String {
+  val message = if (kind == ApiErrorKind.BAD_REQUEST && body != null) {
+    runCatching { Json.parseToJsonElement(body).jsonObject["message"]?.jsonPrimitive?.content }.getOrNull()
+  } else {
+    null
+  }
+  return message?.let { "HTTP $code: $it" } ?: "HTTP $code"
 }
 
 /** http is the app's one OkHttpClient, so every client shares its connections and threads (Android #12). */
@@ -118,6 +149,18 @@ class ApiClient(
 
   override suspend fun putRoute(rideId: String, seq: Int, body: RouteBody) {
     request("PUT", "/rides/$rideId/route/$seq", rideJson.encodeToString(RouteBody.serializer(), body), TRANSIENT)
+  }
+
+  override suspend fun putAskMemo(askId: String, body: AskMemoBody) {
+    request("PUT", "/asks/$askId/memo", rideJson.encodeToString(AskMemoBody.serializer(), body), TRANSIENT)
+  }
+
+  override suspend fun deleteRide(rideId: String) {
+    request("DELETE", "/rides/$rideId", null, TRANSIENT)
+  }
+
+  override suspend fun deleteAsk(askId: String) {
+    request("DELETE", "/asks/$askId", null, TRANSIENT)
   }
 
   suspend fun checkKey() {
@@ -159,7 +202,7 @@ class ApiClient(
       override fun onResponse(call: Call, response: Response) {
         val outcome = runCatching {
           response.use {
-            kindFor(it.code)?.let { kind -> throw ApiError(kind, "HTTP ${it.code}") }
+            kindFor(it.code)?.let { kind -> throw ApiError(kind, reason(it.code, kind, it.body?.string())) }
             it.body?.string() ?: throw ApiError(ApiErrorKind.NETWORK, "empty body")
           }
         }.recoverCatching { e -> throw if (e is IOException) ApiError(ApiErrorKind.NETWORK, e.toString()) else e }

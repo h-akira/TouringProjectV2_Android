@@ -51,6 +51,7 @@ fun Ride.toBody() = RideBody(
   segments = segments.map { SegmentBody(iso(it.startedAt), it.endedAt?.let(::iso)) },
   autoEnded = endReason == EndReason.AUTO,
   updatedAt = iso(updatedAt),
+  memo = memo,
 )
 
 fun RoutePoint.toBody() = PointBody(iso(t), lat, lon, accuracy, segment)

@@ -2,6 +2,7 @@ package com.touringproject.v2.sync
 
 import com.touringproject.v2.api.ApiError
 import com.touringproject.v2.api.ApiErrorKind
+import com.touringproject.v2.api.AskMemoBody
 import com.touringproject.v2.api.RideApi
 import com.touringproject.v2.api.RideBody
 import com.touringproject.v2.api.RouteBody
@@ -65,6 +66,9 @@ private class World {
   val api = object : RideApi {
     override suspend fun putRide(rideId: String, body: RideBody) = call("ride/$rideId:${body.status}")
     override suspend fun putRoute(rideId: String, seq: Int, body: RouteBody) = call("route/$rideId/$seq:${body.points.size}")
+    override suspend fun putAskMemo(askId: String, body: AskMemoBody) = call("memo/$askId:${body.memo}")
+    override suspend fun deleteRide(rideId: String) = call("delete/ride/$rideId")
+    override suspend fun deleteAsk(askId: String) = call("delete/ask/$askId")
   }
 
   val sync = RideSync(store, { if (hasKey) api else null }) { _, _ -> }
