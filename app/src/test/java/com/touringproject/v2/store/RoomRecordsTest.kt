@@ -30,7 +30,7 @@ class RoomRecordsTest {
     .allowMainThreadQueries()
     .build()
   private val rides = RoomRideStore(db.rides())
-  private val sync = RoomSyncStore(db.rides())
+  private val sync = RoomSyncStore(db.rides(), db.asks())
   private val log = RoomAskLog(db.asks(), MainScope()) { _, _ -> }
   private val records = RoomRecords(db.rides(), db.asks())
 

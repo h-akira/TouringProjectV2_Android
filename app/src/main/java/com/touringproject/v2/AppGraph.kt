@@ -55,6 +55,7 @@ import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.store.RoomRideStore
 import com.touringproject.v2.store.RoomSyncStore
 import com.touringproject.v2.sync.RideSync
+import com.touringproject.v2.sync.credentialChanges
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -95,7 +96,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
 
   /** Sends rides and routes; a pass runs on each trigger (slice 2 spec §5.3). */
   val sync = RideSync(
-    RoomSyncStore(database.rides()),
+    RoomSyncStore(database.rides(), database.asks()),
     api = {
       val key = apiKeys.current()
       val user = settings.settings.value?.userName
@@ -219,6 +220,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     scope.launch { sync.run() }
     // SC-16: the recording ride's deadline follows the longest recording time, wherever it was changed (Android #33).
     scope.launch { maxRecordingChanges(settings.settings).collect { rides.maxRecordingChanged() } }
+    // A key or user name saved may let rides waiting on the device go at last (Android #29).
+    scope.launch { credentialChanges(apiKeys.apiKey, settings.settings.map { it?.userName }).collect { sync.request() } }
     scope.launch {
       settings.load()
       apiKeys.load()

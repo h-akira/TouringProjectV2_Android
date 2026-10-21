@@ -178,6 +178,22 @@ interface AskDao {
   @Query("DELETE FROM asks WHERE askId = :askId")
   suspend fun deleteRow(askId: String)
 
+  // Sending memos (slice 3 spec §5.1): the asks whose memo changed since it was taken, unless that version was refused.
+  @Query(
+    "SELECT askId, memo, memoUpdatedAt FROM asks WHERE memoUpdatedAt IS NOT NULL AND " +
+      "(memoSentUpdatedAt IS NULL OR memoSentUpdatedAt < memoUpdatedAt) AND " +
+      "(memoRejectedUpdatedAt IS NULL OR memoRejectedUpdatedAt != memoUpdatedAt) ORDER BY memoUpdatedAt",
+  )
+  suspend fun unsentMemos(): List<AskMemoRow>
+
+  @Query(
+    "UPDATE asks SET memoSentUpdatedAt = :updatedAt WHERE askId = :askId AND (memoSentUpdatedAt IS NULL OR memoSentUpdatedAt < :updatedAt)",
+  )
+  suspend fun markMemoSent(askId: String, updatedAt: Long)
+
+  @Query("UPDATE asks SET memoRejectedUpdatedAt = :updatedAt WHERE askId = :askId")
+  suspend fun markMemoRefused(askId: String, updatedAt: Long)
+
   @Insert(onConflict = OnConflictStrategy.REPLACE)
   suspend fun markDeleted(deletion: DeletionEntity)
 
@@ -190,6 +206,11 @@ interface AskDao {
     return true
   }
 }
+
+data class AskMemoRow(val askId: String, val memo: String?, val memoUpdatedAt: Long)
+
+/** What one ride has left to send, read together (Android #23). */
+data class UnsentRow(val ride: RideEntity, val segments: List<SegmentEntity>, val sentPoints: Int, val totalPoints: Int)
 
 data class RideWithSegments(
   @Embedded val ride: RideEntity,
@@ -317,6 +338,20 @@ interface RideDao {
 
   @Insert(onConflict = OnConflictStrategy.REPLACE)
   suspend fun markDeleted(deletion: DeletionEntity)
+
+  @Query("SELECT * FROM deletions ORDER BY deletedAt")
+  suspend fun deletions(): List<DeletionEntity>
+
+  @Query("DELETE FROM deletions WHERE kind = :kind AND id = :id")
+  suspend fun deletionSent(kind: String, id: String)
+
+  /**
+   * The rides with something left to send, each with its segments and point counts, in one transaction: a save that
+   * lands meanwhile cannot pair an old status with new segments (Android #23).
+   */
+  @Transaction
+  suspend fun unsentSnapshot(): List<UnsentRow> =
+    unsentRides().map { UnsentRow(it, segments(it.id), sentPointCount(it.id), pointCount(it.id)) }
 
   /** Removes an ended ride and everything of it, and marks it for the Backend. False when it is not kept or not ended. */
   @Transaction
