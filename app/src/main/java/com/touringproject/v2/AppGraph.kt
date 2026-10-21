@@ -224,14 +224,14 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     scope.launch { sync.run() }
     // SC-16: the recording ride's deadline follows the longest recording time, wherever it was changed (Android #33).
     scope.launch { maxRecordingChanges(settings.settings).collect { rides.maxRecordingChanged() } }
-    // A key or user name saved may let rides waiting on the device go at last (Android #29).
-    scope.launch { credentialChanges(apiKeys.apiKey, settings.settings.map { it?.userName }).collect { sync.request() } }
     scope.launch {
       settings.load()
       apiKeys.load()
       readiness.settingsLoaded()
       // The start of the app is a trigger; before this the key and the user name are not known.
       sync.request()
+      // From now on, a key or user name saved may let what waits on the device go at last (Android #29).
+      credentialChanges(apiKeys.apiKey, settings.settings.map { it?.userName }).collect { sync.request() }
     }
   }
 

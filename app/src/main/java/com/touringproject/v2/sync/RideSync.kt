@@ -185,12 +185,13 @@ class RideSync(
 }
 
 /**
- * A trigger each time the key or the user name changes once both are known (Android #29). The first pair, read when
- * the app starts, is not one: the start has its own trigger. A key removed is no trigger either.
+ * A trigger each time the key or the user name changes to a pair that can send (Android #29), the key entered for the
+ * first time included. Collect it once both are loaded: the values then are not a change (the start has its own
+ * trigger). A key removed is no trigger.
  */
 fun credentialChanges(key: Flow<String?>, userName: Flow<String?>): Flow<Unit> =
-  combine(key, userName) { k, u -> if (k == null || u == null) null else k to u }
-    .filter { it != null }
+  combine(key, userName) { k, u -> k to u }
     .distinctUntilChanged()
     .drop(1)
+    .filter { (k, u) -> k != null && u != null }
     .map { }
