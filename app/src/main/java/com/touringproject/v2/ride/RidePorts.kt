@@ -13,6 +13,11 @@ interface RideStore {
   /** Adds a point and, in the same transaction, the ride's new distance and the time it was seen alive. */
   suspend fun addPoint(rideId: String, point: RoutePoint, distanceMeters: Double, aliveAt: Long)
   suspend fun markAlive(rideId: String, at: Long)
+  /**
+   * Removes an ended ride with its segments, points, point memos and asks, and marks it to be deleted on the Backend,
+   * all in one transaction (slice 3 spec §4.2). False when the ride is not kept or has not ended.
+   */
+  suspend fun delete(rideId: String, at: Long): Boolean
 }
 
 /** Wakes the app at a ride's deadline even when the process has died (slice 2 spec §4.4). */

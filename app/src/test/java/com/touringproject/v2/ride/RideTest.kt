@@ -130,4 +130,12 @@ class ReconcileTest {
     assertEquals(Reconcile.KeepPaused, reconcile(recording.pause(90_000), 120_000, 7))
     assertEquals(Reconcile.Resume, reconcile(recording, 120_000, null))
   }
+
+  @Test
+  fun a_memo_moves_updated_at_on_even_with_the_clock_set_back() {
+    val ended = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS).end(5_000, EndReason.MANUAL, 5_000)
+    val memo = ended.withMemo("また来たい", 3_000)
+    assertEquals("また来たい", memo.memo)
+    assertEquals(5_001L, memo.updatedAt)
+  }
 }

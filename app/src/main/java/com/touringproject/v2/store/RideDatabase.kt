@@ -9,6 +9,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Relation
@@ -18,6 +19,7 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.touringproject.v2.records.memoTime
 import kotlinx.coroutines.flow.Flow
 
 // The device's record of rides (slice 2 spec §5.1). Every schema version is exported to app/schemas and is moved
@@ -160,6 +162,33 @@ interface AskDao {
   /** The ride's asks in the order they were asked (SC-06, SC-07). */
   @Query("SELECT * FROM asks WHERE rideId = :rideId ORDER BY askedAt")
   fun forRide(rideId: String): Flow<List<AskEntity>>
+
+  @Query("UPDATE asks SET memo = :memo, memoUpdatedAt = :at WHERE askId = :askId")
+  suspend fun setMemo(askId: String, memo: String?, at: Long)
+
+  /** SC-08. False when the ask is not kept; the same memo again changes nothing. */
+  @Transaction
+  suspend fun writeMemo(askId: String, memo: String?, now: Long): Boolean {
+    val ask = ask(askId) ?: return false
+    if (ask.memo == memo) return true
+    setMemo(askId, memo, memoTime(now, ask.memoUpdatedAt))
+    return true
+  }
+
+  @Query("DELETE FROM asks WHERE askId = :askId")
+  suspend fun deleteRow(askId: String)
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun markDeleted(deletion: DeletionEntity)
+
+  /** DL-01: removes the ask and marks it for the Backend, together (slice 3 spec §4.2). False when it is not kept. */
+  @Transaction
+  suspend fun delete(askId: String, at: Long): Boolean {
+    val ask = ask(askId) ?: return false
+    deleteRow(askId)
+    markDeleted(DeletionEntity("ask", askId, ask.rideId, at))
+    return true
+  }
 }
 
 data class RideWithSegments(
@@ -270,6 +299,37 @@ interface RideDao {
   suspend fun addPoint(point: RoutePointEntity, distanceMeters: Double, aliveAt: Long) {
     insertPoint(point)
     updateDistance(point.rideId, distanceMeters, aliveAt)
+  }
+
+  // Deleting a ride (slice 3 spec §4.2). Each table is cleared by name rather than through the foreign keys, and the
+  // asks have none.
+  @Query("DELETE FROM asks WHERE rideId = :rideId")
+  suspend fun deleteAsks(rideId: String)
+
+  @Query("DELETE FROM notes WHERE rideId = :rideId")
+  suspend fun deleteNotes(rideId: String)
+
+  @Query("DELETE FROM route_points WHERE rideId = :rideId")
+  suspend fun deletePoints(rideId: String)
+
+  @Query("DELETE FROM rides WHERE id = :rideId")
+  suspend fun deleteRideRow(rideId: String)
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun markDeleted(deletion: DeletionEntity)
+
+  /** Removes an ended ride and everything of it, and marks it for the Backend. False when it is not kept or not ended. */
+  @Transaction
+  suspend fun deleteEnded(rideId: String, at: Long): Boolean {
+    val ride = ride(rideId) ?: return false
+    if (ride.status != "ended") return false
+    deleteAsks(rideId)
+    deleteNotes(rideId)
+    deletePoints(rideId)
+    deleteSegments(rideId)
+    deleteRideRow(rideId)
+    markDeleted(DeletionEntity("ride", rideId, null, at))
+    return true
   }
 }
 

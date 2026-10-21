@@ -41,4 +41,6 @@ class RoomRideStore(private val dao: RideDao) : RideStore {
     dao.addPoint(RoutePointEntity(rideId = rideId, segment = point.segment, t = point.t, lat = point.lat, lon = point.lon, accuracy = point.accuracy, chunk = null), distanceMeters, aliveAt)
 
   override suspend fun markAlive(rideId: String, at: Long) = dao.markAlive(rideId, at)
+
+  override suspend fun delete(rideId: String, at: Long): Boolean = dao.deleteEnded(rideId, at)
 }

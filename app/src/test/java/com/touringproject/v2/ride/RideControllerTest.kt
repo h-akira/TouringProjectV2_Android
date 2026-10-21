@@ -28,6 +28,8 @@ private class World(var now: Long = 1_000, var boot: Int? = 7) {
   var gate: CompletableDeferred<Unit>? = null
   val events = mutableListOf<String>()
   val autoEnded = mutableListOf<Ride>()
+  val deleted = mutableListOf<String>()
+  var failDeletes = false
   var changes = 0
   /** The longest recording time the rider has chosen (SC-16). */
   var max = MAX
@@ -63,6 +65,14 @@ private class World(var now: Long = 1_000, var boot: Int? = 7) {
     override suspend fun markAlive(rideId: String, at: Long) {
       if (failWrites) throw IOException("disk full")
       rides[rideId]?.let { rides[rideId] = it.copy(lastAliveAt = at) }
+    }
+    override suspend fun delete(rideId: String, at: Long): Boolean {
+      if (failDeletes) throw IOException("disk full")
+      if (rides[rideId]?.status != RideStatus.ENDED) return false
+      rides.remove(rideId)
+      points.remove(rideId)
+      deleted += rideId
+      return true
     }
   }
 
@@ -627,5 +637,115 @@ class RideControllerTest {
     w.failSaves = 1
     assertFalse(w.controller.rename("r1", "御殿場"))
     assertEquals("御殿場", w.controller.active.value?.name)
+  }
+
+  // Slice 3 spec §7.2: the memo goes with the ride's meta, so a new one is sent.
+  @Test
+  fun an_ended_rides_memo_is_saved_and_sent() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    w.controller.end("箱根")
+    val changes = w.changes
+    w.now = 9_000
+    assertTrue(w.controller.memo("r1", "また来たい"))
+    assertEquals("また来たい", w.stored().memo)
+    assertEquals(9_000L, w.stored().updatedAt)
+    assertEquals(changes + 1, w.changes)
+    assertTrue(w.controller.memo("r1", null))
+    assertNull(w.stored().memo)
+  }
+
+  @Test
+  fun the_active_rides_memo_changes_only_its_memo() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    assertTrue(w.controller.memo("r1", "峠の手前で給油"))
+    assertEquals("峠の手前で給油", w.controller.active.value?.memo)
+    assertEquals(RideStatus.RECORDING, w.stored().status)
+    assertEquals("峠の手前で給油", w.stored().memo)
+  }
+
+  @Test
+  fun the_same_memo_again_saves_nothing_and_a_memo_too_long_or_of_no_ride_is_refused() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.controller.memo("r1", "同じ")
+    val changes = w.changes
+    assertTrue(w.controller.memo("r1", "同じ"))
+    assertEquals(changes, w.changes)
+    assertFalse(w.controller.memo("r1", "あ".repeat(2001)))
+    assertFalse(w.controller.memo("r9", "どこ"))
+    assertEquals("同じ", w.stored().memo)
+  }
+
+  @Test
+  fun a_memo_whose_save_fails_reports_it() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    w.controller.end("箱根")
+    w.failSaves = 1
+    assertFalse(w.controller.memo("r1", "書けない"))
+    assertNull(w.stored().memo)
+  }
+
+  // US-D-06.002: an ended ride goes with everything of it, and the deletion is something new to send.
+  @Test
+  fun an_ended_ride_can_be_deleted() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    w.controller.end("箱根")
+    val changes = w.changes
+    assertTrue(w.controller.delete("r1"))
+    assertEquals(listOf("r1"), w.deleted)
+    assertTrue(w.rides.isEmpty())
+    assertEquals(changes + 1, w.changes)
+  }
+
+  // Slice 3 spec §2: the ride recording or paused is ended first.
+  @Test
+  fun the_ride_recording_or_paused_cannot_be_deleted() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    assertFalse(w.controller.delete("r1"))
+    w.controller.pause()
+    assertFalse(w.controller.delete("r1"))
+    assertFalse(w.controller.delete("r9"))
+    assertTrue(w.deleted.isEmpty())
+  }
+
+  @Test
+  fun a_deletion_that_fails_is_reported() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.controller.end("箱根")
+    w.failDeletes = true
+    assertFalse(w.controller.delete("r1"))
+    assertEquals(1, w.rides.size)
+  }
+
+  // A rename that could not be written waits to be written again; deleting the ride drops it, so it does not come back.
+  @Test
+  fun a_deleted_ride_is_not_written_back_by_a_save_still_waiting() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    w.controller.end("箱根")
+    w.failSaves = 1
+    assertFalse(w.controller.rename("r1", "御殿場"))
+    assertTrue(w.controller.delete("r1"))
+    w.controller.start("次の走行")
+    assertEquals(listOf("次の走行"), w.rides.values.map { it.name })
   }
 }
