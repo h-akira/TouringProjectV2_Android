@@ -218,11 +218,10 @@ fun ConnectionScreen(
   }
   // DL-01 (connection key)
   if (confirmingDelete) {
-    AlertDialog(
-      onDismissRequest = { confirmingDelete = false },
-      title = { Text("接続キーを削除しますか？") },
-      confirmButton = { TextButton(onClick = { confirmingDelete = false; scope.launch { save(null) } }) { Text("削除する") } },
-      dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("やめる") } },
+    DeleteDialog(
+      "接続キーを削除しますか？", null, "削除する",
+      onConfirm = { confirmingDelete = false; scope.launch { save(null) } },
+      onDismiss = { confirmingDelete = false },
     )
   }
 }

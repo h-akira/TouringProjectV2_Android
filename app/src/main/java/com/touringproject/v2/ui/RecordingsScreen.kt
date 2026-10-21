@@ -12,13 +12,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -103,12 +101,10 @@ fun RecordingsScreen(
   }
   // DL-01 (recordings)
   if (confirming) {
-    AlertDialog(
-      onDismissRequest = { confirming = false },
-      title = { Text("録音をすべて消しますか？") },
-      text = { Text("端末に残した質問の音声を消します。質問と回答の記録は消えません。") },
-      confirmButton = { TextButton(onClick = { confirming = false; onDeleteAll() }) { Text("消す") } },
-      dismissButton = { TextButton(onClick = { confirming = false }) { Text("やめる") } },
+    DeleteDialog(
+      "録音をすべて消しますか？", "端末に残した質問の音声を消します。質問と回答の記録は消えません。", "消す",
+      onConfirm = { confirming = false; onDeleteAll() },
+      onDismiss = { confirming = false },
     )
   }
 }

@@ -54,6 +54,11 @@ import kotlinx.serialization.Serializable
 @Serializable data object RecordsKey : NavKey
 @Serializable data class RideKey(val rideId: String) : NavKey
 @Serializable data class AskKey(val rideId: String, val askId: String) : NavKey
+@Serializable data class RideMemoKey(val rideId: String) : NavKey
+@Serializable data class AskMemoKey(val rideId: String, val askId: String) : NavKey
+
+/** SC-08 covers the tabs, as the mock draws it. */
+private fun coversTabs(key: NavKey?) = key is RideMemoKey || key is AskMemoKey
 
 private enum class RideSheet { START, END }
 
@@ -108,7 +113,7 @@ fun AppUi(graph: AppGraph) {
         BackHandler(enabled = tabs.onAnotherTabsFirst) { tabs.back() }
         Scaffold(
           containerColor = MaterialTheme.colorScheme.background,
-          bottomBar = { if (tabsShown(state.phase) && !mapFull) TabBar(tabs.tab, tabs::press) },
+          bottomBar = { if (tabsShown(state.phase) && !mapFull && !coversTabs(tabs.current.lastOrNull())) TabBar(tabs.tab, tabs::press) },
         ) { inner ->
           val screens = entryProvider<NavKey> {
               entry<HomeKey> {
@@ -144,6 +149,7 @@ fun AppUi(graph: AppGraph) {
                         scope.launch { if (graph.rides.resume()) Toast.makeText(context, "再開しました", Toast.LENGTH_SHORT).show() }
                       },
                       onEnd = { sheet = RideSheet.END },
+                      onMemo = { ride?.let { tabs.push(RideMemoKey(it.id)) } },
                     )
                   },
                 )
@@ -165,17 +171,25 @@ fun AppUi(graph: AppGraph) {
                   onBack = { tabs.back() },
                   onAsk = { tabs.push(AskKey(key.rideId, it)) },
                   onFullMap = { mapFull = it },
+                  onMemo = { tabs.push(RideMemoKey(key.rideId)) },
                   modifier = Modifier.safeDrawingPadding(),
                 )
               }
               entry<AskKey> { key ->
                 AskDetailRoute(
-                  graph.records, key.rideId, key.askId,
+                  graph.records, graph.askEdits, key.rideId, key.askId,
                   onBack = { tabs.back() },
                   // ‹ › stay within the ride's asks: the shown ask is swapped, so Back still goes to SC-06.
                   onMove = { other -> tabs.current[tabs.current.lastIndex] = AskKey(key.rideId, other) },
+                  onMemo = { tabs.push(AskMemoKey(key.rideId, key.askId)) },
                   modifier = Modifier.safeDrawingPadding(),
                 )
+              }
+              entry<RideMemoKey> { key ->
+                RideMemoRoute(graph.records, graph.rides, key.rideId, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding())
+              }
+              entry<AskMemoKey> { key ->
+                AskMemoRoute(graph.records, graph.askEdits, key.rideId, key.askId, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding())
               }
               entry<SettingsKey> {
                 SettingsScreen(

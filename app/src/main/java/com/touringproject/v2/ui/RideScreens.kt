@@ -31,9 +31,9 @@ import androidx.compose.ui.unit.sp
 import com.touringproject.v2.ride.cutRideName
 import com.touringproject.v2.ride.rideName
 
-/** SC-02's ride card (slice 2 spec §7.2). Memo buttons wait for slice 3. */
+/** SC-02's ride card (slice 2 spec §7.2). onMemo opens SC-08 for the ride's memo (slice 3 spec §7.1). */
 @Composable
-fun RideCard(ride: RideCardUi?, onStart: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onEnd: () -> Unit) {
+fun RideCard(ride: RideCardUi?, onStart: () -> Unit, onPause: () -> Unit, onResume: () -> Unit, onEnd: () -> Unit, onMemo: () -> Unit = {}) {
   val card = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)).padding(14.dp)
   if (ride == null) {
     Column(card, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -57,6 +57,7 @@ fun RideCard(ride: RideCardUi?, onStart: () -> Unit, onPause: () -> Unit, onResu
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
       if (ride.paused) Button(onClick = onResume, Modifier.weight(1f)) { Text("▶ 再開") }
       else OutlinedButton(onClick = onPause, Modifier.weight(1f)) { Text("⏸ 一時停止") }
+      OutlinedButton(onClick = onMemo, Modifier.weight(1f).testTag("rideMemo")) { Text("📝 走行メモ") }
       OutlinedButton(onClick = onEnd, Modifier.weight(1f).testTag("endRide")) { Text("■ 終了") }
     }
   }

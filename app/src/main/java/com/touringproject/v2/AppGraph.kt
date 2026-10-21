@@ -50,6 +50,7 @@ import com.touringproject.v2.settings.KeystoreCipher
 import com.touringproject.v2.settings.SettingsRepository
 import com.touringproject.v2.settings.maxRecordingChanges
 import com.touringproject.v2.store.RideDatabase
+import com.touringproject.v2.store.RoomAskEdits
 import com.touringproject.v2.store.RoomAskLog
 import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.store.RoomRideStore
@@ -104,6 +105,9 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     },
     log = { event, data -> Log.i("trv2.sync", "$event $data") },
   )
+
+  /** SC-07 and SC-08 change kept asks through here; each change is something new to send (slice 3 spec §5.1). */
+  val askEdits = RoomAskEdits(database.asks(), System::currentTimeMillis, sync::request) { message, e -> Log.w("trv2.ask", message, e) }
 
   val rides = RideController(
     RideDeps(
