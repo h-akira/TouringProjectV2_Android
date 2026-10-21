@@ -21,11 +21,11 @@ class RecordLabelsTest {
 
   private fun ms(day: Int, hour: Int, minute: Int, month: Int = 10) = ZonedDateTime.of(2026, month, day, hour, minute, 0, 0, zone).toInstant().toEpochMilli()
 
-  private fun ask(id: String, at: Long, transcript: String? = "右手の山は？", newConversation: Boolean = false, failure: String? = null) = AskRecord(
+  private fun ask(id: String, at: Long, transcript: String? = "右手の山は？", newConversation: Boolean = false, failure: String? = null, memo: String? = null) = AskRecord(
     askId = id, askedAt = at, answeredAt = at + 5_000, transcript = transcript, answer = "金時山です。",
     latitude = 35.2, longitude = 139.0, address = "神奈川県足柄下郡箱根町仙石原", headingDegrees = 45.0, input = "voice",
     conversationId = "c1", newConversation = newConversation,
-    outcome = if (failure == null) AskOutcome.ANSWERED else AskOutcome.FAILED, failure = failure, rideId = "r1",
+    outcome = if (failure == null) AskOutcome.ANSWERED else AskOutcome.FAILED, failure = failure, rideId = "r1", memo = memo,
   )
 
   // 16 Oct 08:58 – 09:44, paused until 10:02, then 10:02 – 10:46.
@@ -154,5 +154,25 @@ class RecordLabelsTest {
     assertEquals("京都市左京区", shortPlace("京都府京都市左京区"))
     assertEquals("国道1号線沿い", shortPlace("国道1号線沿い"))
     assertEquals("場所不明", shortPlace(null))
+  }
+
+  // US-D-04.005: the memos show in the list, the timeline, the pins and SC-07.
+  @Test
+  fun memos_are_marked_where_the_rider_looks_for_them() {
+    val ride = newRide("r1", "箱根", ms(16, 8, 58), 7, 24 * HOUR_MS).end(ms(16, 10, 46), EndReason.MANUAL, ms(16, 10, 46))
+    assertEquals(false, rideRow(RideListItem(ride, 0, SaveState.SAVED), ms(17, 0, 0), zone).memo)
+    assertEquals(true, rideRow(RideListItem(ride.copy(memo = "また来たい"), 0, SaveState.SAVED), ms(17, 0, 0), zone).memo)
+    val asks = listOf(ask("a1", ms(16, 9, 41), memo = "給油した"), ask("a2", ms(16, 10, 30)))
+    assertEquals(listOf(true, false), rideTimeline(ride, asks, zone).filterIsInstance<TimelineRow.Ask>().map { it.memo })
+    assertEquals(listOf(true, false), askPins(asks).map { it.memo })
+    assertEquals("給油した", askDetail(asks, "a1", zone)?.memo)
+    assertNull(askDetail(asks, "a2", zone)?.memo)
+  }
+
+  @Test
+  fun sc_08_names_the_conversation_it_writes_for() {
+    val asks = listOf(ask("a1", ms(16, 9, 41)), ask("a2", ms(16, 10, 30)))
+    assertEquals("会話 2 · 10:30 足柄下郡箱根町仙石原", askMemoTarget(asks, "a2", zone))
+    assertNull(askMemoTarget(asks, "a9", zone))
   }
 }

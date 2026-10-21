@@ -113,6 +113,8 @@ data class RideDetailUi(
   val timeline: List<TimelineRow>,
   val map: MapData,
   val cards: Map<String, PinCardUi>,
+  /** The ride's memo (SC-06); null when it has none. */
+  val memo: String? = null,
 )
 
 /**

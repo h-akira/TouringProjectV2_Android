@@ -66,8 +66,11 @@ private val JAPAN = LatLng(36.2, 138.25)
 
 private fun styleJson(context: Context) = context.assets.open(STYLE_ASSET).bufferedReader().use { it.readText() }
 
-/** A teardrop pin with its number, the tip at the bottom, as in the mock. */
-fun pinBitmap(number: Int, selected: Boolean, density: Float): Bitmap {
+/**
+ * A teardrop pin with its number, the tip at the bottom, as in the mock. memo adds a small white dot at its top right:
+ * the ask has a memo (US-D-04.005).
+ */
+fun pinBitmap(number: Int, selected: Boolean, density: Float, memo: Boolean = false): Bitmap {
   val radius = (if (selected) 16f else 13f) * density
   val stroke = 2f * density
   val tail = radius * 0.8f
@@ -93,6 +96,13 @@ fun pinBitmap(number: Int, selected: Boolean, density: Float): Bitmap {
     textAlign = Paint.Align.CENTER
   }
   canvas.drawText(number.toString(), cx, cy - (text.descent() + text.ascent()) / 2, text)
+  if (memo) {
+    val dot = radius * 0.32f
+    val dx = cx + radius * 0.7f
+    val dy = cy - radius * 0.7f
+    canvas.drawCircle(dx, dy, dot + stroke, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (selected) PIN_SELECTED_COLOR else PIN_COLOR })
+    canvas.drawCircle(dx, dy, dot, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE })
+  }
   return bitmap
 }
 
@@ -142,8 +152,8 @@ private fun mapJson(data: MapData, selected: String?) = MapJson(routesJson(data)
 private fun draw(style: Style, data: MapData, json: MapJson, density: Float) {
   data.pins.forEach { pin ->
     listOf(false, true).forEach { sel ->
-      val name = pinIcon(pin.number, sel)
-      if (style.getImage(name) == null) style.addImage(name, pinBitmap(pin.number, sel, density))
+      val name = pinIcon(pin.number, sel, pin.memo)
+      if (style.getImage(name) == null) style.addImage(name, pinBitmap(pin.number, sel, density, pin.memo))
     }
   }
   style.getSourceAs<GeoJsonSource>("routes")?.setGeoJson(json.routes)

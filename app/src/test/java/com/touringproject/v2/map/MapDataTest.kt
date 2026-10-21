@@ -55,4 +55,16 @@ class MapDataTest {
     val at = LatLon(35.1, 139.1)
     assertEquals(listOf(at), rideMap(points, ended = true, pins = listOf(MapPin("a1", 1, at)), faint = true, focus = at).extent)
   }
+
+  // US-D-04.005: a pin whose ask has a memo takes an image of its own, selected or not.
+  @Test
+  fun a_pin_with_a_memo_takes_its_own_image() {
+    val map = rideMap(points, ended = true, pins = listOf(MapPin("a1", 1, LatLon(35.0, 139.0), memo = true), MapPin("a2", 2, LatLon(35.1, 139.1))))
+    val icons = { selected: String? ->
+      Json.parseToJsonElement(pinsJson(map, selected)).jsonObject["features"]!!.jsonArray
+        .map { it.jsonObject["properties"]!!.jsonObject["icon"]!!.jsonPrimitive.content }
+    }
+    assertEquals(listOf("pin-1-memo", "pin-2"), icons(null))
+    assertEquals(listOf("pin-sel-1-memo", "pin-2"), icons("a1"))
+  }
 }

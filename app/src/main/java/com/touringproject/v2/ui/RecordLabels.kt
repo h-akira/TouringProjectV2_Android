@@ -57,7 +57,16 @@ fun saveLabel(item: RideListItem): String = when (item.saveState) {
   SaveState.SAVED -> "保存済み"
 }
 
-data class RideRowUi(val id: String, val name: String, val date: String, val stats: String, val state: String, val saved: Boolean)
+/** memo: the ride has a memo (US-D-04.005). */
+data class RideRowUi(
+  val id: String,
+  val name: String,
+  val date: String,
+  val stats: String,
+  val state: String,
+  val saved: Boolean,
+  val memo: Boolean = false,
+)
 
 /** One ride of SC-05: 52.8 km · 1:26 · 質問 4 · ⏸ 1 (the pauses only when there were some). */
 fun rideRow(item: RideListItem, now: Long, zone: ZoneId): RideRowUi {
@@ -72,6 +81,7 @@ fun rideRow(item: RideListItem, now: Long, zone: ZoneId): RideRowUi {
   return RideRowUi(
     ride.id, ride.name, "${rideDateLabel(ride, now, zone)} · ${rideSpanLabel(ride, zone)}", stats, saveLabel(item),
     item.saveState == SaveState.SAVED,
+    memo = ride.memo != null,
   )
 }
 
@@ -121,7 +131,7 @@ fun askPins(asks: List<AskRecord>): List<MapPin> {
   return asks.sortedBy { it.askedAt }.mapNotNull { ask ->
     val lat = ask.latitude ?: return@mapNotNull null
     val lon = ask.longitude ?: return@mapNotNull null
-    MapPin(ask.askId, numbers.getValue(ask.askId), LatLon(lat, lon))
+    MapPin(ask.askId, numbers.getValue(ask.askId), LatLon(lat, lon), memo = ask.memo != null)
   }
 }
 
@@ -140,7 +150,16 @@ fun askText(ask: AskRecord): String = ask.transcript?.takeIf { it.isNotBlank() }
 
 sealed interface TimelineRow {
   data class Day(val label: String) : TimelineRow
-  data class Ask(val askId: String, val number: Int, val time: String, val place: String, val text: String, val failed: Boolean) : TimelineRow
+  /** memo: the ask has a memo (US-D-04.005). */
+  data class Ask(
+    val askId: String,
+    val number: Int,
+    val time: String,
+    val place: String,
+    val text: String,
+    val failed: Boolean,
+    val memo: Boolean = false,
+  ) : TimelineRow
   data class Pause(val label: String) : TimelineRow
   data object NewConversation : TimelineRow
 }
@@ -186,7 +205,7 @@ fun rideTimeline(ride: Ride, asks: List<AskRecord>, zone: ZoneId): List<Timeline
         asked = true
         rows += TimelineRow.Ask(
           ask.askId, numbers.getValue(ask.askId), TIME.format(at(ask.askedAt, zone)), shortPlace(ask.address), askText(ask),
-          ask.outcome == AskOutcome.FAILED,
+          ask.outcome == AskOutcome.FAILED, memo = ask.memo != null,
         )
       }
       is Event.PauseAt -> rows += TimelineRow.Pause(
@@ -226,6 +245,8 @@ data class AskDetailUi(
   val failure: String?,
   val previous: String?,
   val next: String?,
+  /** The conversation's memo (SC-07); null when it has none. */
+  val memo: String? = null,
 )
 
 /** askId's place among the asks it was opened from (the ride's): 会話 3 / 5, and the asks before and after it. */
@@ -246,6 +267,7 @@ fun askDetail(asks: List<AskRecord>, askId: String, zone: ZoneId): AskDetailUi? 
     failure = if (ask.outcome == AskOutcome.FAILED) failureLabel(ask.failure) else null,
     previous = ordered.getOrNull(i - 1)?.askId,
     next = ordered.getOrNull(i + 1)?.askId,
+    memo = ask.memo,
   )
 }
 
@@ -256,4 +278,10 @@ fun pinCard(asks: List<AskRecord>, askId: String, zone: ZoneId): PinCardUi? {
   val ask = asks.firstOrNull { it.askId == askId } ?: return null
   val number = askNumbers(asks).getValue(askId)
   return PinCardUi(askId, "$number · ${TIME.format(at(ask.askedAt, zone))} · ${shortPlace(ask.address)}", askText(ask), ask.answer?.ifBlank { null })
+}
+
+/** What SC-08 says it is writing for an ask: 会話 3 · 09:41 箱根町仙石原 (the mock). null when the ask is not among them. */
+fun askMemoTarget(asks: List<AskRecord>, askId: String, zone: ZoneId): String? {
+  val ask = asks.firstOrNull { it.askId == askId } ?: return null
+  return "会話 ${askNumbers(asks).getValue(askId)} · ${TIME.format(at(ask.askedAt, zone))} ${shortPlace(ask.address)}"
 }

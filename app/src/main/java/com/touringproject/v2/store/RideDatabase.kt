@@ -217,12 +217,16 @@ data class RideWithSegments(
   @Relation(parentColumn = "id", entityColumn = "rideId") val segments: List<SegmentEntity>,
 )
 
-/** A ride as SC-05 lists it. pointsLeft is true while one of its points has not been taken (unsent or refused). */
+/**
+ * A ride as SC-05 lists it. pointsLeft is true while one of its points has not been taken (unsent or refused);
+ * memosLeft while the memo of one of its asks has not been taken (slice 3 spec §5.3).
+ */
 data class RideRow(
   @Embedded val ride: RideEntity,
   @Relation(parentColumn = "id", entityColumn = "rideId") val segments: List<SegmentEntity>,
   val questions: Int,
   val pointsLeft: Boolean,
+  val memosLeft: Boolean,
 )
 
 @Dao
@@ -241,7 +245,9 @@ interface RideDao {
   @Query(
     "SELECT *, (SELECT COUNT(*) FROM asks WHERE asks.rideId = rides.id) AS questions, " +
       "(EXISTS (SELECT 1 FROM route_points WHERE chunk IS NULL AND route_points.rideId = rides.id) OR " +
-      "EXISTS (SELECT 1 FROM route_points WHERE refused = 1 AND route_points.rideId = rides.id)) AS pointsLeft FROM rides",
+      "EXISTS (SELECT 1 FROM route_points WHERE refused = 1 AND route_points.rideId = rides.id)) AS pointsLeft, " +
+      "EXISTS (SELECT 1 FROM asks WHERE asks.rideId = rides.id AND asks.memoUpdatedAt IS NOT NULL AND " +
+      "(asks.memoSentUpdatedAt IS NULL OR asks.memoSentUpdatedAt < asks.memoUpdatedAt)) AS memosLeft FROM rides",
   )
   fun rows(): Flow<List<RideRow>>
 

@@ -50,6 +50,7 @@ fun rideDetailUi(ride: Ride, asks: List<AskRecord>, route: List<RoutePoint>, now
   timeline = rideTimeline(ride, asks, zone),
   map = rideMap(route, ride.status == RideStatus.ENDED, askPins(asks)),
   cards = asks.mapNotNull { pinCard(asks, it.askId, zone) }.associateBy { it.askId },
+  memo = ride.memo,
 )
 
 @Composable
