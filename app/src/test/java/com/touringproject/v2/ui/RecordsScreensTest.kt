@@ -330,4 +330,26 @@ class RecordsScreensTest {
     rule.waitForIdle()
     assertEquals(1, deletes)
   }
+
+  // Final review: the ride deleted, its detail turns "not found" while the deletion is still finishing; going back to
+  // SC-05 must not be cancelled with it.
+  @Test
+  fun the_deletion_finishes_even_when_the_ride_is_gone_from_the_screen_meanwhile() {
+    var ui by mutableStateOf<RideDetailUi?>(detail())
+    var finished = 0
+    rule.setContent {
+      RideDetailScreen(ui, fakeMap, true, {}, {}, {}, { true }, {}, onDelete = {
+        ui = null
+        kotlinx.coroutines.delay(100)
+        finished++
+        true
+      })
+    }
+    rule.onNodeWithTag("rideMenu").performClick()
+    rule.onNodeWithTag("deleteRide").performClick()
+    rule.onNodeWithTag("deleteGo").performClick()
+    rule.mainClock.advanceTimeBy(500)
+    rule.waitForIdle()
+    assertEquals(1, finished)
+  }
 }

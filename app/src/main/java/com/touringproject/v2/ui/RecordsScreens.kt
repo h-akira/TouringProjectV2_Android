@@ -142,6 +142,9 @@ fun RideDetailScreen(
   onMemo: () -> Unit = {},
   onDelete: suspend () -> Boolean = { false },
 ) {
+  // Above the early return: a deletion in progress outlives the ride turning "not found" on screen (final review).
+  val scope = rememberCoroutineScope()
+  val context = LocalContext.current
   if (ui == null) {
     Column(modifier.fillMaxSize()) {
       TopBar("走行", onBack)
@@ -154,8 +157,6 @@ fun RideDetailScreen(
   var menu by rememberSaveable { mutableStateOf(false) }
   var renaming by rememberSaveable { mutableStateOf<String?>(null) }
   var deleting by rememberSaveable { mutableStateOf(false) }
-  val scope = rememberCoroutineScope()
-  val context = LocalContext.current
   LaunchedEffect(full) { onFullMap(full) }
   DisposableEffect(Unit) { onDispose { onFullMap(false) } }
   BackHandler(enabled = full) { full = false }
