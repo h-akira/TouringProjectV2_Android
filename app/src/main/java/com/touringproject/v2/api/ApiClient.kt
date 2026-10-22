@@ -17,7 +17,7 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resumeWithException
 
-// Backend API (Backend/openapi.yaml). Errors are classified so the ask loop can pick the spoken message.
+// Backend API (docs-parent/07a_openapi.yaml). Errors are classified so the ask loop can pick the spoken message.
 // GONE is 410: the record, or its ride, was deleted (slice 3 spec §5.4); the sync treats it as sent. CONFLICT is 409: an
 // unreached ask's id is one the Backend took in (slice 4 spec §4.4); the sync treats it as refused.
 enum class ApiErrorKind { INVALID_KEY, BAD_REQUEST, NOT_FOUND, GONE, CONFLICT, RATE_LIMITED, SERVER, NETWORK }

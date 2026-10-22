@@ -9,7 +9,7 @@ TouringProjectV2 の Android アプリ（Kotlin・Jetpack Compose）。
 | 場所 | 中身 |
 |---|---|
 | `app/src/main/java/com/touringproject/v2/ask/` | 一巡の状態機械（`Flow.kt`）・司令塔（`AskController.kt`）・外との窓口（`AskPorts.kt`）・質問の記録の組み立て（`AskRecord.kt`）・ポーリング・会話・失敗の読み上げ文 |
-| `.../api/` | Backend の API（`Backend/openapi.yaml`） |
+| `.../api/` | Backend の API（`docs-parent/07a_openapi.yaml`） |
 | `.../audio/` | インカムの経路・録音・再生・端末の音声・合図 |
 | `.../location/` | 質問の位置の監視と方位の材料の選び方・走行のルートの位置の頼み方と点のふるい分け（`Route.kt`） |
 | `.../ride/` | 走行の型と計算（`Ride.kt`、純粋）・司令塔（`RideController.kt`）・外との窓口（`RidePorts.kt`） |
