@@ -78,7 +78,10 @@ data class RoutePointEntity(
   @ColumnInfo(defaultValue = "0") val refused: Boolean = false,
 )
 
-/** An ask whose loop ended with an answer or a failure the Backend reported (slice 2 spec §5.2). */
+/**
+ * An ask whose loop ended with an answer or a failure the Backend reported (slice 2 spec §5.2), or one that never
+ * reached the Backend (slice 4 spec §4.2: status offline). The device makes the latter's id and sends it itself.
+ */
 @Entity(tableName = "asks", indices = [Index(value = ["rideId"]), Index(value = ["askedAt"])])
 data class AskEntity(
   @PrimaryKey val askId: String,
@@ -93,10 +96,11 @@ data class AskEntity(
   val headingDegrees: Double?,
   /** voice / text */
   val input: String,
-  val conversationId: String,
+  /** null for an unreached ask: it never joined a conversation (US-C-09.006). */
+  val conversationId: String?,
   /** True for the first ask of a conversation: the conversation breaks just before it (US-C-03.004). */
   val newConversation: Boolean,
-  /** answered / failed */
+  /** answered / failed / offline */
   val status: String,
   /** no_speech / transcribe_failed / agent_failed / tts_failed / timeout; null when answered */
   val failure: String?,
@@ -114,6 +118,14 @@ data class AskEntity(
   val memoSentUpdatedAt: Long? = null,
   /** The memoUpdatedAt the Backend refused (400 or 404); that version is not sent again (slice 3 spec §5.2). */
   val memoRejectedUpdatedAt: Long? = null,
+  // An unreached ask's version and sending markers, as a point memo's (slice 4 spec §4.2); null for the other asks.
+  val updatedAt: Long? = null,
+  val sentUpdatedAt: Long? = null,
+  val rejectedUpdatedAt: Long? = null,
+  /** The older point the Backend takes an unreached ask's heading from; null when there was none. */
+  val sampleLatitude: Double? = null,
+  val sampleLongitude: Double? = null,
+  val sampleAt: Long? = null,
 )
 
 /**
@@ -312,8 +324,8 @@ data class RideWithSegments(
 
 /**
  * A ride as SC-05 lists it. pointsLeft is true while one of its points has not been taken (unsent or refused);
- * memosLeft while the memo of one of its asks has not been taken, and notesLeft one of its point memos (slice 3 spec
- * §5.3).
+ * memosLeft while the memo of one of its asks has not been taken, notesLeft one of its point memos (slice 3 spec
+ * §5.3), and unreachedLeft one of its unreached asks (slice 4 spec §5.4).
  */
 data class RideRow(
   @Embedded val ride: RideEntity,
@@ -322,6 +334,7 @@ data class RideRow(
   val pointsLeft: Boolean,
   val memosLeft: Boolean,
   val notesLeft: Boolean,
+  val unreachedLeft: Boolean,
 )
 
 @Dao
@@ -344,7 +357,9 @@ interface RideDao {
       "EXISTS (SELECT 1 FROM asks WHERE asks.rideId = rides.id AND asks.memoUpdatedAt IS NOT NULL AND " +
       "(asks.memoSentUpdatedAt IS NULL OR asks.memoSentUpdatedAt < asks.memoUpdatedAt)) AS memosLeft, " +
       "EXISTS (SELECT 1 FROM notes WHERE notes.rideId = rides.id AND " +
-      "(notes.sentUpdatedAt IS NULL OR notes.sentUpdatedAt < notes.updatedAt)) AS notesLeft FROM rides",
+      "(notes.sentUpdatedAt IS NULL OR notes.sentUpdatedAt < notes.updatedAt)) AS notesLeft, " +
+      "EXISTS (SELECT 1 FROM asks WHERE asks.rideId = rides.id AND asks.status = 'offline' AND " +
+      "(asks.sentUpdatedAt IS NULL OR asks.sentUpdatedAt < asks.updatedAt)) AS unreachedLeft FROM rides",
   )
   fun rows(): Flow<List<RideRow>>
 
@@ -477,7 +492,7 @@ interface RideDao {
 
 @Database(
   entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class, NoteEntity::class, DeletionEntity::class],
-  version = 5,
+  version = 6,
   exportSchema = true,
 )
 abstract class RideDatabase : RoomDatabase() {
@@ -487,7 +502,7 @@ abstract class RideDatabase : RoomDatabase() {
 
   companion object {
     fun open(context: Context): RideDatabase =
-      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
+      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build()
   }
 }
 
@@ -557,5 +572,31 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
       "CREATE TABLE IF NOT EXISTS `deletions` (`kind` TEXT NOT NULL, `id` TEXT NOT NULL, `rideId` TEXT, `deletedAt` INTEGER NOT NULL, " +
         "PRIMARY KEY(`kind`, `id`))",
     )
+  }
+}
+
+/**
+ * 5 -> 6 (slice 4 spec §4.2): asks that never reached the Backend. Their conversation is null, which SQLite cannot allow
+ * on the column in place, so the asks table is made again and its rows copied over. The table is small (one row per
+ * ask) and has no foreign keys either way, so this stays quick inside RideController.load() (adr/0006).
+ */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+  override fun migrate(db: SupportSQLiteDatabase) {
+    db.execSQL(
+      "CREATE TABLE IF NOT EXISTS `asks_new` (`askId` TEXT NOT NULL, `askedAt` INTEGER NOT NULL, `answeredAt` INTEGER, " +
+        "`transcript` TEXT, `answer` TEXT, `latitude` REAL, `longitude` REAL, `address` TEXT, `headingDegrees` REAL, " +
+        "`input` TEXT NOT NULL, `conversationId` TEXT, `newConversation` INTEGER NOT NULL, `status` TEXT NOT NULL, " +
+        "`failure` TEXT, `rideId` TEXT, `memo` TEXT, `memoUpdatedAt` INTEGER, `memoSentUpdatedAt` INTEGER, " +
+        "`memoRejectedUpdatedAt` INTEGER, `updatedAt` INTEGER, `sentUpdatedAt` INTEGER, `rejectedUpdatedAt` INTEGER, " +
+        "`sampleLatitude` REAL, `sampleLongitude` REAL, `sampleAt` INTEGER, PRIMARY KEY(`askId`))",
+    )
+    val kept = "`askId`, `askedAt`, `answeredAt`, `transcript`, `answer`, `latitude`, `longitude`, `address`, `headingDegrees`, " +
+      "`input`, `conversationId`, `newConversation`, `status`, `failure`, `rideId`, `memo`, `memoUpdatedAt`, " +
+      "`memoSentUpdatedAt`, `memoRejectedUpdatedAt`"
+    db.execSQL("INSERT INTO `asks_new` ($kept) SELECT $kept FROM `asks`")
+    db.execSQL("DROP TABLE `asks`")
+    db.execSQL("ALTER TABLE `asks_new` RENAME TO `asks`")
+    db.execSQL("CREATE INDEX IF NOT EXISTS `index_asks_rideId` ON `asks` (`rideId`)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS `index_asks_askedAt` ON `asks` (`askedAt`)")
   }
 }

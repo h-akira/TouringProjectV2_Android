@@ -2,6 +2,7 @@ package com.touringproject.v2.store
 
 import com.touringproject.v2.ask.AskOutcome
 import com.touringproject.v2.ask.AskRecord
+import com.touringproject.v2.api.HeadingSample
 import com.touringproject.v2.records.NoteRecord
 import com.touringproject.v2.records.RideListItem
 import com.touringproject.v2.records.orderRides
@@ -10,6 +11,7 @@ import com.touringproject.v2.ride.Ride
 import com.touringproject.v2.ride.RoutePoint
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.time.Instant
 
 fun AskEntity.toRecord() = AskRecord(
   askId = askId,
@@ -28,6 +30,13 @@ fun AskEntity.toRecord() = AskRecord(
   failure = failure,
   rideId = rideId,
   memo = memo,
+  sample = if (sampleLatitude != null && sampleLongitude != null && sampleAt != null) {
+    HeadingSample(sampleLatitude, sampleLongitude, Instant.ofEpochMilli(sampleAt).toString())
+  } else {
+    null
+  },
+  updatedAt = updatedAt,
+  sent = status != "offline" || sentUpdatedAt != null,
 )
 
 fun NoteEntity.toRecord() = NoteRecord(id, rideId, at, latitude, longitude, text, address, sent = sentUpdatedAt != null)
@@ -38,7 +47,7 @@ class RoomRecords(private val rides: RideDao, private val asks: AskDao, private 
     orderRides(
       rows.map { row ->
         val ride = row.ride.toRide(row.segments.sortedBy { it.seq })
-        RideListItem(ride, row.questions, saveState(ride.status, ride.updatedAt, row.ride.sentUpdatedAt, row.pointsLeft || row.memosLeft || row.notesLeft))
+        RideListItem(ride, row.questions, saveState(ride.status, ride.updatedAt, row.ride.sentUpdatedAt, row.pointsLeft || row.memosLeft || row.notesLeft || row.unreachedLeft))
       },
     )
   }
