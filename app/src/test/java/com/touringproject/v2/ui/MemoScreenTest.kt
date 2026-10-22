@@ -1,12 +1,16 @@
 package com.touringproject.v2.ui
 
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.text.TextRange
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
@@ -102,5 +106,28 @@ class MemoScreenTest {
     gate.complete(true)
     rule.waitForIdle()
     assertEquals(listOf<String?>("一度だけ"), saved)
+  }
+
+  // Android #55: while the save runs, ✕ and Back do nothing, so the screen under SC-08 is never closed with it.
+  @Test
+  fun closing_while_the_save_runs_does_nothing() {
+    val gate = CompletableDeferred<Boolean>()
+    rule.setContent { MemoScreen("走行のメモ", null, { saved += it; gate.await() }, { closed++ }) }
+    rule.onNodeWithTag("memoInput").performTextReplacement("一度だけ")
+    rule.onNodeWithTag("memoSave").performClick()
+    rule.onNodeWithTag("memoClose").performClick()
+    back()
+    rule.waitForIdle()
+    rule.onNodeWithText("変更を破棄しますか？").assertDoesNotExist()
+    gate.complete(true)
+    rule.waitForIdle()
+    assertEquals(1, closed)
+  }
+
+  // Android #55: a kept memo opens with the cursor at its end, ready to write on.
+  @Test
+  fun a_kept_memo_opens_with_the_cursor_at_its_end() {
+    show(initial = "前のメモ")
+    rule.onNodeWithTag("memoInput").assert(SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange, TextRange(4)))
   }
 }
