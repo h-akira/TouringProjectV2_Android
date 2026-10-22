@@ -231,4 +231,41 @@ class ApiClientTest {
     assertEquals("DELETE /Prod/rides/r1", server.takeRequest().let { "${it.method} ${it.path}" })
     assertEquals(3, server.requestCount)
   }
+
+  @Test
+  fun putNote_sends_the_whole_memo_and_reads_the_address_and_heading() = runTest {
+    server.enqueue(json(200, """{"noteId":"n1","applied":true,"address":"静岡県御殿場市新橋","headingDegrees":45.5}"""))
+    val body = NoteBody(
+      at = "2026-10-22T01:24:00Z",
+      location = Point(35.3, 138.9),
+      headingSample = HeadingSample(35.29, 138.89, "2026-10-22T01:23:40Z"),
+      text = "展望スペース",
+      updatedAt = "2026-10-22T01:25:00Z",
+    )
+    assertEquals(NoteSaved("静岡県御殿場市新橋", 45.5), client().putNote("r1", "n1", body))
+    val request = server.takeRequest()
+    assertEquals("PUT /Prod/rides/r1/notes/n1", "${request.method} ${request.path}")
+    val sent = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+    assertEquals("展望スペース", sent["text"]!!.jsonPrimitive.content)
+    assertEquals("35.3", sent["location"]!!.jsonObject["latitude"]!!.jsonPrimitive.content)
+    assertEquals("2026-10-22T01:23:40Z", sent["headingSample"]!!.jsonObject["at"]!!.jsonPrimitive.content)
+    assertEquals("2026-10-22T01:24:00Z", sent["at"]!!.jsonPrimitive.content)
+  }
+
+  // A memo opened before the ride had a point has no place; the Backend then has no address for it.
+  @Test
+  fun a_memo_without_a_place_sends_it_as_null_and_gets_no_address() = runTest {
+    server.enqueue(json(200, """{"noteId":"n1","applied":false,"address":null,"headingDegrees":null}"""))
+    assertEquals(NoteSaved(null, null), client().putNote("r1", "n1", NoteBody("2026-10-22T01:24:00Z", null, null, "x", "2026-10-22T01:25:00Z")))
+    val sent = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+    assertEquals(JsonNull, sent["location"])
+    assertEquals(JsonNull, sent["headingSample"])
+  }
+
+  @Test
+  fun deleteNote_goes_to_the_memo_under_its_ride() = runTest {
+    server.enqueue(MockResponse().setResponseCode(204))
+    client().deleteNote("r1", "n1")
+    assertEquals("DELETE /Prod/rides/r1/notes/n1", server.takeRequest().let { "${it.method} ${it.path}" })
+  }
 }

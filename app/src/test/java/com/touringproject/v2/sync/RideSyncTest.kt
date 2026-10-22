@@ -3,6 +3,8 @@ package com.touringproject.v2.sync
 import com.touringproject.v2.api.ApiError
 import com.touringproject.v2.api.ApiErrorKind
 import com.touringproject.v2.api.AskMemoBody
+import com.touringproject.v2.api.NoteBody
+import com.touringproject.v2.api.NoteSaved
 import com.touringproject.v2.api.RideApi
 import com.touringproject.v2.api.RideBody
 import com.touringproject.v2.api.RouteBody
@@ -87,6 +89,11 @@ private class World {
     override suspend fun putAskMemo(askId: String, body: AskMemoBody) = call("memo/$askId:${body.memo}")
     override suspend fun deleteRide(rideId: String) = call("delete/ride/$rideId")
     override suspend fun deleteAsk(askId: String) = call("delete/ask/$askId")
+    override suspend fun putNote(rideId: String, noteId: String, body: NoteBody): NoteSaved {
+      call("note/$rideId/$noteId:${body.text}")
+      return NoteSaved()
+    }
+    override suspend fun deleteNote(rideId: String, noteId: String) = call("delete/note/$rideId/$noteId")
   }
 
   val sync = RideSync(store, { if (hasKey) api else null }) { _, _ -> }
