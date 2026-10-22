@@ -3,6 +3,7 @@ package com.touringproject.v2.records
 import com.touringproject.v2.location.Fix
 import com.touringproject.v2.location.pickHeadingSample
 import com.touringproject.v2.ride.RoutePoint
+import kotlinx.serialization.Serializable
 import java.time.Instant
 
 // Point memos (US-D-08, SC-19). One is written while a ride records or is paused, at the place the ride has reached,
@@ -26,8 +27,10 @@ data class NoteRecord(
 
 /**
  * A point memo opened from Home and not yet saved: when it was opened and where the ride was then, with the older
- * point the Backend works the heading out from (slice 3 spec §4.3). Nothing is written until it is saved.
+ * point the Backend works the heading out from (slice 3 spec §4.3). Nothing is written until it is saved. Serializable:
+ * SC-19 keeps it in its key, so the memo stays where it was opened when the activity is recreated.
  */
+@Serializable
 data class NoteDraft(
   val id: String,
   val rideId: String,

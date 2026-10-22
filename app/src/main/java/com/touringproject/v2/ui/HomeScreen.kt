@@ -7,10 +7,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -78,7 +81,11 @@ fun WarningBand(text: String, onClick: (() -> Unit)?, onClose: (() -> Unit)?, mo
   }
 }
 
-// SC-02 (slice 1 minimum). Glanced at while riding: it never scrolls.
+/**
+ * SC-02 (slice 1 minimum). Glanced at while riding: it never scrolls. onNote is set while a ride records or is paused:
+ * "📝 地点メモ" then stands at the right of the intercom's line and opens SC-19 at once (slice 3 spec §7.1; the mock puts
+ * it on the card of the heading, which this screen does not have yet).
+ */
 @Composable
 fun HomeScreen(
   ui: HomeUi,
@@ -89,6 +96,7 @@ fun HomeScreen(
   modifier: Modifier = Modifier,
   onDismissVolume: () -> Unit = {},
   ride: @Composable () -> Unit = {},
+  onNote: (() -> Unit)? = null,
 ) {
   var confirming by remember { mutableStateOf(false) }
   Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -102,12 +110,22 @@ fun HomeScreen(
       WarningBand(banner.text, if (banner.leads) ({ onBanner(banner) }) else null, if (low) onDismissVolume else null, Modifier.testTag("banner"))
     }
     ride()
-    Text(
-      ui.askHint ?: "インカムのボタンで話せます",
-      Modifier.testTag("askHint"),
-      color = if (ui.askHint == null) Color(0xFF13804A) else MaterialTheme.colorScheme.onSurfaceVariant,
-      fontSize = 16.sp,
-    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+      Text(
+        ui.askHint ?: "インカムのボタンで話せます",
+        Modifier.weight(1f).testTag("askHint"),
+        color = if (ui.askHint == null) Color(0xFF13804A) else MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 16.sp,
+      )
+      if (onNote != null) {
+        Button(
+          onClick = onNote,
+          Modifier.heightIn(min = 48.dp).testTag("newNote"),
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF13804A), contentColor = Color.White),
+          contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+        ) { Text("📝 地点メモ", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+      }
+    }
     Column(
       Modifier.fillMaxWidth().heightIn(min = 76.dp, max = 140.dp).background(Color(0xFF1F4FD1), RoundedCornerShape(16.dp))
         .clickable { confirming = true }.padding(16.dp).testTag("newConversation"),

@@ -2,6 +2,8 @@ package com.touringproject.v2.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -12,6 +14,8 @@ import com.touringproject.v2.map.MapPin
 import com.touringproject.v2.map.RouteMap
 import com.touringproject.v2.map.rideMap
 import com.touringproject.v2.records.AskEdits
+import com.touringproject.v2.records.NoteDraft
+import com.touringproject.v2.records.NoteEdits
 import com.touringproject.v2.records.NoteRecord
 import com.touringproject.v2.ride.Ride
 import com.touringproject.v2.ride.RideController
@@ -142,4 +146,29 @@ fun AskMemoRoute(records: RoomRecords, edits: AskEdits, rideId: String, askId: S
   val ask = asks.firstOrNull { it.askId == askId } ?: return
   val target = remember(asks, askId) { askMemoTarget(asks, askId, ZoneId.systemDefault()) } ?: return
   MemoScreen(target, ask.memo, { edits.memo(askId, it) }, onClose, modifier)
+}
+
+/** SC-19 opened from Home: the memo is kept for the ride it was opened in when it is first saved (slice 3 spec §7.3). */
+@Composable
+fun NewNoteRoute(records: RoomRecords, notes: NoteEdits, draft: NoteDraft, onClose: () -> Unit, modifier: Modifier = Modifier) {
+  val ride = readRide(records, draft.rideId) ?: return
+  val kept = ride.value ?: return
+  val header = remember(draft, kept.name) { newNoteHeader(draft, kept.name, ZoneId.systemDefault()) }
+  NoteScreen(header, null, { notes.create(draft, it) }, onClose, modifier)
+}
+
+/**
+ * SC-19 opened from SC-06, to change or delete a kept memo. The memo last read stays on screen once it is deleted, so
+ * the deletion in progress is not cancelled with the screen and closes it once.
+ */
+@Composable
+fun NoteRoute(records: RoomRecords, notes: NoteEdits, rideId: String, noteId: String, onClose: () -> Unit, modifier: Modifier = Modifier) {
+  val ride = readRide(records, rideId) ?: return
+  val list = readNotes(records, rideId) ?: return
+  var shown by remember(noteId) { mutableStateOf(list.firstOrNull { it.id == noteId }) }
+  list.firstOrNull { it.id == noteId }?.let { shown = it }
+  val note = shown ?: return
+  val name = ride.value?.name ?: return
+  val header = remember(note, name) { noteHeader(note, name, ZoneId.systemDefault()) }
+  NoteScreen(header, note.text, { notes.text(noteId, it) }, onClose, modifier, onDelete = { notes.delete(noteId) })
 }
