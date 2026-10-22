@@ -92,6 +92,35 @@ class RoomAskLogTest {
     db.close()
   }
 
+  // Android #28: the rider closes the band; the warning goes until another ask cannot be written.
+  @Test
+  fun the_warning_goes_when_the_rider_closes_it() = runBlocking {
+    val dao = object : AskDao {
+      override suspend fun upsert(ask: AskEntity) = throw IOException("disk full")
+      override suspend fun ask(askId: String): AskEntity? = null
+      override suspend fun rideKept(rideId: String) = true
+      override fun countForRide(rideId: String) = kotlinx.coroutines.flow.flowOf(0)
+      override fun forRide(rideId: String) = kotlinx.coroutines.flow.flowOf(emptyList<AskEntity>())
+      override suspend fun setMemo(askId: String, memo: String?, at: Long) = error("not used")
+      override suspend fun deleteRow(askId: String) = error("not used")
+      override suspend fun markDeleted(deletion: DeletionEntity) = error("not used")
+      override suspend fun unsentMemos(): List<AskMemoRow> = error("not used")
+      override suspend fun markMemoSent(askId: String, updatedAt: Long) = error("not used")
+      override suspend fun markMemoRefused(askId: String, updatedAt: Long) = error("not used")
+      override suspend fun unsentUnreached(): List<AskEntity> = error("not used")
+      override suspend fun markUnreachedSent(askId: String, updatedAt: Long, address: String?, headingDegrees: Double?) = error("not used")
+      override suspend fun markUnreachedRefused(askId: String, updatedAt: Long) = error("not used")
+    }
+    val failing = RoomAskLog(dao, kotlinx.coroutines.MainScope()) { message, _ -> errors += message }
+    failing.save(record)
+    assertTrue(failing.failed.value)
+    failing.dismiss()
+    assertFalse(failing.failed.value)
+    failing.save(record)
+    assertTrue(failing.failed.value)
+    db.close()
+  }
+
   // Android #54: the ride was deleted while its ask waited for the answer; the ask is not kept for a ride that is gone.
   @Test
   fun an_ask_whose_ride_was_deleted_meanwhile_is_not_kept() = runBlocking {

@@ -96,6 +96,7 @@ fun HomeScreen(
   modifier: Modifier = Modifier,
   onDismissVolume: () -> Unit = {},
   ride: @Composable () -> Unit = {},
+  onDismissAskFailure: () -> Unit = {},
   onNote: (() -> Unit)? = null,
 ) {
   var confirming by remember { mutableStateOf(false) }
@@ -106,8 +107,12 @@ fun HomeScreen(
       OutlinedButton(onClick = onTapToTalk, Modifier.testTag("tapToTalk"), enabled = ui.askHint == null) { Text("🎤 押して話す") }
     }
     ui.banner?.let { banner ->
-      val low = banner == Banner.LOW_VOLUME
-      WarningBand(banner.text, if (banner.leads) ({ onBanner(banner) }) else null, if (low) onDismissVolume else null, Modifier.testTag("banner"))
+      val close = when (banner) {
+        Banner.LOW_VOLUME -> onDismissVolume
+        Banner.ASK_STORE_FAILED -> onDismissAskFailure
+        else -> null
+      }
+      WarningBand(banner.text, if (banner.leads) ({ onBanner(banner) }) else null, close, Modifier.testTag("banner"))
     }
     ride()
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

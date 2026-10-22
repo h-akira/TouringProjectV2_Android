@@ -57,6 +57,13 @@ class LabelsTest {
     assertEquals(Banner.STORE_FAILED, homeBanner(hasKey = false, returnAppMissing = true, volumeLow = true, storeFailed = true))
   }
 
+  // Android #28: an ask that could not be written comes after a failing ride store, before the settings that are missing.
+  @Test
+  fun an_ask_that_could_not_be_written_comes_after_the_ride_store() {
+    assertEquals(Banner.ASK_STORE_FAILED, homeBanner(hasKey = false, returnAppMissing = true, askStoreFailed = true))
+    assertEquals(Banner.STORE_FAILED, homeBanner(hasKey = true, returnAppMissing = false, storeFailed = true, askStoreFailed = true))
+  }
+
   @Test
   fun the_media_volume_is_low_below_a_third_of_the_maximum() {
     assertTrue(mediaVolumeLow(MediaVolume(4, 15)))

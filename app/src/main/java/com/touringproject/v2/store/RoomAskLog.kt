@@ -43,8 +43,13 @@ fun AskRecord.toEntity() = AskEntity(
  */
 class RoomAskLog(private val dao: AskDao, private val scope: CoroutineScope, private val log: (String, Throwable?) -> Unit) : AskLog {
   private val failing = MutableStateFlow(false)
-  /** True while the last write of an ask failed. */
+  /** True once an ask could not be written, until the rider closes the band or the next ask is written (Android #28). */
   val failed: StateFlow<Boolean> = failing.asStateFlow()
+
+  /** SC-02's ✕ on the band: the ask is lost either way, and the rider has seen it (Android #28). */
+  fun dismiss() {
+    failing.value = false
+  }
 
   override fun keep(record: AskRecord) {
     scope.launch { save(record) }
