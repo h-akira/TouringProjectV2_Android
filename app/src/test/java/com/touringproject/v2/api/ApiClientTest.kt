@@ -294,4 +294,28 @@ class ApiClientTest {
     assertEquals(TranscriptionResult("t2", "failed", null, "no_speech"), client().getTranscription("t2"))
     assertEquals("GET /Prod/transcriptions/t1", server.takeRequest().let { "${it.method} ${it.path}" })
   }
+
+  // Slice 4 spec §4.4: an unreached ask goes whole under the device's id, and the Backend answers its place and heading.
+  @Test
+  fun putOfflineAsk_sends_the_unreached_ask_and_reads_the_address_and_heading() = runTest {
+    server.enqueue(json(200, """{"askId":"u1","applied":true,"address":"神奈川県箱根町仙石原","headingDegrees":12.5}"""))
+    val body = OfflineAskBody("2026-10-22T01:24:00Z", null, null, "r1", "2026-10-22T01:24:00Z")
+    assertEquals(OfflineAskSaved("神奈川県箱根町仙石原", 12.5), client().putOfflineAsk("u1", body))
+    val request = server.takeRequest()
+    assertEquals("PUT /Prod/asks/u1/offline", "${request.method} ${request.path}")
+    val sent = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+    assertEquals("r1", sent["rideId"]!!.jsonPrimitive.content)
+    assertEquals(JsonNull, sent["location"])
+    assertEquals(JsonNull, sent["headingSample"])
+  }
+
+  // 409: the id is an ask the Backend took in; it is not retried.
+  @Test
+  fun an_unreached_ask_over_a_taken_one_is_a_conflict_and_not_retried() = runTest {
+    server.enqueue(json(409, """{"error":"conflict"}"""))
+    val error = runCatching { client().putOfflineAsk("u1", OfflineAskBody("2026-10-22T01:24:00Z", null, null, "r1", "2026-10-22T01:24:00Z")) }
+      .exceptionOrNull() as ApiError
+    assertEquals(ApiErrorKind.CONFLICT, error.kind)
+    assertEquals(1, server.requestCount)
+  }
 }

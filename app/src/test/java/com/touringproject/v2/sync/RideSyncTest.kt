@@ -5,6 +5,8 @@ import com.touringproject.v2.api.ApiErrorKind
 import com.touringproject.v2.api.AskMemoBody
 import com.touringproject.v2.api.NoteBody
 import com.touringproject.v2.api.NoteSaved
+import com.touringproject.v2.api.OfflineAskBody
+import com.touringproject.v2.api.OfflineAskSaved
 import com.touringproject.v2.api.RideApi
 import com.touringproject.v2.api.RideBody
 import com.touringproject.v2.api.RouteBody
@@ -47,6 +49,13 @@ private class World {
   fun note(id: String, updatedAt: Long, text: String = "展望", rideId: String = "r1") {
     notes[id] = NoteRow(UnsentNote(id, rideId, 1_500, 35.0, 139.0, null, null, null, text, updatedAt))
   }
+  class UnreachedRow(val ask: UnsentUnreached, var sent: Long? = null, var refused: Long? = null, var address: String? = null)
+  val unreached = linkedMapOf<String, UnreachedRow>()
+
+  fun unreached(id: String, updatedAt: Long) {
+    unreached[id] = UnreachedRow(UnsentUnreached(id, "r1", 1_400, 35.0, 139.0, null, null, null, updatedAt))
+  }
+  var online = true
   var hasKey = true
   var gate: CompletableDeferred<Unit>? = null
   var passes = 0
@@ -91,6 +100,15 @@ private class World {
       notes.getValue(noteId).refused = updatedAt
       calls += "refused:note/$noteId"
     }
+    override suspend fun unsentUnreached() =
+      unreached.values.filter { (it.sent ?: -1) < it.ask.updatedAt && it.refused != it.ask.updatedAt }.map { it.ask }
+    override suspend fun unreachedSent(askId: String, updatedAt: Long, address: String?, headingDegrees: Double?) {
+      unreached.getValue(askId).also { it.sent = updatedAt; it.address = address }
+    }
+    override suspend fun unreachedRefused(askId: String, updatedAt: Long) {
+      unreached.getValue(askId).refused = updatedAt
+      calls += "refused:unreached/$askId"
+    }
   }
 
   private fun call(name: String) {
@@ -110,9 +128,13 @@ private class World {
       return saved[noteId] ?: NoteSaved()
     }
     override suspend fun deleteNote(rideId: String, noteId: String) = call("delete/note/$rideId/$noteId")
+    override suspend fun putOfflineAsk(askId: String, body: OfflineAskBody): OfflineAskSaved {
+      call("unreached/$askId:${body.rideId}")
+      return OfflineAskSaved("箱根町仙石原", 12.5)
+    }
   }
 
-  val sync = RideSync(store, { if (hasKey) api else null }) { _, _ -> }
+  val sync = RideSync(store, { if (hasKey) api else null }, { online }) { _, _ -> }
 }
 
 class RideSyncTest {
@@ -398,5 +420,60 @@ class RideSyncTest {
     w.sync.pass()
     assertEquals(listOf("ride/r1:recording"), w.calls)
     assertTrue(w.deletions.isEmpty())
+  }
+
+  // Slice 4 spec §5.1: unreached asks go after the point memos and before the memos, so a memo finds its ask there.
+  @Test
+  fun an_unreached_ask_goes_before_the_memos_and_keeps_the_address_it_gets() = runTest {
+    val w = World()
+    w.add(recording)
+    w.rows.getValue("r1").sent = recording.updatedAt
+    w.note("n1", 5_000)
+    w.unreached("u1", 1_400)
+    w.memos["u1"] = World.MemoRow("何の山か", 6_000)
+    w.sync.pass()
+    assertEquals(listOf("note/r1/n1:展望", "unreached/u1:r1", "memo/u1:何の山か"), w.calls)
+    assertEquals("箱根町仙石原", w.unreached.getValue("u1").address)
+    w.calls.clear()
+    w.sync.pass()
+    assertEquals(emptyList<String>(), w.calls)
+  }
+
+  // A failure on the way ends the pass, so the memo of an unreached ask that did not go waits for it.
+  @Test
+  fun the_memo_of_an_unreached_ask_that_failed_to_go_waits_for_it() = runTest {
+    val w = World()
+    w.unreached("u1", 1_400)
+    w.memos["u1"] = World.MemoRow("何の山か", 6_000)
+    w.fail["unreached/u1:r1"] = ApiErrorKind.NETWORK
+    w.sync.pass()
+    assertEquals(listOf("unreached/u1:r1"), w.calls)
+  }
+
+  // 409: the Backend took in an ask under this id; the unreached one is refused, not sent again.
+  @Test
+  fun an_unreached_ask_the_backend_refuses_is_not_sent_again() = runTest {
+    val w = World()
+    w.unreached("u1", 1_400)
+    w.fail["unreached/u1:r1"] = ApiErrorKind.CONFLICT
+    w.sync.pass()
+    assertEquals(listOf("unreached/u1:r1", "refused:unreached/u1"), w.calls)
+    w.calls.clear()
+    w.sync.pass()
+    assertEquals(emptyList<String>(), w.calls)
+  }
+
+  // Slice 4 spec §5.2: without a network a pass does not try; what waits goes on the next trigger with one.
+  @Test
+  fun without_a_network_a_pass_makes_no_request() = runTest {
+    val w = World()
+    w.add(recording, points = 300)
+    w.unreached("u1", 1_400)
+    w.online = false
+    w.sync.pass()
+    assertEquals(emptyList<String>(), w.calls)
+    w.online = true
+    w.sync.pass()
+    assertEquals(listOf("ride/r1:recording", "route/r1/0:300", "unreached/u1:r1"), w.calls)
   }
 }

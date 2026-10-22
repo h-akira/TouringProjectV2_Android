@@ -220,6 +220,23 @@ interface AskDao {
   @Query("UPDATE asks SET memoRejectedUpdatedAt = :updatedAt WHERE askId = :askId")
   suspend fun markMemoRefused(askId: String, updatedAt: Long)
 
+  // Sending unreached asks (slice 4 spec §5.1): those changed since they were taken, unless that version was refused.
+  @Query(
+    "SELECT * FROM asks WHERE status = 'offline' AND (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
+      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt) ORDER BY updatedAt",
+  )
+  suspend fun unsentUnreached(): List<AskEntity>
+
+  /** As a point memo's: the marker never moves back, and an answer without an address or heading keeps what it has. */
+  @Query(
+    "UPDATE asks SET sentUpdatedAt = MAX(IFNULL(sentUpdatedAt, :updatedAt), :updatedAt), address = IFNULL(:address, address), " +
+      "headingDegrees = IFNULL(:headingDegrees, headingDegrees) WHERE askId = :askId",
+  )
+  suspend fun markUnreachedSent(askId: String, updatedAt: Long, address: String?, headingDegrees: Double?)
+
+  @Query("UPDATE asks SET rejectedUpdatedAt = :updatedAt WHERE askId = :askId")
+  suspend fun markUnreachedRefused(askId: String, updatedAt: Long)
+
   @Insert(onConflict = OnConflictStrategy.REPLACE)
   suspend fun markDeleted(deletion: DeletionEntity)
 

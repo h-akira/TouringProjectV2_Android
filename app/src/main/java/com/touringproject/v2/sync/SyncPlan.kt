@@ -2,6 +2,7 @@ package com.touringproject.v2.sync
 
 import com.touringproject.v2.api.HeadingSample
 import com.touringproject.v2.api.NoteBody
+import com.touringproject.v2.api.OfflineAskBody
 import com.touringproject.v2.api.Point
 import com.touringproject.v2.api.PointBody
 import com.touringproject.v2.api.RideBody
@@ -64,4 +65,11 @@ fun UnsentNote.toBody(): NoteBody {
   val location = if (latitude != null && longitude != null) Point(latitude, longitude) else null
   val sample = if (sampleLatitude != null && sampleLongitude != null && sampleAt != null) HeadingSample(sampleLatitude, sampleLongitude, iso(sampleAt)) else null
   return NoteBody(iso(at), location, sample, text, iso(updatedAt))
+}
+
+/** An unreached ask goes with its place and sample as a point memo does: each only when it is whole. */
+fun UnsentUnreached.toBody(): OfflineAskBody {
+  val location = if (latitude != null && longitude != null) Point(latitude, longitude) else null
+  val sample = if (sampleLatitude != null && sampleLongitude != null && sampleAt != null) HeadingSample(sampleLatitude, sampleLongitude, iso(sampleAt)) else null
+  return OfflineAskBody(iso(askedAt), location, sample, rideId, iso(updatedAt))
 }

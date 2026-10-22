@@ -78,6 +78,9 @@ class RoomAskLogTest {
       override suspend fun unsentMemos(): List<AskMemoRow> = error("not used")
       override suspend fun markMemoSent(askId: String, updatedAt: Long) = error("not used")
       override suspend fun markMemoRefused(askId: String, updatedAt: Long) = error("not used")
+      override suspend fun unsentUnreached(): List<AskEntity> = error("not used")
+      override suspend fun markUnreachedSent(askId: String, updatedAt: Long, address: String?, headingDegrees: Double?) = error("not used")
+      override suspend fun markUnreachedRefused(askId: String, updatedAt: Long) = error("not used")
     }
     val failing = RoomAskLog(dao, kotlinx.coroutines.MainScope()) { message, _ -> errors += message }
     failing.save(record)
@@ -138,6 +141,9 @@ class RoomAskLogTest {
       override suspend fun unsentMemos(): List<AskMemoRow> = error("not used")
       override suspend fun markMemoSent(askId: String, updatedAt: Long) = error("not used")
       override suspend fun markMemoRefused(askId: String, updatedAt: Long) = error("not used")
+      override suspend fun unsentUnreached(): List<AskEntity> = error("not used")
+      override suspend fun markUnreachedSent(askId: String, updatedAt: Long, address: String?, headingDegrees: Double?) = error("not used")
+      override suspend fun markUnreachedRefused(askId: String, updatedAt: Long) = error("not used")
     }
     val dropping = RoomAskLog(dao, kotlinx.coroutines.MainScope()) { message, _ -> errors += message }
     dropping.save(record)

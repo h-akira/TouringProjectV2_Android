@@ -18,8 +18,9 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resumeWithException
 
 // Backend API (Backend/openapi.yaml). Errors are classified so the ask loop can pick the spoken message.
-// GONE is 410: the record, or its ride, was deleted (slice 3 spec §5.4); the sync treats it as sent.
-enum class ApiErrorKind { INVALID_KEY, BAD_REQUEST, NOT_FOUND, GONE, RATE_LIMITED, SERVER, NETWORK }
+// GONE is 410: the record, or its ride, was deleted (slice 3 spec §5.4); the sync treats it as sent. CONFLICT is 409: an
+// unreached ask's id is one the Backend took in (slice 4 spec §4.4); the sync treats it as refused.
+enum class ApiErrorKind { INVALID_KEY, BAD_REQUEST, NOT_FOUND, GONE, CONFLICT, RATE_LIMITED, SERVER, NETWORK }
 
 class ApiError(val kind: ApiErrorKind, message: String? = null) : Exception(message ?: kind.name)
 
@@ -104,15 +105,23 @@ data class NoteBody(val at: String, val location: Point?, val headingSample: Hea
 /** What the Backend settled for a point memo when it first took it; null when it could not tell (no place, no heading). */
 @Serializable data class NoteSaved(val address: String? = null, val headingDegrees: Double? = null)
 
+/** An ask that never reached the Backend, as a whole (slice 4 spec §4.4). location is null when it had no place yet. */
+@Serializable
+data class OfflineAskBody(val askedAt: String, val location: Point?, val headingSample: HeadingSample?, val rideId: String, val updatedAt: String)
+
+/** What the Backend settled for an unreached ask when it first took it; null when it could not tell. */
+@Serializable data class OfflineAskSaved(val address: String? = null, val headingDegrees: Double? = null)
+
 /**
  * Every call may be sent again and again: the Backend keeps one copy of each, and a deletion is the same however often
- * it comes. A 400 throws BAD_REQUEST, a 404 NOT_FOUND and a 410 (deleted) GONE.
+ * it comes. A 400 throws BAD_REQUEST, a 404 NOT_FOUND, a 409 CONFLICT and a 410 (deleted) GONE.
  */
 interface RideApi {
   suspend fun putRide(rideId: String, body: RideBody)
   suspend fun putRoute(rideId: String, seq: Int, body: RouteBody)
   suspend fun putAskMemo(askId: String, body: AskMemoBody)
   suspend fun putNote(rideId: String, noteId: String, body: NoteBody): NoteSaved
+  suspend fun putOfflineAsk(askId: String, body: OfflineAskBody): OfflineAskSaved
   suspend fun deleteRide(rideId: String)
   suspend fun deleteAsk(askId: String)
   suspend fun deleteNote(rideId: String, noteId: String)
@@ -127,6 +136,7 @@ private fun kindFor(status: Int): ApiErrorKind? = when {
   status == 403 -> ApiErrorKind.INVALID_KEY
   status == 400 -> ApiErrorKind.BAD_REQUEST
   status == 404 -> ApiErrorKind.NOT_FOUND
+  status == 409 -> ApiErrorKind.CONFLICT
   status == 410 -> ApiErrorKind.GONE
   status == 429 -> ApiErrorKind.RATE_LIMITED
   status >= 500 -> ApiErrorKind.SERVER
@@ -188,6 +198,11 @@ class ApiClient(
 
   override suspend fun putNote(rideId: String, noteId: String, body: NoteBody): NoteSaved =
     json.decodeFromString(NoteSaved.serializer(), request("PUT", "/rides/$rideId/notes/$noteId", rideJson.encodeToString(NoteBody.serializer(), body), TRANSIENT))
+
+  override suspend fun putOfflineAsk(askId: String, body: OfflineAskBody): OfflineAskSaved = json.decodeFromString(
+    OfflineAskSaved.serializer(),
+    request("PUT", "/asks/$askId/offline", rideJson.encodeToString(OfflineAskBody.serializer(), body), TRANSIENT),
+  )
 
   override suspend fun deleteRide(rideId: String) {
     request("DELETE", "/rides/$rideId", null, TRANSIENT)

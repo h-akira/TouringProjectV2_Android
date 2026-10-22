@@ -15,6 +15,11 @@ import com.touringproject.v2.sync.ChunkRange
 import com.touringproject.v2.sync.PendingDeletion
 import com.touringproject.v2.sync.UnsentAskMemo
 import com.touringproject.v2.sync.UnsentNote
+import com.touringproject.v2.sync.UnsentUnreached
+import com.touringproject.v2.api.HeadingSample
+import com.touringproject.v2.ask.unreachedAsk
+import com.touringproject.v2.location.Fix
+import kotlinx.coroutines.MainScope
 import com.touringproject.v2.sync.RideSync
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -194,5 +199,28 @@ class RoomSyncStoreTest {
     sync.pass()
     assertEquals(2, server.requestCount)
     server.shutdown()
+  }
+
+  // Slice 4 spec §5.1: an unreached ask is unsent until its version is taken or refused, and keeps the address it got.
+  @Test
+  fun an_unreached_ask_is_unsent_until_its_version_is_taken_and_keeps_its_address() = runBlocking {
+    rides.save(ride)
+    val log = RoomAskLog(db.asks(), MainScope()) { _, _ -> }
+    log.save(unreachedAsk("u1", 1_400, Fix(35.0, 139.0, 1_400, 5.0), HeadingSample(34.99, 139.0, "1970-01-01T00:00:01.300Z"), "r1"))
+    log.save(unreachedAsk("u2", 1_600, null, null, "r1"))
+    assertEquals(
+      listOf(UnsentUnreached("u1", "r1", 1_400, 35.0, 139.0, 34.99, 139.0, 1_300, 1_400), UnsentUnreached("u2", "r1", 1_600, null, null, null, null, null, 1_600)),
+      store.unsentUnreached(),
+    )
+    store.unreachedSent("u1", 1_400, "神奈川県箱根町仙石原", 12.5)
+    store.unreachedRefused("u2", 1_600)
+    assertEquals(emptyList<UnsentUnreached>(), store.unsentUnreached())
+    assertEquals("神奈川県箱根町仙石原" to 12.5, db.asks().ask("u1")!!.let { it.address to it.headingDegrees })
+    // The answer to a later send without an address (410) keeps the one settled before.
+    store.unreachedSent("u1", 1_400, null, null)
+    assertEquals("神奈川県箱根町仙石原", db.asks().ask("u1")!!.address)
+    // The other asks are never unreached ones to send.
+    db.asks().upsert(db.asks().ask("u1")!!.copy(askId = "a1", status = "answered", updatedAt = null, sentUpdatedAt = null))
+    assertEquals(emptyList<UnsentUnreached>(), store.unsentUnreached())
   }
 }

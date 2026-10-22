@@ -7,6 +7,7 @@ import com.touringproject.v2.sync.SyncStore
 import com.touringproject.v2.sync.Unsent
 import com.touringproject.v2.sync.UnsentAskMemo
 import com.touringproject.v2.sync.UnsentNote
+import com.touringproject.v2.sync.UnsentUnreached
 
 class RoomSyncStore(private val dao: RideDao, private val asks: AskDao, private val notes: NoteDao) : SyncStore {
   override suspend fun unsent(): List<Unsent> = dao.unsentSnapshot().map {
@@ -42,4 +43,16 @@ class RoomSyncStore(private val dao: RideDao, private val asks: AskDao, private 
     notes.markSent(noteId, updatedAt, address, headingDegrees)
 
   override suspend fun noteRefused(noteId: String, updatedAt: Long) = notes.markRefused(noteId, updatedAt)
+
+  // An unreached ask always has its ride and its version (slice 4 spec §4.2); a row without them is not one to send.
+  override suspend fun unsentUnreached(): List<UnsentUnreached> = asks.unsentUnreached().mapNotNull {
+    val rideId = it.rideId ?: return@mapNotNull null
+    val updatedAt = it.updatedAt ?: return@mapNotNull null
+    UnsentUnreached(it.askId, rideId, it.askedAt, it.latitude, it.longitude, it.sampleLatitude, it.sampleLongitude, it.sampleAt, updatedAt)
+  }
+
+  override suspend fun unreachedSent(askId: String, updatedAt: Long, address: String?, headingDegrees: Double?) =
+    asks.markUnreachedSent(askId, updatedAt, address, headingDegrees)
+
+  override suspend fun unreachedRefused(askId: String, updatedAt: Long) = asks.markUnreachedRefused(askId, updatedAt)
 }
