@@ -108,8 +108,12 @@ class AskDeps(
   val route: RouteControl,
   val recorder: Recorder,
   val recordings: RecordingSink,
-  /** Where the asks that reached the Backend are kept (slice 2 spec §5.2). */
+  /** Where the asks are kept: those that reached the Backend (slice 2 spec §5.2) and those that did not (slice 4 spec §4). */
   val asks: AskLog,
+  /** Whether the device has a network now: without one the ask is not sent (US-C-09.001). */
+  val online: () -> Boolean,
+  /** A new id for an unreached ask, which the device makes (slice 4 spec §4.2). */
+  val newId: () -> String,
   /** Whether a ride is recording now: an ask starts only then (slice 2 spec §4.7). */
   val ride: () -> RideNow,
   val location: Positions,
