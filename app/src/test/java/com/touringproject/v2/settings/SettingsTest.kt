@@ -39,14 +39,14 @@ class SettingsTest {
   fun saved_settings_round_trip() = runTest {
     val store = FakeStore()
     val repo = SettingsRepository(store)
-    val s = Settings("rider01", returnEnabled = false, returnApp = maps, returnTiming = ReturnTiming.SPOKEN, recentApps = listOf(maps), answerVolumeDb = 3, maxRecordingHours = 6, showAskPins = false)
+    val s = Settings("rider01", returnEnabled = false, returnApp = maps, returnTiming = ReturnTiming.SPOKEN, recentApps = listOf(maps), answerVolumeDb = 3, maxRecordingHours = 6, showAskPins = false, showNotePins = false)
     repo.update(s)
     assertEquals(s, SettingsRepository(store).load())
   }
 
   @Test
   fun broken_values_fall_back_to_defaults() {
-    val raw = """{"userName":"NO","returnEnabled":"yes","returnApp":{"packageName":1},"returnTiming":"later","recentApps":[{"packageName":"a","label":"A"},3],"answerVolumeDb":12,"maxRecordingHours":72,"showAskPins":"no"}"""
+    val raw = """{"userName":"NO","returnEnabled":"yes","returnApp":{"packageName":1},"returnTiming":"later","recentApps":[{"packageName":"a","label":"A"},3],"answerVolumeDb":12,"maxRecordingHours":72,"showAskPins":"no","showNotePins":0}"""
     val (s, needsSave) = decodeSettings(raw, Random(2))
     assertTrue(needsSave)
     assertTrue(s.returnEnabled)
@@ -56,6 +56,13 @@ class SettingsTest {
     assertEquals(DEFAULT_VOLUME_DB, s.answerVolumeDb)
     assertEquals(DEFAULT_MAX_RECORDING_HOURS, s.maxRecordingHours)
     assertTrue(s.showAskPins)
+    assertTrue(s.showNotePins)
+  }
+
+  // Settings saved before slice 3 have no choice for the point memos' pins: they are shown.
+  @Test
+  fun the_point_memos_pins_are_shown_until_hidden() {
+    assertTrue(decodeSettings("""{"userName":"rider01","showAskPins":false}""").first.showNotePins)
   }
 
   @Test

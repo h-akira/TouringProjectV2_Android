@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.touringproject.v2.map.MapData
+import com.touringproject.v2.map.PinKind
 import com.touringproject.v2.ride.cutRideName
 import com.touringproject.v2.ride.rideName
 import kotlinx.coroutines.launch
@@ -125,11 +126,11 @@ data class RideDetailUi(
 )
 
 /**
- * SC-06. The map can fill the screen (onFullMap tells AppUi to hide the tabs), its pins can be hidden (showPins is
- * kept in the settings), and a tapped pin shows its card above the map's bottom edge. onRename says whether the new
- * name was saved; one that was not is told (Android #46). onMemo opens SC-08 for the ride's memo, and onNote SC-19 for
- * a point memo. An ended ride can be
- * deleted after DL-01; onDelete says whether it was (slice 3 spec §7.4), and AppUi then goes back to SC-05.
+ * SC-06. The map can fill the screen (onFullMap tells AppUi to hide the tabs), the asks' and the point memos' pins can
+ * be hidden apart (showPins and showNotes are kept in the settings), and a tapped pin shows its card above the map's
+ * bottom edge. onRename says whether the new name was saved; one that was not is told (Android #46). onMemo opens SC-08
+ * for the ride's memo, and onNote SC-19 for a point memo. An ended ride can be deleted after DL-01; onDelete says
+ * whether it was (slice 3 spec §7.4), and AppUi then goes back to SC-05.
  */
 @Composable
 fun RideDetailScreen(
@@ -145,6 +146,8 @@ fun RideDetailScreen(
   onMemo: () -> Unit = {},
   onDelete: suspend () -> Boolean = { false },
   onNote: (String) -> Unit = {},
+  showNotes: Boolean = true,
+  onShowNotes: (Boolean) -> Unit = {},
 ) {
   // Above the early return: a deletion in progress outlives the ride turning "not found" on screen (final review).
   val scope = rememberCoroutineScope()
@@ -164,22 +167,24 @@ fun RideDetailScreen(
   LaunchedEffect(full) { onFullMap(full) }
   DisposableEffect(Unit) { onDispose { onFullMap(false) } }
   BackHandler(enabled = full) { full = false }
-  val shown = if (showPins) ui.map else ui.map.copy(pins = emptyList())
-  val card = selected?.takeIf { showPins }?.let { ui.cards[it] }
+  val shown = ui.map.showing(asks = showPins, notes = showNotes)
+  // A card goes with its pin when that kind is hidden.
+  val visible = selected?.takeIf { id -> shown.pins.any { it.id == id } }
+  val card = visible?.let { ui.cards[it] }
   val mapArea: @Composable (Modifier) -> Unit = { area ->
     Box(area) {
-      map(shown, selected.takeIf { showPins }, { selected = it }, Modifier.fillMaxSize())
+      map(shown, visible, { selected = it }, Modifier.fillMaxSize())
       TextButton(
         onClick = { full = !full },
         modifier = Modifier.align(Alignment.TopStart).padding(6.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp)).testTag("fullMap"),
       ) { Text(if (full) "✕" else "⛶", fontSize = 18.sp) }
-      FilterChip(
-        selected = showPins,
-        onClick = { onShowPins(!showPins) },
-        label = { Text("💬 質問") },
-        modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).testTag("pinToggle"),
-      )
-      card?.let { PinCard(it, { onAsk(it.id) }, Modifier.align(Alignment.BottomCenter).padding(8.dp)) }
+      Row(Modifier.align(Alignment.TopEnd).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        FilterChip(selected = showPins, onClick = { onShowPins(!showPins) }, label = { Text("💬 質問") }, modifier = Modifier.testTag("pinToggle"))
+        FilterChip(selected = showNotes, onClick = { onShowNotes(!showNotes) }, label = { Text("📝 地点メモ") }, modifier = Modifier.testTag("notePinToggle"))
+      }
+      card?.let {
+        PinCard(it, { if (it.kind == PinKind.NOTE) onNote(it.id) else onAsk(it.id) }, Modifier.align(Alignment.BottomCenter).padding(8.dp))
+      }
     }
   }
   // The map keeps one place in the composition and only changes size, so full screen keeps the rider's pan and zoom.
@@ -214,7 +219,7 @@ fun RideDetailScreen(
         item { Summary(ui.summary, ui.recording) }
         item { MemoBox("走行のメモ", ui.memo, "＋ 走行のメモ", onMemo, "rideMemo") }
         item { Muted("時系列", Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp)) }
-        if (ui.timeline.isEmpty()) item { Muted("この走行の記録中にした質問はありません。", Modifier.padding(horizontal = 16.dp)) }
+        if (ui.timeline.isEmpty()) item { Muted("この走行の記録中にした質問と地点メモはありません。", Modifier.padding(horizontal = 16.dp)) }
         items(ui.timeline) { row -> TimelineItem(row, onAsk, onNote) }
       }
     }
@@ -280,9 +285,10 @@ private fun PinCard(card: PinCardUi, onOpen: () -> Unit, modifier: Modifier = Mo
       .padding(12.dp).testTag("pinCard"),
   ) {
     Muted(card.heading, size = 13)
-    Text(card.question, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    val note = card.kind == PinKind.NOTE
+    Text(card.question, fontWeight = if (note) FontWeight.Normal else FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
     card.answer?.let { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 14.sp) }
-    Text("詳しく見る ›", color = Accent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+    Text(if (note) "開く ›" else "詳しく見る ›", color = if (note) Memo else Accent, fontWeight = FontWeight.Bold, fontSize = 14.sp)
   }
 }
 
@@ -300,6 +306,7 @@ private fun Summary(summary: RideSummaryUi, recording: Boolean) {
       SummaryStat(summary.questions, "質問", Modifier.testTag("summaryQuestions"))
     }
     summary.pauses?.let { Muted(it) }
+    summary.notes?.let { Muted(it) }
     if (summary.autoEnded) Text("最長時間に達したため、自動で終了しました", color = Rec, fontSize = 14.sp, modifier = Modifier.testTag("autoEnded"))
     if (recording) Muted("記録中の走行です。ルートは開いたときまでのものです。")
   }

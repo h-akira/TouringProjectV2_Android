@@ -12,6 +12,7 @@ import com.touringproject.v2.map.MapPin
 import com.touringproject.v2.map.RouteMap
 import com.touringproject.v2.map.rideMap
 import com.touringproject.v2.records.AskEdits
+import com.touringproject.v2.records.NoteRecord
 import com.touringproject.v2.ride.Ride
 import com.touringproject.v2.ride.RideController
 import com.touringproject.v2.ride.RideStatus
@@ -41,16 +42,21 @@ private fun readAsks(records: RoomRecords, rideId: String): List<AskRecord>? =
   remember(rideId) { records.asks(rideId) }.collectAsStateWithLifecycle(null).value
 
 @Composable
+private fun readNotes(records: RoomRecords, rideId: String): List<NoteRecord>? =
+  remember(rideId) { records.notes(rideId) }.collectAsStateWithLifecycle(null).value
+
+@Composable
 private fun readRoute(records: RoomRecords, rideId: String): List<RoutePoint>? =
   produceState<List<RoutePoint>?>(null, rideId) { value = records.route(rideId) }.value
 
-fun rideDetailUi(ride: Ride, asks: List<AskRecord>, route: List<RoutePoint>, now: Long, zone: ZoneId) = RideDetailUi(
+/** The asks' and the point memos' cards share one map: their ids are UUIDs, so they never meet. */
+fun rideDetailUi(ride: Ride, asks: List<AskRecord>, notes: List<NoteRecord>, route: List<RoutePoint>, now: Long, zone: ZoneId) = RideDetailUi(
   name = ride.name,
-  summary = rideSummary(ride, asks.size, now, zone),
+  summary = rideSummary(ride, asks.size, now, zone, notes.size),
   recording = ride.status != RideStatus.ENDED,
-  timeline = rideTimeline(ride, asks, zone),
-  map = rideMap(route, ride.status == RideStatus.ENDED, askPins(asks)),
-  cards = asks.mapNotNull { pinCard(asks, it.askId, zone) }.associateBy { it.id },
+  timeline = rideTimeline(ride, asks, zone, notes),
+  map = rideMap(route, ride.status == RideStatus.ENDED, askPins(asks) + notePins(notes)),
+  cards = (asks.mapNotNull { pinCard(asks, it.askId, zone) } + notes.mapNotNull { noteCard(notes, it.id, zone) }).associateBy { it.id },
   memo = ride.memo,
 )
 
@@ -66,13 +72,15 @@ fun RideDetailRoute(
   onFullMap: (Boolean) -> Unit,
   onMemo: () -> Unit,
   modifier: Modifier = Modifier,
+  onNote: (String) -> Unit = {},
 ) {
   val ride = readRide(records, rideId) ?: return
   val asks = readAsks(records, rideId) ?: return
+  val notes = readNotes(records, rideId) ?: return
   val route = readRoute(records, rideId) ?: return
   // A long ride has tens of thousands of points: the map's data is made off the main thread (Android #42).
-  val ui = produceState<Read<RideDetailUi?>?>(null, ride, asks, route) {
-    value = Read(withContext(Dispatchers.Default) { ride.value?.let { rideDetailUi(it, asks, route, System.currentTimeMillis(), ZoneId.systemDefault()) } })
+  val ui = produceState<Read<RideDetailUi?>?>(null, ride, asks, notes, route) {
+    value = Read(withContext(Dispatchers.Default) { ride.value?.let { rideDetailUi(it, asks, notes, route, System.currentTimeMillis(), ZoneId.systemDefault()) } })
   }.value ?: return
   RideDetailScreen(
     ui.value, routeMap,
@@ -85,6 +93,9 @@ fun RideDetailRoute(
     modifier = modifier,
     onMemo = onMemo,
     onDelete = { rides.delete(rideId).also { if (it) onBack() } },
+    onNote = onNote,
+    showNotes = settings.showNotePins,
+    onShowNotes = { updateSettings(settings.copy(showNotePins = it)) },
   )
 }
 

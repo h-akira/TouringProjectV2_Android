@@ -30,6 +30,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.touringproject.v2.map.LatLon
 import com.touringproject.v2.map.MapData
 import com.touringproject.v2.map.MapPin
+import com.touringproject.v2.map.PinKind
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -363,5 +364,48 @@ class RecordsScreensTest {
     rule.onNodeWithText("09:50 · 御殿場市新橋 · 📝 地点メモ").assertExists()
     rule.onNodeWithTag("note-n1").performClick()
     assertEquals(listOf("n1"), opened)
+  }
+
+  private fun withNote() = detail().let { d ->
+    d.copy(
+      map = d.map.copy(pins = d.map.pins + MapPin("n1", 1, LatLon(35.25, 138.95), kind = PinKind.NOTE)),
+      cards = d.cards + ("n1" to PinCardUi("n1", "1 · 09:50 · 御殿場市新橋 · 📝 地点メモ", "展望スペース", null, PinKind.NOTE)),
+      summary = d.summary.copy(notes = "📝 地点メモ 1件"),
+    )
+  }
+
+  // US-D-08: a point memo's green pin shows its card, and the card opens SC-19.
+  @Test
+  fun a_point_memos_pin_shows_its_card_which_opens_the_memo() {
+    val opened = mutableListOf<String>()
+    val asked = mutableListOf<String>()
+    rule.setContent { RideDetailScreen(withNote(), fakeMap, true, {}, {}, { asked += it }, { true }, {}, onNote = { opened += it }) }
+    rule.onNodeWithText("📝 地点メモ 1件").assertExists()
+    rule.onNodeWithTag("pin-n1").performClick()
+    rule.onNodeWithText("展望スペース").assertExists()
+    rule.onNodeWithText("開く ›").assertExists()
+    rule.onNodeWithTag("pinCard").performClick()
+    assertEquals(listOf("n1"), opened)
+    assertEquals(emptyList<String>(), asked)
+  }
+
+  // US-D-02: "💬 質問" and "📝 地点メモ" show or hide their own pins; each choice goes to the settings.
+  @Test
+  fun the_asks_and_the_point_memos_pins_are_shown_or_hidden_apart() {
+    var asks by mutableStateOf(true)
+    var notes by mutableStateOf(true)
+    rule.setContent {
+      RideDetailScreen(withNote(), fakeMap, asks, { asks = it }, {}, {}, { true }, {}, showNotes = notes, onShowNotes = { notes = it })
+    }
+    rule.onNodeWithTag("mapState").assertTextEquals("pins 3 selected null")
+    rule.onNodeWithTag("pin-n1").performClick()
+    rule.onNodeWithTag("notePinToggle").performClick()
+    rule.onNodeWithTag("mapState").assertTextEquals("pins 2 selected null")
+    rule.onNodeWithTag("pinCard").assertDoesNotExist()
+    rule.onNodeWithTag("pinToggle").performClick()
+    rule.onNodeWithTag("mapState").assertTextEquals("pins 0 selected null")
+    // The timeline is shown whatever the map shows.
+    rule.onNodeWithTag("timeline").performScrollToNode(hasTestTag("ask-a1"))
+    assertEquals(false to false, asks to notes)
   }
 }

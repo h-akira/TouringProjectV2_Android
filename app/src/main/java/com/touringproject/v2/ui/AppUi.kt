@@ -155,8 +155,7 @@ fun AppUi(graph: AppGraph) {
                 )
               }
               entry<RecordsKey> {
-                // Read only while the list is shown: Room runs the query again for every route point (Android #42).
-                val rideList by graph.records.list.collectAsStateWithLifecycle(null)
+                val rideList by graph.recordsList.collectAsStateWithLifecycle()
                 RideListScreen(
                   rideList?.let { rideSections(it, System.currentTimeMillis(), ZoneId.systemDefault()) },
                   onRide = { tabs.push(RideKey(it)) },

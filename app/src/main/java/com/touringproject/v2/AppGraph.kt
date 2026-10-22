@@ -34,6 +34,7 @@ import com.touringproject.v2.recordings.TRIAL_IDLE
 import com.touringproject.v2.recordings.TrialController
 import com.touringproject.v2.recordings.TrialDeps
 import com.touringproject.v2.recordings.TrialState
+import com.touringproject.v2.records.RideListItem
 import com.touringproject.v2.records.activeAskCount
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.RideController
@@ -93,6 +94,12 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val askLog = RoomAskLog(database.asks(), scope) { message, e -> Log.w("trv2.ask", message, e) }
   /** What the Records tab reads (SC-05, SC-06, SC-07). */
   val records = RoomRecords(database.rides(), database.asks(), database.notes())
+
+  /**
+   * SC-05's list, shared so that coming back from a ride shows the list it left at once (Android #49). It is read only
+   * while the list is shown and for 5 s after: Room runs the query again for every route point (Android #42).
+   */
+  val recordsList: StateFlow<List<RideListItem>?> = records.list.stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
   private val notices = RideNotices(context)
 
   /** Sends rides, routes, memos, point memos and deletions; a pass runs on each trigger (slice 2 spec §5.3). */

@@ -47,7 +47,10 @@ class AppUiTest {
   fun the_records_tab_lists_the_kept_rides_and_home_keeps_its_place() {
     val graph = (rule.activity.application as TouringApp).graph
     rule.onNodeWithTag("tab-RECORDS").performClick()
-    rule.onNodeWithText("まだ走行の記録がありません。ホームの「▶ 走行を開始」で記録します。").assertExists()
+    // The list is read off the main thread and shared by AppGraph (Android #49): it comes a moment later.
+    rule.waitUntil(5_000) {
+      rule.onAllNodes(androidx.compose.ui.test.hasText("まだ走行の記録がありません。ホームの「▶ 走行を開始」で記録します。")).fetchSemanticsNodes().isNotEmpty()
+    }
     val ride = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS).end(5_000, EndReason.MANUAL, 5_000)
     runBlocking { graph.rideStore.save(ride) }
     rule.waitUntil(5_000) { rule.onAllNodesWithTagExists("ride-r1") }

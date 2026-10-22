@@ -14,6 +14,7 @@ import com.touringproject.v2.ride.end
 import com.touringproject.v2.ride.newRide
 import com.touringproject.v2.ride.pause
 import com.touringproject.v2.ride.resume
+import com.touringproject.v2.ride.RoutePoint
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -246,5 +247,17 @@ class RecordLabelsTest {
   fun the_summary_counts_the_point_memos_only_when_there_are_some() {
     assertEquals("📝 地点メモ 2件", rideSummary(ride, 4, ms(17, 0, 0), zone, notes = 2).notes)
     assertNull(rideSummary(ride, 4, ms(17, 0, 0), zone).notes)
+  }
+
+  // SC-06 puts the asks' and the point memos' pins on one map, and a tap on either opens its own card.
+  @Test
+  fun the_detail_has_the_pins_and_the_cards_of_both_asks_and_point_memos() {
+    val asks = listOf(ask("a1", ms(16, 9, 41)))
+    val notes = listOf(note("n1", ms(16, 9, 50)))
+    val ui = rideDetailUi(ride, asks, notes, listOf(RoutePoint(0, ms(16, 9, 0), 35.2, 139.0, 5.0)), ms(17, 0, 0), zone)
+    assertEquals(listOf("a1" to PinKind.ASK, "n1" to PinKind.NOTE), ui.map.pins.map { it.id to it.kind })
+    assertEquals(PinKind.NOTE, ui.cards.getValue("n1").kind)
+    assertEquals("📝 地点メモ 1件", ui.summary.notes)
+    assertEquals(1, ui.timeline.filterIsInstance<TimelineRow.Note>().size)
   }
 }

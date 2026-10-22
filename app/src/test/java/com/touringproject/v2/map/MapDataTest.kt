@@ -79,4 +79,16 @@ class MapDataTest {
     assertEquals(listOf("a1" to "pin-1", "n1" to "note-1"), properties(null))
     assertEquals(listOf("a1" to "pin-1", "n1" to "note-sel-1"), properties("n1"))
   }
+
+  // SC-06: the asks' and the point memos' pins are shown or hidden apart; with both hidden only the route is left.
+  @Test
+  fun each_kind_of_pin_is_shown_or_hidden_on_its_own() {
+    val map = rideMap(points, ended = true, pins = listOf(MapPin("a1", 1, LatLon(35.0, 139.0)), MapPin("n1", 1, LatLon(35.1, 139.1), kind = PinKind.NOTE)))
+    assertEquals(listOf("a1", "n1"), map.showing(asks = true, notes = true).pins.map { it.id })
+    assertEquals(listOf("n1"), map.showing(asks = false, notes = true).pins.map { it.id })
+    assertEquals(listOf("a1"), map.showing(asks = true, notes = false).pins.map { it.id })
+    val bare = map.showing(asks = false, notes = false)
+    assertEquals(emptyList<MapPin>(), bare.pins)
+    assertEquals(map.routes, bare.routes)
+  }
 }

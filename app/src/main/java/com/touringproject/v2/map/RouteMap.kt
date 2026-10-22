@@ -151,22 +151,25 @@ private fun addLayers(style: Style, faint: Boolean, dark: Boolean) {
   )
 }
 
-/** The GeoJSON of each source, made off the main thread (Android #42). */
-private class MapJson(val routes: String, val pauses: String, val ends: String, val pins: String)
+/** The GeoJSON of the route's sources, made off the main thread (Android #42). The pins are made apart (Android #49). */
+private class RouteJson(val routes: String, val pauses: String, val ends: String)
 
-private fun mapJson(data: MapData, selected: String?) = MapJson(routesJson(data), pausesJson(data), endsJson(data), pinsJson(data, selected))
+private fun routeJson(data: MapData) = RouteJson(routesJson(data), pausesJson(data), endsJson(data))
 
-private fun draw(style: Style, data: MapData, json: MapJson, density: Float) {
+private fun drawRoute(style: Style, json: RouteJson) {
+  style.getSourceAs<GeoJsonSource>("routes")?.setGeoJson(json.routes)
+  style.getSourceAs<GeoJsonSource>("pauses")?.setGeoJson(json.pauses)
+  style.getSourceAs<GeoJsonSource>("ends")?.setGeoJson(json.ends)
+}
+
+private fun drawPins(style: Style, data: MapData, json: String, density: Float) {
   data.pins.forEach { pin ->
     listOf(false, true).forEach { sel ->
       val name = pinIcon(pin.number, sel, pin.memo, pin.kind)
       if (style.getImage(name) == null) style.addImage(name, pinBitmap(pin.number, sel, density, pin.memo, pin.kind))
     }
   }
-  style.getSourceAs<GeoJsonSource>("routes")?.setGeoJson(json.routes)
-  style.getSourceAs<GeoJsonSource>("pauses")?.setGeoJson(json.pauses)
-  style.getSourceAs<GeoJsonSource>("ends")?.setGeoJson(json.ends)
-  style.getSourceAs<GeoJsonSource>(PINS_LAYER)?.setGeoJson(json.pins)
+  style.getSourceAs<GeoJsonSource>(PINS_LAYER)?.setGeoJson(json)
 }
 
 /** Takes in the whole route and every pin; a single place is shown close up (slice 2 spec §7.5). */
@@ -254,18 +257,24 @@ fun RouteMap(
       }
     }
   }
-  LaunchedEffect(loaded, data, selected) {
+  LaunchedEffect(loaded, data) {
     val (map, style) = loaded ?: return@LaunchedEffect
-    val json = withContext(Dispatchers.Default) { mapJson(data, selected) }
+    val json = withContext(Dispatchers.Default) { routeJson(data) }
     // MapLibre is touched only on the UI thread; where the effect resumes is not left to chance.
     withContext(Dispatchers.Main) {
-      draw(style, data, json, density)
+      drawRoute(style, json)
       // Until the first places arrive the map shows Japan, and the camera fits again once they do.
       if (!fitted) {
         fit(map, data.extent, (48 * density).toInt())
         fitted = data.extent.isNotEmpty()
       }
     }
+  }
+  // Selecting a pin makes only the pins again, not the route of tens of thousands of points (Android #49).
+  LaunchedEffect(loaded, data, selected) {
+    val (_, style) = loaded ?: return@LaunchedEffect
+    val json = withContext(Dispatchers.Default) { pinsJson(data, selected) }
+    withContext(Dispatchers.Main) { drawPins(style, data, json, density) }
   }
   Box(modifier) {
     AndroidView({ view }, Modifier.matchParentSize())

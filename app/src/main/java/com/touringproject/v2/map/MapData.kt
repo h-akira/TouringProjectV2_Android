@@ -37,6 +37,10 @@ data class MapData(
 ) {
   /** Everything the camera should take in when the map opens. */
   val extent: List<LatLon> get() = focus?.let { listOf(it) } ?: (routes.flatten() + pins.map { it.at })
+
+  /** SC-06's switches: the asks' and the point memos' pins shown or hidden apart; with both hidden only the route is left. */
+  fun showing(asks: Boolean, notes: Boolean): MapData =
+    copy(pins = pins.filter { if (it.kind == PinKind.NOTE) notes else asks })
 }
 
 fun rideMap(points: List<RoutePoint>, ended: Boolean, pins: List<MapPin>, faint: Boolean = false, focus: LatLon? = null): MapData {
