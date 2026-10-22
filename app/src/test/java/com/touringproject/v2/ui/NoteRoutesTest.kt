@@ -118,4 +118,15 @@ class NoteRoutesTest {
     rule.waitForIdle()
     assertFalse(input.attached)
   }
+
+  // Android #57: a memo or ride that is not found says so, and the screen can still be closed.
+  @Test
+  fun a_memo_not_found_says_so_and_can_be_closed() {
+    keepRide()
+    rule.setContent { NoteRoute(records, notes, "r1", "n9", onClose = { closed++ }) }
+    waitFor("notFound")
+    rule.onNodeWithTag("notFound").assertTextEquals("この地点メモは見つかりません。")
+    rule.onNodeWithTag("notFoundClose").performClick()
+    assertEquals(1, closed)
+  }
 }

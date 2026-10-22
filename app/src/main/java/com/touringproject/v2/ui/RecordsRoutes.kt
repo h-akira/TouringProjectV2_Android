@@ -176,7 +176,7 @@ private fun voiceUi(voice: NoteVoice?): NoteVoiceUi? {
 @Composable
 fun NewNoteRoute(records: RoomRecords, notes: NoteEdits, draft: NoteDraft, onClose: () -> Unit, modifier: Modifier = Modifier, voice: NoteVoice? = null) {
   val ride = readRide(records, draft.rideId) ?: return
-  val kept = ride.value ?: return
+  val kept = ride.value ?: return NoteNotFound("この走行は見つかりません。", onClose, modifier)
   val header = remember(draft, kept.name) { newNoteHeader(draft, kept.name, ZoneId.systemDefault()) }
   NoteScreen(
     header, null, { notes.create(draft, it) }, onClose, modifier,
@@ -202,8 +202,8 @@ fun NoteRoute(
   val list = readNotes(records, rideId) ?: return
   var shown by remember(noteId) { mutableStateOf(list.firstOrNull { it.id == noteId }) }
   list.firstOrNull { it.id == noteId }?.let { shown = it }
-  val note = shown ?: return
-  val name = ride.value?.name ?: return
+  val note = shown ?: return NoteNotFound("この地点メモは見つかりません。", onClose, modifier)
+  val name = ride.value?.name ?: return NoteNotFound("この走行は見つかりません。", onClose, modifier)
   val header = remember(note, name) { noteHeader(note, name, ZoneId.systemDefault()) }
   NoteScreen(
     header, note.text, { notes.text(noteId, it) }, onClose, modifier, onDelete = { notes.delete(noteId) },

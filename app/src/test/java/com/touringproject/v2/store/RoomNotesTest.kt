@@ -144,4 +144,15 @@ class RoomNotesTest {
     assertEquals(NoteDraft("n1", "r1", 5_000, null, null, null, null, null), notes.draft("r1"))
     assertEquals(1, errors.size)
   }
+
+  // Android #57: a memo saved just before the process died is saved again from the restored SC-19; it is the same memo.
+  @Test
+  fun saving_a_drafted_memo_again_changes_the_one_kept() = runBlocking {
+    rides.save(ride)
+    assertTrue(notes.create(draft, "一つ目"))
+    now = 6_000
+    assertTrue(notes.create(draft, "二つ目"))
+    assertEquals("二つ目" to 6_000L, db.notes().note("n1")!!.let { it.text to it.updatedAt })
+    assertFalse(notes.create(draft.copy(rideId = "r9"), "別の走行"))
+  }
 }

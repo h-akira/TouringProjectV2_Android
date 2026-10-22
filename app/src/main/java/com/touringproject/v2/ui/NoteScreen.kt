@@ -1,6 +1,7 @@
 package com.touringproject.v2.ui
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -14,9 +15,11 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -58,6 +61,8 @@ fun NoteScreen(
   onHeard: (Int) -> Unit = {},
 ) {
   var deleting by rememberSaveable { mutableStateOf(false) }
+  // From "削除する" until the deletion has returned: nothing else may close the screen meanwhile (Android #57).
+  var removing by remember { mutableStateOf(false) }
   val scope = rememberCoroutineScope()
   val context = LocalContext.current
   MemoEditor(
@@ -76,10 +81,16 @@ fun NoteScreen(
     },
     heard = voice?.heard,
     onHeard = onHeard,
+    busy = removing,
     footer = {
       if (voice != null) VoiceInputArea(voice, onVoice)
       if (onDelete != null) {
-        OutlinedButton(onClick = { deleting = true }, modifier = Modifier.fillMaxWidth().testTag("deleteNote"), border = BorderStroke(1.dp, Danger)) {
+        OutlinedButton(
+          onClick = { deleting = true },
+          enabled = !removing,
+          modifier = Modifier.fillMaxWidth().testTag("deleteNote"),
+          border = BorderStroke(1.dp, Danger),
+        ) {
           Text("この地点メモを削除", color = Danger, fontWeight = FontWeight.Bold)
         }
       }
@@ -90,7 +101,15 @@ fun NoteScreen(
       DeleteKind.NOTE,
       onConfirm = {
         deleting = false
-        scope.launch { if (onDelete()) onClose() else Toast.makeText(context, "削除できませんでした", Toast.LENGTH_SHORT).show() }
+        removing = true
+        scope.launch {
+          if (onDelete()) {
+            onClose()
+          } else {
+            removing = false
+            Toast.makeText(context, "削除できませんでした", Toast.LENGTH_SHORT).show()
+          }
+        }
       },
       onDismiss = { deleting = false },
     )
@@ -120,5 +139,15 @@ private fun VoiceInputArea(voice: NoteVoiceUi, onVoice: () -> Unit) {
     Text("声は文字にするためだけにサーバーへ送ります。AI には聞きません。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
   } else {
     Text("通信できないため、声では入力できません。文字で書けば保存できます。", color = Danger, fontSize = 13.sp)
+  }
+}
+
+/** SC-19 for a ride or memo that is not kept: it says so, and ✕ and Back still close it (Android #57). */
+@Composable
+fun NoteNotFound(text: String, onClose: () -> Unit, modifier: Modifier = Modifier) {
+  BackHandler(onBack = onClose)
+  Column(modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    TextButton(onClick = onClose, modifier = Modifier.testTag("notFoundClose")) { Text("✕", fontSize = 22.sp) }
+    Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 16.sp, modifier = Modifier.testTag("notFound"))
   }
 }

@@ -238,12 +238,20 @@ interface NoteDao {
   @Query("SELECT EXISTS (SELECT 1 FROM rides WHERE id = :rideId)")
   suspend fun rideKept(rideId: String): Boolean
 
-  /** SC-19 from Home. False when the memo's ride is no longer kept. */
+  /**
+   * SC-19 from Home. False when the memo's ride is no longer kept. A memo already kept under the draft's id (saved just
+   * before the process died, then saved again from the restored SC-19) takes the new text (Android #57).
+   */
   @Transaction
   suspend fun create(note: NoteEntity): Boolean {
     if (!rideKept(note.rideId)) return false
-    insert(note)
-    return true
+    val kept = note(note.id)
+    if (kept == null) {
+      insert(note)
+      return true
+    }
+    if (kept.rideId != note.rideId) return false
+    return writeText(note.id, note.text, note.updatedAt)
   }
 
   @Query("UPDATE notes SET text = :text, updatedAt = :at WHERE id = :id")

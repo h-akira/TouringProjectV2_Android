@@ -175,4 +175,20 @@ class NoteScreenTest {
     rule.waitForIdle()
     assertEquals(listOf("料金所の手前\n展望スペース"), saved)
   }
+
+  // Android #57: while the memo is being deleted, ✕, Back and a second delete do nothing; the screen closes once.
+  @Test
+  fun while_the_memo_is_being_deleted_nothing_else_closes_it() {
+    val gate = kotlinx.coroutines.CompletableDeferred<Boolean>()
+    rule.setContent { NoteScreen(header, "消すメモ", { true }, { closed++ }, onDelete = { deletes++; gate.await() }) }
+    rule.onNodeWithTag("deleteNote").performClick()
+    rule.onNodeWithTag("deleteGo").performClick()
+    rule.onNodeWithTag("memoClose").performClick()
+    rule.runOnUiThread { rule.activity.onBackPressedDispatcher.onBackPressed() }
+    rule.onNodeWithTag("deleteNote").assertIsNotEnabled()
+    gate.complete(true)
+    rule.waitForIdle()
+    assertEquals(1, deletes)
+    assertEquals(1, closed)
+  }
 }
