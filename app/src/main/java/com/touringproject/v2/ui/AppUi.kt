@@ -101,6 +101,7 @@ fun AppUi(graph: AppGraph) {
   val recordsStack = rememberNavBackStack(RecordsKey)
   val settingsStack = rememberNavBackStack(SettingsKey)
   var selectedTab by rememberSaveable { mutableStateOf(Tab.HOME) }
+  val noteVoice = remember(graph) { NoteVoice(graph.voice, graph.voiceState, graph.connectivity.online) }
   val tabs = remember(homeStack, recordsStack, settingsStack) {
     TabStacks(mapOf(Tab.HOME to homeStack, Tab.RECORDS to recordsStack, Tab.SETTINGS to settingsStack), { selectedTab }, { selectedTab = it })
   }
@@ -205,10 +206,10 @@ fun AppUi(graph: AppGraph) {
                 AskMemoRoute(graph.records, graph.askEdits, key.rideId, key.askId, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding())
               }
               entry<NewNoteKey> { key ->
-                NewNoteRoute(graph.records, graph.notes, key.draft, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding())
+                NewNoteRoute(graph.records, graph.notes, key.draft, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding(), voice = noteVoice)
               }
               entry<NoteKey> { key ->
-                NoteRoute(graph.records, graph.notes, key.rideId, key.noteId, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding())
+                NoteRoute(graph.records, graph.notes, key.rideId, key.noteId, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding(), voice = noteVoice)
               }
               entry<SettingsKey> {
                 SettingsScreen(
