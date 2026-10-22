@@ -1,5 +1,7 @@
 package com.touringproject.v2.sync
 
+import com.touringproject.v2.api.HeadingSample
+import com.touringproject.v2.api.Point
 import com.touringproject.v2.api.SegmentBody
 import com.touringproject.v2.ride.EndReason
 import com.touringproject.v2.ride.HOUR_MS
@@ -9,6 +11,7 @@ import com.touringproject.v2.ride.newRide
 import com.touringproject.v2.ride.pause
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -62,5 +65,19 @@ class SyncPlanTest {
     val body = RoutePoint(2, 1_234, 35.0, 139.0, null).toBody()
     assertEquals("1970-01-01T00:00:01.234Z", body.t)
     assertEquals(2, body.segment)
+  }
+
+  // Slice 3 spec §6.2: a memo without a place goes without one, and a heading sample goes only when it is whole.
+  @Test
+  fun a_point_memo_goes_with_its_place_and_sample_in_utc() {
+    val note = UnsentNote("n1", "r1", 1_000, 35.3, 138.9, 35.29, 138.89, 500, "展望スペース", 2_000)
+    val body = note.toBody()
+    assertEquals("1970-01-01T00:00:01Z", body.at)
+    assertEquals(Point(35.3, 138.9), body.location)
+    assertEquals(HeadingSample(35.29, 138.89, "1970-01-01T00:00:00.500Z"), body.headingSample)
+    assertEquals("展望スペース" to "1970-01-01T00:00:02Z", body.text to body.updatedAt)
+    val bare = note.copy(latitude = null, longitude = null, sampleAt = null).toBody()
+    assertNull(bare.location)
+    assertNull(bare.headingSample)
   }
 }

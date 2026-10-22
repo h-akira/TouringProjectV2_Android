@@ -95,9 +95,9 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val records = RoomRecords(database.rides(), database.asks(), database.notes())
   private val notices = RideNotices(context)
 
-  /** Sends rides and routes; a pass runs on each trigger (slice 2 spec §5.3). */
+  /** Sends rides, routes, memos, point memos and deletions; a pass runs on each trigger (slice 2 spec §5.3). */
   val sync = RideSync(
-    RoomSyncStore(database.rides(), database.asks()),
+    RoomSyncStore(database.rides(), database.asks(), database.notes()),
     api = {
       val key = apiKeys.current()
       val user = settings.settings.value?.userName

@@ -39,6 +39,14 @@ private class World {
   /** askId to (memo, updatedAt, sent, refused). */
   val memos = linkedMapOf<String, MemoRow>()
   class MemoRow(val memo: String?, val updatedAt: Long, var sent: Long? = null, var refused: Long? = null)
+  class NoteRow(val note: UnsentNote, var sent: Long? = null, var refused: Long? = null, var address: String? = null, var heading: Double? = null)
+  val notes = linkedMapOf<String, NoteRow>()
+  /** What the Backend answers for a point memo, by noteId. */
+  val saved = mutableMapOf<String, NoteSaved>()
+
+  fun note(id: String, updatedAt: Long, text: String = "展望", rideId: String = "r1") {
+    notes[id] = NoteRow(UnsentNote(id, rideId, 1_500, 35.0, 139.0, null, null, null, text, updatedAt))
+  }
   var hasKey = true
   var gate: CompletableDeferred<Unit>? = null
   var passes = 0
@@ -75,6 +83,14 @@ private class World {
       memos.getValue(askId).refused = updatedAt
       calls += "refused:memo/$askId"
     }
+    override suspend fun unsentNotes() = notes.values.filter { (it.sent ?: -1) < it.note.updatedAt && it.refused != it.note.updatedAt }.map { it.note }
+    override suspend fun noteSent(noteId: String, updatedAt: Long, address: String?, headingDegrees: Double?) {
+      notes.getValue(noteId).also { it.sent = updatedAt; it.address = address; it.heading = headingDegrees }
+    }
+    override suspend fun noteRefused(noteId: String, updatedAt: Long) {
+      notes.getValue(noteId).refused = updatedAt
+      calls += "refused:note/$noteId"
+    }
   }
 
   private fun call(name: String) {
@@ -91,7 +107,7 @@ private class World {
     override suspend fun deleteAsk(askId: String) = call("delete/ask/$askId")
     override suspend fun putNote(rideId: String, noteId: String, body: NoteBody): NoteSaved {
       call("note/$rideId/$noteId:${body.text}")
-      return NoteSaved()
+      return saved[noteId] ?: NoteSaved()
     }
     override suspend fun deleteNote(rideId: String, noteId: String) = call("delete/note/$rideId/$noteId")
   }
@@ -223,18 +239,24 @@ class RideSyncTest {
     job.cancel()
   }
 
-  // Slice 3 spec §5.1: deletions go first, then rides, then memos.
+  // Slice 3 spec §5.1: deletions go first, then rides, then point memos, then memos.
   @Test
-  fun a_pass_sends_deletions_then_rides_then_memos() = runTest {
+  fun a_pass_sends_deletions_then_rides_then_point_memos_then_memos() = runTest {
     val w = World()
     w.add(recording)
     w.memos["a1"] = World.MemoRow("また来たい", 2_000)
+    w.note("n1", 1_900)
     w.deletions += PendingDeletion("ride", "r0", null)
     w.deletions += PendingDeletion("ask", "a0", "r1")
+    w.deletions += PendingDeletion("note", "n0", "r1")
     w.sync.pass()
-    assertEquals(listOf("delete/ride/r0", "delete/ask/a0", "ride/r1:recording", "memo/a1:また来たい"), w.calls)
+    assertEquals(
+      listOf("delete/ride/r0", "delete/ask/a0", "delete/note/r1/n0", "ride/r1:recording", "note/r1/n1:展望", "memo/a1:また来たい"),
+      w.calls,
+    )
     assertTrue(w.deletions.isEmpty())
     assertEquals(2_000L, w.memos.getValue("a1").sent)
+    assertEquals(1_900L, w.notes.getValue("n1").sent)
     w.calls.clear()
     w.sync.pass()
     assertEquals(emptyList<String>(), w.calls)
@@ -320,5 +342,61 @@ class RideSyncTest {
     w.memos["a1"] = World.MemoRow(null, 2_000)
     w.sync.pass()
     assertEquals(listOf("memo/a1:null"), w.calls)
+  }
+
+  // Slice 3 spec §5.1: the address and heading the Backend settled are kept with the memo.
+  @Test
+  fun a_point_memo_keeps_the_address_and_heading_the_backend_settled() = runTest {
+    val w = World()
+    w.note("n1", 2_000)
+    w.saved["n1"] = NoteSaved("静岡県御殿場市新橋", 45.5)
+    w.sync.pass()
+    val row = w.notes.getValue("n1")
+    assertEquals(Triple(2_000L, "静岡県御殿場市新橋", 45.5), Triple(row.sent, row.address, row.heading))
+    w.calls.clear()
+    w.sync.pass()
+    assertEquals(emptyList<String>(), w.calls)
+  }
+
+  @Test
+  fun a_refused_point_memo_is_not_sent_again_until_it_changes_and_a_gone_one_is_taken_as_sent() = runTest {
+    val w = World()
+    w.note("n1", 2_000, text = "x")
+    w.note("n2", 2_100, text = "y")
+    w.fail["note/r1/n1:x"] = ApiErrorKind.BAD_REQUEST
+    w.fail["note/r1/n2:y"] = ApiErrorKind.GONE
+    w.sync.pass()
+    assertEquals(listOf("note/r1/n1:x", "refused:note/n1", "note/r1/n2:y"), w.calls)
+    assertEquals(2_100L, w.notes.getValue("n2").sent)
+    w.calls.clear()
+    w.sync.pass()
+    assertEquals(emptyList<String>(), w.calls)
+    w.note("n1", 2_200, text = "z")
+    w.sync.pass()
+    assertEquals(listOf("note/r1/n1:z"), w.calls)
+  }
+
+  // A failed point memo ends the pass before the memos, and goes again first in the next one.
+  @Test
+  fun a_point_memo_that_fails_ends_the_pass() = runTest {
+    val w = World()
+    w.note("n1", 2_000)
+    w.memos["a1"] = World.MemoRow("x", 2_000)
+    w.fail["note/r1/n1:展望"] = ApiErrorKind.NETWORK
+    w.sync.pass()
+    assertEquals(listOf("note/r1/n1:展望"), w.calls)
+    assertEquals(null, w.notes.getValue("n1").sent)
+  }
+
+  // Android #54: a mark of a kind the device cannot send is dropped, and what comes after it still goes.
+  @Test
+  fun a_deletion_of_an_unknown_kind_is_dropped_and_the_rest_still_goes() = runTest {
+    val w = World()
+    w.add(recording)
+    w.deletions += PendingDeletion("photo", "p0", "r1")
+    w.deletions += PendingDeletion("note", "n0", null)
+    w.sync.pass()
+    assertEquals(listOf("ride/r1:recording"), w.calls)
+    assertTrue(w.deletions.isEmpty())
   }
 }

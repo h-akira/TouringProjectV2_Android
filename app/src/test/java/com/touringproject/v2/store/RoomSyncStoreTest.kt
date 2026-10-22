@@ -14,6 +14,7 @@ import com.touringproject.v2.ride.pause
 import com.touringproject.v2.sync.ChunkRange
 import com.touringproject.v2.sync.PendingDeletion
 import com.touringproject.v2.sync.UnsentAskMemo
+import com.touringproject.v2.sync.UnsentNote
 import com.touringproject.v2.sync.RideSync
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -34,7 +35,7 @@ class RoomSyncStoreTest {
     .build()
   private val dao = db.rides()
   private val rides = RoomRideStore(dao)
-  private val store = RoomSyncStore(dao, db.asks())
+  private val store = RoomSyncStore(dao, db.asks(), db.notes())
   private val ride = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS)
 
   @After
@@ -154,5 +155,44 @@ class RoomSyncStoreTest {
     assertEquals(paused.segments, unsent.ride.segments)
     assertEquals(2, unsent.sentPoints)
     assertEquals(3, unsent.totalPoints)
+  }
+
+  private suspend fun keepNote(id: String, text: String, at: Long) = db.notes().create(
+    NoteEntity(id, "r1", 1_500, 35.0, 139.0, 34.99, 139.0, 1_400, text, at, null, null, null, null),
+  )
+
+  @Test
+  fun a_point_memo_is_unsent_until_its_version_is_taken_and_keeps_its_address() = runBlocking {
+    rides.save(ride)
+    keepNote("n1", "展望", 5_000)
+    keepNote("n2", "給油", 6_000)
+    assertEquals(
+      listOf(UnsentNote("n1", "r1", 1_500, 35.0, 139.0, 34.99, 139.0, 1_400, "展望", 5_000), UnsentNote("n2", "r1", 1_500, 35.0, 139.0, 34.99, 139.0, 1_400, "給油", 6_000)),
+      store.unsentNotes(),
+    )
+    store.noteSent("n1", 5_000, "静岡県御殿場市新橋", 45.5)
+    store.noteRefused("n2", 6_000)
+    assertEquals(emptyList<UnsentNote>(), store.unsentNotes())
+    assertEquals("静岡県御殿場市新橋" to 45.5, db.notes().note("n1")!!.let { it.address to it.headingDegrees })
+    // A later send that is not answered with an address keeps the one settled before.
+    db.notes().writeText("n1", "展望スペース", 7_000)
+    store.noteSent("n1", 7_000, null, null)
+    assertEquals("静岡県御殿場市新橋" to 7_000L, db.notes().note("n1")!!.let { it.address to it.sentUpdatedAt })
+  }
+
+  @Test
+  fun a_point_memo_reaches_the_backend_after_its_ride_and_keeps_the_address() = runBlocking {
+    val server = MockWebServer().apply { start() }
+    server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+    server.enqueue(MockResponse().setResponseCode(200).setBody("""{"noteId":"n1","applied":true,"address":"静岡県御殿場市新橋","headingDegrees":45.5}"""))
+    val sync = RideSync(store, { ApiClient(server.url("/Prod/").toString(), "key-1", "rider01", OkHttpClient()) }) { _, _ -> }
+    rides.save(ride)
+    keepNote("n1", "展望", 5_000)
+    sync.pass()
+    assertEquals(listOf("/Prod/rides/r1", "/Prod/rides/r1/notes/n1"), (1..2).map { server.takeRequest().path })
+    assertEquals("静岡県御殿場市新橋", db.notes().note("n1")!!.address)
+    sync.pass()
+    assertEquals(2, server.requestCount)
+    server.shutdown()
   }
 }

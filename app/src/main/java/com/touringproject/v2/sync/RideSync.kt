@@ -3,6 +3,7 @@ package com.touringproject.v2.sync
 import com.touringproject.v2.api.ApiError
 import com.touringproject.v2.api.ApiErrorKind
 import com.touringproject.v2.api.AskMemoBody
+import com.touringproject.v2.api.NoteSaved
 import com.touringproject.v2.api.RideApi
 import com.touringproject.v2.api.RouteBody
 import com.touringproject.v2.ride.Ride
@@ -27,6 +28,20 @@ data class PendingDeletion(val kind: String, val id: String, val rideId: String?
 /** A conversation's memo that has changed since the Backend last took it; memo null removes it. */
 data class UnsentAskMemo(val askId: String, val memo: String?, val updatedAt: Long)
 
+/** A point memo that has changed since the Backend last took it, as a whole; it goes as it is now (slice 3 spec §5.1). */
+data class UnsentNote(
+  val id: String,
+  val rideId: String,
+  val at: Long,
+  val latitude: Double?,
+  val longitude: Double?,
+  val sampleLatitude: Double?,
+  val sampleLongitude: Double?,
+  val sampleAt: Long?,
+  val text: String,
+  val updatedAt: Long,
+)
+
 interface SyncStore {
   /**
    * Rides whose meta has changed since it was sent (and was not refused), or that have points not yet sent. Read in
@@ -48,6 +63,11 @@ interface SyncStore {
   suspend fun askMemoSent(askId: String, updatedAt: Long)
   /** The Backend refused the memo as of updatedAt (400, or 404 for an ask it does not have); it is not sent again. */
   suspend fun askMemoRefused(askId: String, updatedAt: Long)
+  suspend fun unsentNotes(): List<UnsentNote>
+  /** The Backend took the point memo as of updatedAt; address and headingDegrees are what it settled, null when it did not say. */
+  suspend fun noteSent(noteId: String, updatedAt: Long, address: String?, headingDegrees: Double?)
+  /** The Backend refused the point memo as of updatedAt (400); that version is not sent again. */
+  suspend fun noteRefused(noteId: String, updatedAt: Long)
 }
 
 /** How the Backend answered a send that did not fail on the way. */
@@ -95,6 +115,10 @@ class RideSync(
     for (unsent in rides) {
       if (!attempt(unsent.ride.id) { sendRide(client, unsent) }) return
     }
+    val notes = read("notes") { store.unsentNotes() } ?: return
+    for (note in notes) {
+      if (!attempt(note.id) { sendNote(client, note) }) return
+    }
     val memos = read("ask_memos") { store.unsentAskMemos() } ?: return
     for (memo in memos) {
       if (!attempt(memo.askId) { sendAskMemo(client, memo) }) return
@@ -121,14 +145,16 @@ class RideSync(
     false
   }
 
-  // A deletion that is refused can never go either; its mark goes, and the log tells.
+  // A deletion that is refused can never go either; its mark goes, and the log tells. So does a mark the device cannot
+  // send at all (a kind it does not know, a point memo without its ride): kept, it would hold back every pass (Android #54).
   private suspend fun sendDeletion(client: RideApi, deletion: PendingDeletion) {
-    reply(deletion.id, "delete/${deletion.kind}") {
-      when (deletion.kind) {
-        "ride" -> client.deleteRide(deletion.id)
-        "ask" -> client.deleteAsk(deletion.id)
-        else -> throw IllegalStateException("unknown deletion kind ${deletion.kind}")
-      }
+    val what = "delete/${deletion.kind}"
+    val rideId = deletion.rideId
+    when {
+      deletion.kind == "ride" -> reply(deletion.id, what) { client.deleteRide(deletion.id) }
+      deletion.kind == "ask" -> reply(deletion.id, what) { client.deleteAsk(deletion.id) }
+      deletion.kind == "note" && rideId != null -> reply(deletion.id, what) { client.deleteNote(rideId, deletion.id) }
+      else -> log("sync_unsendable", mapOf("id" to deletion.id, "what" to what))
     }
     store.deletionSent(deletion)
   }
@@ -147,6 +173,16 @@ class RideSync(
       val points = store.points(ride.id, chunk.from, chunk.until)
       val answer = reply(ride.id, "route/${chunk.seq}") { client.putRoute(ride.id, chunk.seq, RouteBody(points.map { it.toBody() })) }
       store.chunkSent(ride.id, chunk, refused = answer == Reply.REFUSED)
+    }
+  }
+
+  // GONE: the memo or its ride was deleted on the Backend; it has no address to give.
+  private suspend fun sendNote(client: RideApi, note: UnsentNote) {
+    var saved: NoteSaved? = null
+    if (reply(note.id, "note") { saved = client.putNote(note.rideId, note.id, note.toBody()) } == Reply.REFUSED) {
+      store.noteRefused(note.id, note.updatedAt)
+    } else {
+      store.noteSent(note.id, note.updatedAt, saved?.address, saved?.headingDegrees)
     }
   }
 

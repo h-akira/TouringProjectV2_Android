@@ -1,5 +1,8 @@
 package com.touringproject.v2.sync
 
+import com.touringproject.v2.api.HeadingSample
+import com.touringproject.v2.api.NoteBody
+import com.touringproject.v2.api.Point
 import com.touringproject.v2.api.PointBody
 import com.touringproject.v2.api.RideBody
 import com.touringproject.v2.api.SegmentBody
@@ -55,3 +58,10 @@ fun Ride.toBody() = RideBody(
 )
 
 fun RoutePoint.toBody() = PointBody(iso(t), lat, lon, accuracy, segment)
+
+/** A memo opened before its ride had a point goes without a place; the sample goes only when it is whole. */
+fun UnsentNote.toBody(): NoteBody {
+  val location = if (latitude != null && longitude != null) Point(latitude, longitude) else null
+  val sample = if (sampleLatitude != null && sampleLongitude != null && sampleAt != null) HeadingSample(sampleLatitude, sampleLongitude, iso(sampleAt)) else null
+  return NoteBody(iso(at), location, sample, text, iso(updatedAt))
+}

@@ -38,7 +38,7 @@ class RoomRecords(private val rides: RideDao, private val asks: AskDao, private 
     orderRides(
       rows.map { row ->
         val ride = row.ride.toRide(row.segments.sortedBy { it.seq })
-        RideListItem(ride, row.questions, saveState(ride.status, ride.updatedAt, row.ride.sentUpdatedAt, row.pointsLeft || row.memosLeft))
+        RideListItem(ride, row.questions, saveState(ride.status, ride.updatedAt, row.ride.sentUpdatedAt, row.pointsLeft || row.memosLeft || row.notesLeft))
       },
     )
   }

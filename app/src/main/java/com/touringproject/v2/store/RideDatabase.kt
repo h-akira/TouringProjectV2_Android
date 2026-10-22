@@ -272,6 +272,26 @@ interface NoteDao {
     markDeleted(DeletionEntity("note", id, note.rideId, at))
     return true
   }
+
+  // Sending (slice 3 spec §5.1): the memos changed since they were taken, unless that version was refused.
+  @Query(
+    "SELECT * FROM notes WHERE (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
+      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt) ORDER BY updatedAt",
+  )
+  suspend fun unsent(): List<NoteEntity>
+
+  /**
+   * The marker never moves back. The address and heading are settled by the Backend once; a send it answers without
+   * them (410: deleted there) keeps what the memo has.
+   */
+  @Query(
+    "UPDATE notes SET sentUpdatedAt = MAX(IFNULL(sentUpdatedAt, :updatedAt), :updatedAt), address = IFNULL(:address, address), " +
+      "headingDegrees = IFNULL(:headingDegrees, headingDegrees) WHERE id = :id",
+  )
+  suspend fun markSent(id: String, updatedAt: Long, address: String?, headingDegrees: Double?)
+
+  @Query("UPDATE notes SET rejectedUpdatedAt = :updatedAt WHERE id = :id")
+  suspend fun markRefused(id: String, updatedAt: Long)
 }
 
 /** What one ride has left to send, read together (Android #23). */
@@ -284,7 +304,8 @@ data class RideWithSegments(
 
 /**
  * A ride as SC-05 lists it. pointsLeft is true while one of its points has not been taken (unsent or refused);
- * memosLeft while the memo of one of its asks has not been taken (slice 3 spec §5.3).
+ * memosLeft while the memo of one of its asks has not been taken, and notesLeft one of its point memos (slice 3 spec
+ * §5.3).
  */
 data class RideRow(
   @Embedded val ride: RideEntity,
@@ -292,6 +313,7 @@ data class RideRow(
   val questions: Int,
   val pointsLeft: Boolean,
   val memosLeft: Boolean,
+  val notesLeft: Boolean,
 )
 
 @Dao
@@ -312,7 +334,9 @@ interface RideDao {
       "(EXISTS (SELECT 1 FROM route_points WHERE chunk IS NULL AND route_points.rideId = rides.id) OR " +
       "EXISTS (SELECT 1 FROM route_points WHERE refused = 1 AND route_points.rideId = rides.id)) AS pointsLeft, " +
       "EXISTS (SELECT 1 FROM asks WHERE asks.rideId = rides.id AND asks.memoUpdatedAt IS NOT NULL AND " +
-      "(asks.memoSentUpdatedAt IS NULL OR asks.memoSentUpdatedAt < asks.memoUpdatedAt)) AS memosLeft FROM rides",
+      "(asks.memoSentUpdatedAt IS NULL OR asks.memoSentUpdatedAt < asks.memoUpdatedAt)) AS memosLeft, " +
+      "EXISTS (SELECT 1 FROM notes WHERE notes.rideId = rides.id AND " +
+      "(notes.sentUpdatedAt IS NULL OR notes.sentUpdatedAt < notes.updatedAt)) AS notesLeft FROM rides",
   )
   fun rows(): Flow<List<RideRow>>
 
