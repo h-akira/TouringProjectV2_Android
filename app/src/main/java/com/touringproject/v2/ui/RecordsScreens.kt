@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -400,19 +401,12 @@ fun AskDetailScreen(
         Meta("進行方向", detail.direction)
         Meta("入力", detail.input)
       }
-      Muted("あなた", Modifier.align(Alignment.End), 13)
-      Text(
-        detail.question ?: "（聞き取れませんでした）",
-        Modifier.align(Alignment.End).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(12.dp)).padding(12.dp).testTag("askQuestion"),
-      )
-      Muted("AI", size = 13)
-      if (detail.failure != null) {
-        Text("答えられませんでした: ${detail.failure}", color = Rec, modifier = Modifier.testTag("askFailure"))
+      if (detail.unreached) {
+        // Slice 4 spec §4.3: nothing the rider said was kept; the memo is where to write what they wanted to know.
+        Text("📵 通信できず、質問できなかった", color = Rec, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("askUnreached"))
+        Muted("$UNREACHED_ANSWER。何を聞きたかったかは、メモに書けます。", size = 14)
       } else {
-        Text(
-          detail.answer ?: "",
-          Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(12.dp).testTag("askAnswer"),
-        )
+        AskExchange(detail)
       }
       MemoBox("メモ", detail.memo, "＋ メモを追加", onMemo, "askMemo")
       OutlinedButton(
@@ -430,6 +424,25 @@ fun AskDetailScreen(
         scope.launch { if (!onDelete()) Toast.makeText(context, "削除できませんでした", Toast.LENGTH_SHORT).show() }
       },
       onDismiss = { deleting = false },
+    )
+  }
+}
+
+/** The question as heard and the answer, or why there was none. */
+@Composable
+private fun ColumnScope.AskExchange(detail: AskDetailUi) {
+  Muted("あなた", Modifier.align(Alignment.End), 13)
+  Text(
+    detail.question ?: "（聞き取れませんでした）",
+    Modifier.align(Alignment.End).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(12.dp)).padding(12.dp).testTag("askQuestion"),
+  )
+  Muted("AI", size = 13)
+  if (detail.failure != null) {
+    Text("答えられませんでした: ${detail.failure}", color = Rec, modifier = Modifier.testTag("askFailure"))
+  } else {
+    Text(
+      detail.answer ?: "",
+      Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(12.dp).testTag("askAnswer"),
     )
   }
 }

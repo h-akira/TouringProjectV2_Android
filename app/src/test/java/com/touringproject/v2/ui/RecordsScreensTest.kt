@@ -408,4 +408,21 @@ class RecordsScreensTest {
     rule.onNodeWithTag("timeline").performScrollToNode(hasTestTag("ask-a1"))
     assertEquals(false to false, asks to notes)
   }
+
+  // Slice 4 spec §4.3: an unreached ask shows that it never reached the Backend instead of the question and answer,
+  // and offers its memo for what the rider wanted to know.
+  @Test
+  fun an_unreached_ask_says_so_instead_of_a_question_and_offers_its_memo() {
+    val unreached = AskDetailUi(
+      "会話 2 / 2", "10月16日（金） 10:05", "住所は送ったあとに付きます", "停車中", "🎤 声で質問", null, null, null, "a1", null, unreached = true,
+    )
+    var memos = 0
+    rule.setContent { AskDetailScreen(unreached, null, fakeMap, "u1", {}, {}, onMemo = { memos++ }) }
+    rule.onNodeWithTag("askUnreached").assertTextEquals("📵 通信できず、質問できなかった")
+    rule.onNodeWithText("質問の内容は残していません。何を聞きたかったかは、メモに書けます。").assertExists()
+    rule.onNodeWithTag("askQuestion").assertDoesNotExist()
+    rule.onNodeWithTag("askAnswer").assertDoesNotExist()
+    rule.onNodeWithText("＋ メモを追加").performScrollTo().performClick()
+    assertEquals(1, memos)
+  }
 }
