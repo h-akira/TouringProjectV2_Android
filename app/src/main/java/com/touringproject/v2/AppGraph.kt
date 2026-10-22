@@ -211,7 +211,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   private val voiceFlow = MutableStateFlow(VOICE_IDLE)
   val voiceState: StateFlow<VoiceState> = voiceFlow.asStateFlow()
 
-  // SC-19's voice input: its own route control and recorder, like SC-12's trial, so nothing is shared with the ask loop.
+  // SC-19's voice input: its own route control and recorder, like SC-12's trial. The audio route underneath is the
+  // app's one, so the press router keeps asks off it while a voice input unwinds.
   val voice = VoiceInput(
     VoiceDeps(
       now = System::currentTimeMillis,
@@ -254,6 +255,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     voicePress = { voice.press(Source.HANDSFREE) },
     voiceRecording = { voice.recording },
     voiceStop = voice::stop,
+    voiceBusy = { voice.busy },
   )
 
   /** The screen's "押して話す", routed like an intercom press so it waits for a left trial to unwind. */

@@ -37,6 +37,8 @@ private class VoiceHarness(
   /** What each GET answers, in turn; the last one repeats. */
   val results: MutableList<TranscriptionResult> = mutableListOf(TranscriptionResult("t1", "done", "展望スペース")),
   var getGate: CompletableDeferred<Unit>? = null,
+  /** Holds the route's setup without letting a cancel through, as the headset's voice recognition does (up to 4 s). */
+  var routeGate: CompletableDeferred<Unit>? = null,
 ) {
   val log = mutableListOf<String>()
   val states = mutableListOf<VoiceState>()
@@ -62,6 +64,7 @@ private class VoiceHarness(
       route = object : RouteControl {
         override suspend fun start(source: Source): Boolean {
           log += "route:${source.name.lowercase()}"
+          routeGate?.let { gate -> kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { gate.await() } }
           return true
         }
         override suspend fun stop() { log += "route:stop" }
@@ -216,10 +219,10 @@ class VoiceInputTest {
   @Test
   fun leaving_drops_the_recording_or_the_text_still_being_made() = runTest {
     val recording = VoiceHarness(this)
-    recording.voice.attach()
+    val shown = recording.voice.attach()
     recording.voice.press(Source.SCREEN)
     runCurrent()
-    recording.voice.detach()
+    recording.voice.detach(shown)
     advanceUntilIdle()
     assertEquals(listOf("route:screen", "rec:start", "cue:start", "rec:cancel", "route:stop"), recording.log)
     assertEquals(VOICE_IDLE, recording.voice.state)
@@ -230,7 +233,7 @@ class VoiceInputTest {
     runCurrent()
     making.voice.press(Source.SCREEN)
     advanceTimeBy(1_500)
-    making.voice.detach()
+    making.voice.detach(making.voice.attach())
     making.getGate!!.complete(Unit)
     advanceUntilIdle()
     assertEquals(VOICE_IDLE, making.voice.state)
@@ -245,5 +248,60 @@ class VoiceInputTest {
     h.voice.stop()
     advanceUntilIdle()
     assertEquals(Heard(1, "展望スペース"), h.voice.state.heard)
+  }
+
+  // Final review I-3: the SC-19 being left lets go of the button after the next one has taken it; the shown one keeps it.
+  @Test
+  fun a_late_leave_of_the_screen_before_does_not_take_the_button_from_the_one_shown() = runTest {
+    val h = VoiceHarness(this)
+    val before = h.voice.attach()
+    val shown = h.voice.attach()
+    h.voice.press(Source.SCREEN)
+    runCurrent()
+    h.voice.detach(before)
+    assertTrue(h.voice.attached)
+    assertEquals(VoicePhase.RECORDING, h.voice.state.phase)
+    h.voice.detach(shown)
+    assertEquals(false, h.voice.attached)
+  }
+
+  // Final review I-2: leaving cancels what the run awaits, so the next SC-19 can record at once.
+  @Test
+  fun leaving_while_the_text_is_made_lets_the_next_screen_record_at_once() = runTest {
+    val h = VoiceHarness(this, getGate = CompletableDeferred())
+    h.voice.detach(h.voice.attach().also {
+      h.voice.press(Source.SCREEN)
+      runCurrent()
+      h.voice.press(Source.SCREEN)
+      advanceTimeBy(1_500)
+    })
+    runCurrent()
+    assertEquals(false, h.voice.busy)
+    h.voice.attach()
+    h.voice.press(Source.SCREEN)
+    runCurrent()
+    assertEquals(VoicePhase.RECORDING, h.voice.state.phase)
+    assertEquals(2, h.log.count { it == "rec:start" })
+  }
+
+  // Final review I-1, I-2: a run that cannot be cut short (the route's setup) is still unwinding: a press gets the
+  // failure cue rather than nothing, and the run lets go of the route when it ends.
+  @Test
+  fun a_press_while_the_run_before_still_unwinds_gets_the_failure_cue() = runTest {
+    val h = VoiceHarness(this, routeGate = CompletableDeferred())
+    val left = h.voice.attach()
+    h.voice.press(Source.HANDSFREE)
+    runCurrent()
+    h.voice.detach(left)
+    runCurrent()
+    assertTrue(h.voice.busy)
+    h.voice.attach()
+    h.voice.press(Source.HANDSFREE)
+    assertEquals("cue:failure", h.log.last())
+    h.routeGate!!.complete(Unit)
+    advanceUntilIdle()
+    assertEquals(false, h.voice.busy)
+    assertEquals("route:stop", h.log.last())
+    assertEquals(VOICE_IDLE, h.voice.state)
   }
 }

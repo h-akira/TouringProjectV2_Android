@@ -164,8 +164,8 @@ class NoteVoice(val input: VoiceInput, val state: StateFlow<VoiceState>, val onl
 private fun voiceUi(voice: NoteVoice?): NoteVoiceUi? {
   voice ?: return null
   DisposableEffect(voice) {
-    voice.input.attach()
-    onDispose { voice.input.detach() }
+    val token = voice.input.attach()
+    onDispose { voice.input.detach(token) }
   }
   val state by voice.state.collectAsStateWithLifecycle()
   val online by voice.online.collectAsStateWithLifecycle()

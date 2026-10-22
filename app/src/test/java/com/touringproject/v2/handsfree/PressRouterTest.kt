@@ -10,6 +10,7 @@ class PressRouterTest {
   private var askBusy = false
   private var noteOpen = false
   private var voiceRecording = false
+  private var voiceBusy = false
   private val router = PressRouter(
     trialActive = { trialActive },
     trialBusy = { trialBusy || trialActive },
@@ -23,6 +24,7 @@ class PressRouterTest {
     voicePress = { log += "voice:press" },
     voiceRecording = { voiceRecording },
     voiceStop = { log += "voice:stop" },
+    voiceBusy = { voiceBusy },
   )
 
   @Test
@@ -79,5 +81,14 @@ class PressRouterTest {
     askBusy = true
     router.press()
     assertEquals(listOf("check:stop", "ask:press"), log)
+  }
+
+  // Final review I-1: a voice input left on SC-19 may still set up or release the intercom route; no ask may take it yet.
+  @Test
+  fun a_press_while_a_left_voice_input_still_unwinds_starts_no_question() {
+    voiceBusy = true
+    router.press()
+    router.tap()
+    assertEquals(emptyList<String>(), log)
   }
 }
