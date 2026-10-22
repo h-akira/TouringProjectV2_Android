@@ -862,6 +862,7 @@ button { font: inherit; color: inherit; }
                 <button class="btn tonal block" style="margin-top:10px">今すぐ保存</button>
               </div>
               <div class="list"><div class="kv"><span>ユーザー名</span><span style="font-family:ui-monospace,Menlo,monospace;font-weight:700">k3x9q2</span></div></div>
+              <button class="btn tonal block">クラウドから読み直す</button>
               <div class="section-title">保存している内容</div>
               <div class="list">
                 <div class="kv"><span>会話の文字・ルート・メモ</span><span>端末＋クラウド · すべて</span></div>
@@ -1403,10 +1404,11 @@ const SPEC = {
 
   "SC-14": { name: "データの保存", role: "記録がクラウドに保存できているかを確かめる。", states: [["synced","保存済み"],["pending","未保存あり"]],
     body: `<ul>
-<li>状態: 「すべてクラウドに保存済み」と最終保存の時刻、または「未送信の記録があります」と内訳（質問できなかった地点の件数・未保存のルート）。</li>
+<li>状態: 「すべてクラウドに保存済み」と最終保存の時刻、または「未送信の記録があります」と内訳（質問できなかった地点の件数・未保存のルート・地点メモ・メモ・削除）。</li>
+<li>「クラウドから読み直す」: 今のユーザー名のまま、クラウドの記録と突き合わせる（新しいほうを残し、クラウドで消したものは端末からも消す）。</li>
 <li>通信できるようになると自動で送る。「今すぐ保存」で手動でも送れる。</li>
 <li>保存している内容を明示する: 会話の文字・ルート・メモは端末とクラウドにすべて、音声は確認用に端末だけに直近10件（設定 > 録音の確認でだけ聞ける）。</li>
-<li>今のユーザー名を出す。機種変更時は同じユーザー名を設定すれば記録が戻ること（音声は戻らない）を説明に書く。</li>
+<li>今のユーザー名を出す（タップで SC-18）。機種変更時は同じユーザー名を設定すれば記録が戻ること（音声は戻らない）を説明に書く。</li>
 <li>件数（走行・質問・端末の音声）を出す。</li></ul>` }
 };
 
