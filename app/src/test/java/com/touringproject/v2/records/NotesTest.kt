@@ -37,4 +37,14 @@ class NotesTest {
     assertEquals("展望スペース", noteText("  展望スペース \n"))
     assertNull(noteText(" \n "))
   }
+
+  // Slice 3 spec §7.3: what was heard goes at the end of what is written, on a line of its own, within 2000 characters.
+  @Test
+  fun what_was_heard_goes_at_the_end_on_a_line_of_its_own() {
+    assertEquals("展望スペース", appendHeard("", "展望スペース"))
+    assertEquals("料金所の手前\n展望スペース", appendHeard("料金所の手前", "展望スペース"))
+    assertEquals("料金所の手前\n展望スペース", appendHeard("料金所の手前\n", "展望スペース"))
+    val full = appendHeard("あ".repeat(1998), "いうえ")
+    assertEquals(2000, full.codePointCount(0, full.length))
+  }
 }
