@@ -10,6 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowNetwork
 import org.robolectric.shadows.ShadowNetworkCapabilities
 
 // Slice 3 spec §7.3: SC-19 follows whether the device has a network.
@@ -31,6 +32,22 @@ class ConnectivityTest {
     callback.onCapabilitiesChanged(network, caps)
     assertTrue(connectivity.online.value)
     callback.onCapabilitiesChanged(network, ShadowNetworkCapabilities.newInstance())
+    assertFalse(connectivity.online.value)
+  }
+
+  // Android #62: after a switch (Wi-Fi to mobile data), the old network's loss reported late does not leave it offline.
+  @Test
+  fun losing_the_old_network_after_a_switch_leaves_it_online() {
+    val before = shadowOf(manager).networkCallbacks.toSet()
+    val connectivity = Connectivity(app)
+    val callback = (shadowOf(manager).networkCallbacks - before).single()
+    val old = manager.activeNetwork!!
+    val new = ShadowNetwork.newInstance(1_234)
+    val caps = ShadowNetworkCapabilities.newInstance().also { shadowOf(it).addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) }
+    callback.onCapabilitiesChanged(new, caps)
+    callback.onLost(old)
+    assertTrue(connectivity.online.value)
+    callback.onLost(new)
     assertFalse(connectivity.online.value)
   }
 }

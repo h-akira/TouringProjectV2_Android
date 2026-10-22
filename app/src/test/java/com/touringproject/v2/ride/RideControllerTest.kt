@@ -748,4 +748,65 @@ class RideControllerTest {
     w.controller.start("次の走行")
     assertEquals(listOf("次の走行"), w.rides.values.map { it.name })
   }
+
+  // Android #53: a deletion that fails does not drop the change still waiting to be written.
+  @Test
+  fun a_ride_whose_deletion_fails_keeps_its_waiting_rename() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    w.controller.end("箱根")
+    w.failSaves = 2
+    w.failDeletes = true
+    assertFalse(w.controller.rename("r1", "御殿場"))
+    assertFalse(w.controller.delete("r1"))
+    w.failDeletes = false
+    assertTrue(w.controller.memo("r1", "また来たい"))
+    assertEquals("御殿場" to "また来たい", w.stored().let { it.name to it.memo })
+  }
+
+  // Android #53: an edit of a ride whose change is still waiting starts from that change, so it does not undo it.
+  @Test
+  fun an_edit_of_a_ride_waiting_to_be_written_keeps_the_waiting_change() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    w.controller.end("箱根")
+    w.failSaves = 1
+    assertFalse(w.controller.rename("r1", "御殿場"))
+    // The waiting rename fails once more when the memo comes, then the memo's own save works.
+    w.failSaves = 1
+    assertTrue(w.controller.memo("r1", "また来たい"))
+    assertEquals("御殿場" to "また来たい", w.stored().let { it.name to it.memo })
+  }
+
+  // Android #53: SC-08 said the memo was not saved, so it is not written later behind the rider's back.
+  @Test
+  fun a_memo_that_could_not_be_written_is_not_written_later() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    w.controller.end("箱根")
+    w.failSaves = 1
+    assertFalse(w.controller.memo("r1", "書けない"))
+    assertTrue(w.controller.rename("r1", "御殿場"))
+    assertEquals("御殿場", w.stored().name)
+    assertNull(w.stored().memo)
+  }
+
+  @Test
+  fun the_active_rides_memo_that_could_not_be_written_is_neither_shown_nor_written_later() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.failSaves = 1
+    assertFalse(w.controller.memo("r1", "書けない"))
+    assertNull(w.controller.active.value?.memo)
+    w.controller.pause()
+    assertNull(w.stored().memo)
+    assertEquals(RideStatus.PAUSED, w.stored().status)
+  }
 }

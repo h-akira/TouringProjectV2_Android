@@ -129,7 +129,8 @@ fun AppUi(graph: AppGraph) {
                     hasKey = apiKey != null,
                     returnAppMissing = current.returnEnabled && current.returnApp == null,
                     volumeLow = volumeWarning(volume, volumeDismissedAt),
-                    storeFailed = storeFailed || askStoreFailed,
+                    storeFailed = storeFailed,
+                    askStoreFailed = askStoreFailed,
                   ),
                   conversation = conversationLabel(expiresAt, System.currentTimeMillis()),
                   askHint = askHint(ride),
@@ -142,6 +143,7 @@ fun AppUi(graph: AppGraph) {
                   onNewConversation = graph.controller::resetConversation,
                   modifier = Modifier.safeDrawingPadding(),
                   onDismissVolume = { volume?.let { graph.dismissVolumeWarning(it.current) } },
+                  onDismissAskFailure = graph.askLog::dismiss,
                   ride = {
                     RideCard(
                       ride?.let { rideCard(it, now, questions) },

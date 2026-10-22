@@ -260,4 +260,41 @@ class RecordLabelsTest {
     assertEquals("📝 地点メモ 1件", ui.summary.notes)
     assertEquals(1, ui.timeline.filterIsInstance<TimelineRow.Note>().size)
   }
+
+  private fun unreached(id: String, at: Long, latitude: Double? = 35.2, address: String? = null, sent: Boolean = false) =
+    com.touringproject.v2.ask.unreachedAsk(id, at, latitude?.let { com.touringproject.v2.location.Fix(it, 139.0, at, 5.0) }, null, "r1")
+      .copy(address = address, sent = sent)
+
+  // Slice 4 spec §4.3: an unreached ask is numbered with the asks, says so in place of its question, and gets its place
+  // once it has been sent, as a point memo does.
+  @Test
+  fun an_unreached_ask_is_numbered_with_the_asks_and_says_it_never_reached_the_backend() {
+    val asks = listOf(ask("a1", ms(16, 9, 41)), unreached("u1", ms(16, 10, 5)), unreached("u2", ms(16, 10, 20), latitude = null))
+    val rows = rideTimeline(ride, asks, zone).filterIsInstance<TimelineRow.Ask>()
+    assertEquals(listOf(1, 2, 3), rows.map { it.number })
+    assertEquals(listOf("右手の山は？", UNREACHED_TEXT, UNREACHED_TEXT), rows.map { it.text })
+    assertEquals(listOf("足柄下郡箱根町仙石原", "住所は送信後", "位置の記録なし"), rows.map { it.place })
+    assertEquals(listOf(false, true, true), rows.map { it.failed })
+    assertEquals("足柄下郡箱根町仙石原", askPlace(unreached("u1", 0, address = "神奈川県足柄下郡箱根町仙石原", sent = true)))
+    assertEquals("場所不明", askPlace(unreached("u1", 0, sent = true)))
+  }
+
+  @Test
+  fun an_unreached_asks_pin_card_and_detail_tell_that_nothing_was_kept() {
+    val asks = listOf(ask("a1", ms(16, 9, 41)), unreached("u1", ms(16, 10, 5)))
+    val card = pinCard(asks, "u1", zone)!!
+    assertEquals("2 · 10:05 · 住所は送信後", card.heading)
+    assertEquals(UNREACHED_TEXT, card.question)
+    assertEquals(UNREACHED_ANSWER, card.answer)
+    val detail = askDetail(asks, "u1", zone)!!
+    assertEquals(true, detail.unreached)
+    assertEquals("住所は送ったあとに付きます", detail.place)
+    assertNull(detail.question)
+    assertNull(detail.failure)
+    assertEquals("停車中", detail.direction)
+    assertEquals("神奈川県足柄下郡箱根町仙石原", askDetail(listOf(unreached("u1", 0, address = "神奈川県足柄下郡箱根町仙石原", sent = true)), "u1", zone)!!.place)
+    assertEquals("位置を記録できませんでした", askDetail(listOf(unreached("u1", 0, latitude = null)), "u1", zone)!!.place)
+    assertEquals("住所は分かりませんでした", askDetail(listOf(unreached("u1", 0, sent = true)), "u1", zone)!!.place)
+    assertEquals("会話 2 · 10:05 住所は送信後", askMemoTarget(asks, "u1", zone))
+  }
 }

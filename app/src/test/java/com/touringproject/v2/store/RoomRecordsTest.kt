@@ -114,4 +114,20 @@ class RoomRecordsTest {
     sync.noteSent("n1", 5_000, null, null)
     assertEquals(SaveState.SAVED, records.list.first().single().saveState)
   }
+
+  // Slice 4 spec §5.4: an unreached ask not yet taken leaves its ride "未送信あり", and reads back as unreached.
+  @Test
+  fun an_unreached_ask_not_yet_sent_leaves_the_ride_unsent() = runBlocking {
+    val ended = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS).end(4_000, EndReason.MANUAL, 4_000)
+    rides.save(ended)
+    sync.rideSent("r1", ended.updatedAt)
+    log.save(com.touringproject.v2.ask.unreachedAsk("u1", 1_500, null, null, "r1"))
+    assertEquals(SaveState.UNSENT, records.list.first().single().saveState)
+    val kept = records.asks("r1").first().single()
+    assertEquals(AskOutcome.OFFLINE, kept.outcome)
+    assertEquals(false, kept.sent)
+    db.openHelper.writableDatabase.execSQL("UPDATE asks SET sentUpdatedAt = 1500 WHERE askId = 'u1'")
+    assertEquals(SaveState.SAVED, records.list.first().single().saveState)
+    assertEquals(true, records.asks("r1").first().single().sent)
+  }
 }

@@ -94,6 +94,20 @@ class HomeScreenTest {
     assertEquals(1, dismissed)
   }
 
+  // Android #28: the ask is lost either way, so the band closes once the rider has seen it.
+  @Test
+  fun the_band_of_an_ask_that_could_not_be_written_closes_with_its_cross() {
+    var opened: Banner? = null
+    var dismissed = 0
+    rule.setContent {
+      HomeScreen(HomeUi("rider01", Banner.ASK_STORE_FAILED, "新しい会話です"), {}, {}, { opened = it }, {}, onDismissAskFailure = { dismissed++ })
+    }
+    rule.onNodeWithText("書けなかった質問があります").performClick()
+    rule.onNodeWithTag("bandClose").performClick()
+    assertNull(opened)
+    assertEquals(1, dismissed)
+  }
+
   @Test
   fun the_media_volume_is_read_while_home_is_shown_and_a_withheld_reading_keeps_the_last() {
     // 4b #2, and the carried-over rule: null (media on the call route) must not clear a low reading.

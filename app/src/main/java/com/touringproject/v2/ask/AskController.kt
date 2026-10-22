@@ -53,7 +53,16 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   // Per-ask state: an older ask that is still unwinding must not read or change the newer one's.
   private class Run(val id: Int, val source: Source, var returned: Boolean = false)
 
-  private class Recording(val audio: String, val name: String, val current: Fix?, val fixes: List<Fix>)
+  // meta and pcm go to SC-12 once the ask has reached the Backend, or failed there; an unreached ask's recording goes.
+  private class Recording(
+    val audio: String,
+    val name: String,
+    val current: Fix?,
+    val fixes: List<Fix>,
+    val endedAt: Long,
+    val meta: RecordingMeta,
+    val pcm: ByteArray,
+  )
 
   /** The intercom button: start, stop the recording, or say that an answer is on its way. */
   fun press() {
@@ -131,6 +140,11 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       }
       serviceRunning = true
       val recording = record(run) ?: return
+      // US-C-09: without a network the ask cannot be asked; when and where it was is kept instead (slice 4 spec §4.1).
+      if (!d.online()) {
+        keepUnreached(recording, rideId, run)
+        return
+      }
       val sent = send(recording, rideId, api, run) ?: return
       maybeReturn(ReturnTiming.SENT, settings, run)
       val result = waitForAnswer(sent, recording.name, api, run) ?: return
@@ -234,12 +248,13 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       fail(FailureReason.MIC, run)
       return null
     }
-    d.recordings.saved(RecordingMeta(stopped.name, startedAt, pcmDurationMs(stopped.pcm.size), phoneMic, device, null), stopped.pcm)
+    val endedAt = d.now()
+    val meta = RecordingMeta(stopped.name, startedAt, pcmDurationMs(stopped.pcm.size), phoneMic, device, null)
     val (currentFix, fixes) = d.location.end()
-    return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, currentFix, fixes)
+    return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, currentFix, fixes, endedAt, meta, stopped.pcm)
   }
 
-  private suspend fun send(recording: Recording, rideId: String?, api: AskApi, run: Run): SentAsk? {
+  private suspend fun send(recording: Recording, rideId: String, api: AskApi, run: Run): SentAsk? {
     val d = deps
     val here = recording.current
     val body = AskBody(
@@ -254,15 +269,38 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       api.postAsk(body)
     } catch (e: Exception) {
       d.log("post_failed", mapOf("kind" to ((e as? ApiError)?.kind?.name ?: "unknown")))
-      fail(reasonFor(e), run)
+      val reason = reasonFor(e)
+      // The Backend did not take the ask in (slice 4 spec §4.1); a refusal (the key, the request) is no unreached ask.
+      if (reason == FailureReason.NETWORK) {
+        keepUnreached(recording, rideId, run)
+        return null
+      }
+      d.recordings.saved(recording.meta, recording.pcm)
+      fail(reason, run)
       return null
     }
+    d.recordings.saved(recording.meta, recording.pcm)
     // The ask exists on the Backend either way, so keep the conversation going even if it was cancelled.
     d.conversation.update(accepted.conversationId, accepted.conversationExpiresAt)
     if (!isCurrent(run)) return null
     dispatch(FlowEvent.Sent(accepted.askId, d.now()))
     d.cues.sent()
     return SentAsk(accepted.askId, accepted.conversationId, body.conversationId == null, d.now(), here, rideId)
+  }
+
+  /**
+   * US-C-09: the ask never reached the Backend. Its time, place and heading's sample are kept as an unreached ask, which
+   * is sent later; the recording is dropped (US-C-09.001) and the conversation is left as it was (US-C-09.006). An ask
+   * the rider cancelled meanwhile is not kept: they let it go.
+   */
+  private suspend fun keepUnreached(recording: Recording, rideId: String, run: Run) {
+    val d = deps
+    if (isCurrent(run)) {
+      val here = recording.current
+      d.asks.keep(unreachedAsk(d.newId(), recording.endedAt, here, here?.let { pickHeadingSample(recording.fixes, it) }, rideId))
+      d.log("ask_unreached", mapOf("rideId" to rideId))
+    }
+    fail(FailureReason.NETWORK, run)
   }
 
   private suspend fun waitForAnswer(sent: SentAsk, recordingName: String, api: AskApi, run: Run): AskResult? {

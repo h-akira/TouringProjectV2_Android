@@ -61,6 +61,7 @@ import com.touringproject.v2.store.RoomRideStore
 import com.touringproject.v2.store.RoomSyncStore
 import com.touringproject.v2.sync.RideSync
 import com.touringproject.v2.sync.credentialChanges
+import com.touringproject.v2.sync.reconnections
 import com.touringproject.v2.voice.VOICE_IDLE
 import com.touringproject.v2.voice.VoiceDeps
 import com.touringproject.v2.voice.VoiceInput
@@ -109,7 +110,10 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val recordsList: StateFlow<List<RideListItem>?> = records.list.stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
   private val notices = RideNotices(context)
 
-  /** Sends rides, routes, memos, point memos and deletions; a pass runs on each trigger (slice 2 spec §5.3). */
+  /** Whether the device has a network now: SC-19's voice input, the ask loop and the sync follow it. */
+  val connectivity = Connectivity(context)
+
+  /** Sends rides, routes, memos, point memos, unreached asks and deletions; a pass runs on each trigger (slice 2 spec §5.3). */
   val sync = RideSync(
     RoomSyncStore(database.rides(), database.asks(), database.notes()),
     api = {
@@ -118,6 +122,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       if (apiBaseUrl.isEmpty() || key == null || user == null) null else ApiClient(apiBaseUrl, key, user, http)
     },
     log = { event, data -> Log.i("trv2.sync", "$event $data") },
+    online = { connectivity.online.value },
   )
 
   /** SC-07 and SC-08 change kept asks through here; each change is something new to send (slice 3 spec §5.1). */
@@ -168,6 +173,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       recorder = PcmRecorder(),
       recordings = RecordingKeeper(recordingStore, scope) { message, e -> Log.w("trv2.recordings", message, e) },
       asks = askLog,
+      online = { connectivity.online.value },
+      newId = { UUID.randomUUID().toString() },
       ride = { rideNow(rides.active.value) },
       location = PositionTracker(FusedPositionSource(context)),
       service = serviceCoordinator.keepAlive,
@@ -204,9 +211,6 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val recordingCheck = RecordingCheck(recordingStore, trial, PcmPlayer(), { isBusy(controller.state) }, scope) { message, e ->
     Log.w("trv2.recordings", message, e)
   }
-
-  /** Whether the device has a network now (SC-19's voice input). */
-  val connectivity = Connectivity(context)
 
   private val voiceFlow = MutableStateFlow(VOICE_IDLE)
   val voiceState: StateFlow<VoiceState> = voiceFlow.asStateFlow()
@@ -276,6 +280,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       readiness.ridesLoaded()
     }
     scope.launch { sync.run() }
+    // The network coming back lets what waited for it go, while the process lives (slice 4 spec §5.2).
+    scope.launch { reconnections(connectivity.online).collect { sync.request() } }
     // SC-16: the recording ride's deadline follows the longest recording time, wherever it was changed (Android #33).
     scope.launch { maxRecordingChanges(settings.settings).collect { rides.maxRecordingChanged() } }
     scope.launch {

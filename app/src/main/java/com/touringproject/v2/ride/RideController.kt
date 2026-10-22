@@ -193,6 +193,12 @@ class RideController(private val deps: RideDeps) {
   }
 
   /**
+   * The kept ride an edit starts from: the version still waiting to be written if this is that ride (its write failed
+   * again just now, in flush), so that one edit does not undo the other (Android #53); otherwise the stored one.
+   */
+  private suspend fun keptRide(rideId: String): Ride? = unsaved?.takeIf { it.id == rideId } ?: read("ride") { deps.store.ride(rideId) }
+
+  /**
    * SC-06 (and SC-04 through end): gives any kept ride a new name. Returns false when the name is not usable, the
    * ride is not kept, or the new name could not be written now (it is written again with the next call; Android #46).
    * The active ride stays as it is but for its name.
@@ -207,28 +213,36 @@ class RideController(private val deps: RideDeps) {
       activeRide.value = renamed
       return@locked saved
     }
-    val ride = read("ride") { deps.store.ride(rideId) } ?: return@locked false
+    val ride = keptRide(rideId) ?: return@locked false
     save(ride.rename(clean, now))
   }
 
   /**
    * SC-08 (and SC-02's 走行メモ): sets or, for null, removes any kept ride's memo. Returns false when the memo is too
-   * long, the ride is not kept, or the memo could not be written now. The same memo again changes nothing.
+   * long, the ride is not kept, or the memo could not be written now. The same memo again changes nothing. A memo
+   * that could not be written is not kept to be written later: SC-08 has said it was not saved, and the rider may
+   * discard it (Android #53).
    */
   suspend fun memo(rideId: String, memo: String?): Boolean = locked {
     if (!memoFits(memo)) return@locked false
     val now = deps.now()
+    val waiting = unsaved
     val active = activeRide.value
     if (active?.id == rideId) {
       if (active.memo == memo) return@locked true
       val changed = active.withMemo(memo, now)
-      val saved = save(changed)
+      if (!save(changed)) {
+        unsaved = waiting
+        return@locked false
+      }
       activeRide.value = changed
-      return@locked saved
+      return@locked true
     }
-    val ride = read("ride") { deps.store.ride(rideId) } ?: return@locked false
+    val ride = keptRide(rideId) ?: return@locked false
     if (ride.memo == memo) return@locked true
-    save(ride.withMemo(memo, now))
+    if (save(ride.withMemo(memo, now))) return@locked true
+    unsaved = waiting
+    false
   }
 
   /**
@@ -237,11 +251,14 @@ class RideController(private val deps: RideDeps) {
    */
   suspend fun delete(rideId: String): Boolean = locked {
     if (activeRide.value?.id == rideId) return@locked false
-    if (unsaved?.id == rideId) unsaved = null
     var deleted = false
     val written = write("delete") { deleted = deps.store.delete(rideId, deps.now()) }
-    if (written && deleted) deps.changed()
-    written && deleted
+    if (!written || !deleted) return@locked false
+    // Only once the ride is gone: a deletion that failed leaves its waiting change to be written (Android #53).
+    if (unsaved?.id == rideId) unsaved = null
+    storeFailing.value = unsaved != null
+    deps.changed()
+    true
   }
 
   /**

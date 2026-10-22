@@ -62,6 +62,8 @@ private class Harness(
   val pcm: ByteArray = byteArrayOf(1, 2, 3),
   /** Asks start only while a ride records (slice 2 spec §4.7); most tests ride. */
   var ride: RideNow = RideNow.Recording("r1"),
+  /** Whether the device has a network when the recording ends (slice 4 spec §4.1). */
+  var online: Boolean = true,
 ) {
   val log = mutableListOf<String>()
   val states = mutableListOf<FlowState>()
@@ -116,6 +118,8 @@ private class Harness(
       override fun transcribed(name: String, transcript: String) { transcripts += name to transcript }
     },
     asks = { kept += it },
+    online = { online },
+    newId = { "u1" },
     ride = { ride },
     location = object : Positions {
       override fun begin() { log += "loc:begin" }
@@ -575,10 +579,84 @@ class AskControllerTest {
     assertEquals(TIMEOUT_FAILURE, h.kept.single().failure)
   }
 
+  // Slice 4 spec §4.1: the network failed on the way, so the Backend never took the ask in; it is kept as unreached.
   @Test
-  fun an_ask_the_backend_never_took_in_is_not_kept() = runTest {
+  fun an_ask_the_backend_never_took_in_is_kept_as_unreached_without_its_recording() = runTest {
     val h = Harness(this, stopAfterMs = 1_000, post = { throw ApiError(ApiErrorKind.NETWORK) })
     h.controller.run(Source.HANDSFREE)
+    val kept = h.kept.single()
+    assertEquals(AskOutcome.OFFLINE, kept.outcome)
+    assertEquals("u1", kept.askId)
+    assertEquals("r1", kept.rideId)
+    assertTrue(h.metas.isEmpty())
+    assertTrue("say:通信できないため、質問できませんでした。" in h.log)
+  }
+
+  // US-C-09.001: with no network when the recording ends, nothing is sent; when and where it was is kept.
+  @Test
+  fun without_a_network_the_ask_is_not_sent_and_is_kept_as_unreached() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000, online = false)
+    h.controller.run(Source.HANDSFREE)
+    assertFalse("post" in h.log)
+    val kept = h.kept.single()
+    assertEquals(AskOutcome.OFFLINE, kept.outcome)
+    assertEquals(1_000L, kept.askedAt)
+    assertEquals(1_000L, kept.updatedAt)
+    assertEquals(HERE.latitude, kept.latitude!!, 0.0)
+    assertEquals(HeadingSample(BEHIND.latitude, BEHIND.longitude, "1970-01-01T00:01:30Z"), kept.sample)
+    assertEquals(null, kept.conversationId)
+    assertFalse(kept.newConversation)
+    assertFalse(kept.sent)
+    assertTrue(h.metas.isEmpty())
+    assertEquals(
+      listOf("cue:failure", "say:通信できないため、質問できませんでした。", "return:maps", "svc:stop"),
+      h.log.dropWhile { it != "route:stop" }.drop(1),
+    )
+  }
+
+  // US-C-09.006: an unreached ask joins no conversation, so the next ask carries on the one before it.
+  @Test
+  fun an_unreached_ask_leaves_the_conversation_as_it_was() = runTest {
+    val h = Harness(this, stopAfterMs = null)
+    h.controller.run(Source.HANDSFREE)
+    h.online = false
+    h.controller.run(Source.HANDSFREE)
+    h.online = true
+    h.controller.run(Source.HANDSFREE)
+    // Only the first and the third were sent; the third goes on with the first's conversation.
+    assertEquals(listOf(null, "c1"), h.bodies.map { it.conversationId })
+    assertEquals(listOf(true, false, false), h.kept.map { it.newConversation })
+  }
+
+  // A 5xx after the retries is a network failure for the rider: the Backend did not take the ask in.
+  @Test
+  fun a_server_failure_on_send_keeps_an_unreached_ask() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000, post = { throw ApiError(ApiErrorKind.SERVER, "HTTP 503") })
+    h.controller.run(Source.HANDSFREE)
+    assertEquals(AskOutcome.OFFLINE, h.kept.single().outcome)
+  }
+
+  // A refusal is no unreached ask: the network worked. The recording stays for SC-12, as before.
+  @Test
+  fun a_refused_key_keeps_no_ask_but_keeps_the_recording() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000, post = { throw ApiError(ApiErrorKind.INVALID_KEY) })
+    h.controller.run(Source.HANDSFREE)
+    assertTrue(h.kept.isEmpty())
+    assertEquals(1, h.metas.size)
+  }
+
+  // The rider cancelled while the ask was being sent: they let it go, so it is not kept even when the send fails.
+  @Test
+  fun an_ask_cancelled_while_sending_is_not_kept_as_unreached() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000)
+    h.post = {
+      delay(5_000)
+      throw ApiError(ApiErrorKind.NETWORK)
+    }
+    val running = launch { h.controller.run(Source.SCREEN) }
+    h.until { h.phase == Phase.SENDING }
+    h.controller.cancel()
+    running.join()
     assertTrue(h.kept.isEmpty())
   }
 

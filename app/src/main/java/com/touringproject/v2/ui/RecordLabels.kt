@@ -173,8 +173,26 @@ fun notePlace(note: NoteRecord): String = when {
   else -> "住所は送信後"
 }
 
+/** What an unreached ask shows in place of its question, in lists and on pins (the mock's SC-07). */
+const val UNREACHED_TEXT = "（通信できず、質問できなかった）"
+
+/** What an unreached ask shows in place of its answer: nothing it said was kept (US-C-09.002). */
+const val UNREACHED_ANSWER = "質問の内容は残していません"
+
+/**
+ * Where an ask was, in short. An unreached ask gets its address once it has been sent, as a point memo does (slice 4
+ * spec §4.4); the others have theirs from the Backend.
+ */
+fun askPlace(ask: AskRecord): String = when {
+  ask.outcome != AskOutcome.OFFLINE -> shortPlace(ask.address)
+  ask.latitude == null -> "位置の記録なし"
+  ask.address != null -> shortPlace(ask.address)
+  ask.sent -> "場所不明"
+  else -> "住所は送信後"
+}
+
 /** What a list shows of an ask: what was heard, or why nothing was. */
-fun askText(ask: AskRecord): String = ask.transcript?.takeIf { it.isNotBlank() } ?: when {
+fun askText(ask: AskRecord): String = if (ask.outcome == AskOutcome.OFFLINE) UNREACHED_TEXT else ask.transcript?.takeIf { it.isNotBlank() } ?: when {
   ask.outcome == AskOutcome.ANSWERED -> "（聞き取った文がありません）"
   ask.failure == "no_speech" -> "（聞き取れませんでした）"
   ask.failure == "timeout" -> "（時間内に答えが届きませんでした）"
@@ -252,8 +270,8 @@ fun rideTimeline(ride: Ride, asks: List<AskRecord>, zone: ZoneId, notes: List<No
         if (ask.newConversation && asked) rows += TimelineRow.NewConversation
         asked = true
         rows += TimelineRow.Ask(
-          ask.askId, numbers.getValue(ask.askId), TIME.format(at(ask.askedAt, zone)), shortPlace(ask.address), askText(ask),
-          ask.outcome == AskOutcome.FAILED, memo = ask.memo != null,
+          ask.askId, numbers.getValue(ask.askId), TIME.format(at(ask.askedAt, zone)), askPlace(ask), askText(ask),
+          ask.outcome != AskOutcome.ANSWERED, memo = ask.memo != null,
         )
       }
       is Event.PauseAt -> rows += TimelineRow.Pause(
@@ -281,7 +299,10 @@ fun failureLabel(failure: String?): String = when (failure) {
   else -> "AI が答えられませんでした"
 }
 
-/** SC-07. question is null when nothing was heard; failure is set for an ask that got no answer. */
+/**
+ * SC-07. question is null when nothing was heard; failure is set for an ask that got no answer. An unreached ask has
+ * neither: unreached says to show that it never reached the Backend instead (slice 4 spec §4.3).
+ */
 data class AskDetailUi(
   val title: String,
   val time: String,
@@ -295,7 +316,16 @@ data class AskDetailUi(
   val next: String?,
   /** The conversation's memo (SC-07); null when it has none. */
   val memo: String? = null,
+  val unreached: Boolean = false,
 )
+
+/** SC-07's place of an unreached ask, in full: worded as SC-19 words a point memo's (slice 4 spec §4.3). */
+private fun unreachedPlace(ask: AskRecord): String = when {
+  ask.latitude == null -> "位置を記録できませんでした"
+  ask.address != null -> ask.address
+  ask.sent -> "住所は分かりませんでした"
+  else -> "住所は送ったあとに付きます"
+}
 
 /** askId's place among the asks it was opened from (the ride's): 会話 3 / 5, and the asks before and after it. */
 fun askDetail(asks: List<AskRecord>, askId: String, zone: ZoneId): AskDetailUi? {
@@ -304,10 +334,11 @@ fun askDetail(asks: List<AskRecord>, askId: String, zone: ZoneId): AskDetailUi? 
   if (i < 0) return null
   val ask = ordered[i]
   val time = at(ask.askedAt, zone)
+  val unreached = ask.outcome == AskOutcome.OFFLINE
   return AskDetailUi(
     title = "会話 ${i + 1} / ${ordered.size}",
     time = "${dayLabel(time.toLocalDate())} ${TIME.format(time)}",
-    place = ask.address?.ifBlank { null } ?: "場所不明",
+    place = if (unreached) unreachedPlace(ask) else ask.address?.ifBlank { null } ?: "場所不明",
     direction = directionLabel(ask.headingDegrees),
     input = if (ask.input == "text") "⌨ 文字で質問" else "🎤 声で質問",
     question = ask.transcript?.ifBlank { null },
@@ -316,6 +347,7 @@ fun askDetail(asks: List<AskRecord>, askId: String, zone: ZoneId): AskDetailUi? 
     previous = ordered.getOrNull(i - 1)?.askId,
     next = ordered.getOrNull(i + 1)?.askId,
     memo = ask.memo,
+    unreached = unreached,
   )
 }
 
@@ -328,7 +360,8 @@ data class PinCardUi(val id: String, val heading: String, val question: String, 
 fun pinCard(asks: List<AskRecord>, askId: String, zone: ZoneId): PinCardUi? {
   val ask = asks.firstOrNull { it.askId == askId } ?: return null
   val number = askNumbers(asks).getValue(askId)
-  return PinCardUi(askId, "$number · ${TIME.format(at(ask.askedAt, zone))} · ${shortPlace(ask.address)}", askText(ask), ask.answer?.ifBlank { null })
+  val answer = if (ask.outcome == AskOutcome.OFFLINE) UNREACHED_ANSWER else ask.answer?.ifBlank { null }
+  return PinCardUi(askId, "$number · ${TIME.format(at(ask.askedAt, zone))} · ${askPlace(ask)}", askText(ask), answer)
 }
 
 /** A point memo's card: 2 · 10:24 · 新橋 · 📝 地点メモ, then its text (the mock). */
@@ -369,5 +402,5 @@ fun noteHeader(note: NoteRecord, rideName: String, zone: ZoneId): NoteHeaderUi {
 /** What SC-08 says it is writing for an ask: 会話 3 · 09:41 箱根町仙石原 (the mock). null when the ask is not among them. */
 fun askMemoTarget(asks: List<AskRecord>, askId: String, zone: ZoneId): String? {
   val ask = asks.firstOrNull { it.askId == askId } ?: return null
-  return "会話 ${askNumbers(asks).getValue(askId)} · ${TIME.format(at(ask.askedAt, zone))} ${shortPlace(ask.address)}"
+  return "会話 ${askNumbers(asks).getValue(askId)} · ${TIME.format(at(ask.askedAt, zone))} ${askPlace(ask)}"
 }

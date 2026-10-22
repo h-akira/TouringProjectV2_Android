@@ -30,7 +30,7 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 2, true, MIGRATION_1_2).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
       .allowMainThreadQueries()
       .build()
     runBlocking {
@@ -56,7 +56,7 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 3, true, MIGRATION_2_3).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
       .allowMainThreadQueries()
       .build()
     runBlocking {
@@ -78,7 +78,7 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 4, true, MIGRATION_3_4).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
       .allowMainThreadQueries()
       .build()
     runBlocking {
@@ -100,7 +100,7 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 5, true, MIGRATION_4_5).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
       .allowMainThreadQueries()
       .build()
     runBlocking {
@@ -111,6 +111,34 @@ class MigrationTest {
       assertEquals("Q", ask.transcript)
       assertNull(ask.memo)
       assertNull(ask.memoUpdatedAt)
+    }
+    db.close()
+  }
+
+  // Slice 4 spec §4.2: the asks table is made again so that an unreached ask can have no conversation; what was kept
+  // stays as it was, memos and their markers included.
+  @Test
+  fun version_5_moves_to_6_keeping_asks_and_letting_an_ask_have_no_conversation() {
+    helper.createDatabase(DB, 5).apply {
+      execSQL("INSERT INTO rides VALUES ('r1', '箱根', 'ended', 'manual', NULL, 5000, 120.0, 6000, 6000, NULL, 0, NULL)")
+      val columns = "(askId, askedAt, answeredAt, transcript, answer, latitude, longitude, address, headingDegrees, input, conversationId, " +
+        "newConversation, status, failure, rideId, memo, memoUpdatedAt, memoSentUpdatedAt, memoRejectedUpdatedAt)"
+      execSQL("INSERT INTO asks $columns VALUES ('a1', 1000, 2000, 'Q', 'A', 35.0, 139.0, '箱根町', 90.0, 'voice', 'c1', 1, 'answered', NULL, 'r1', '晴れ', 3000, 3000, NULL)")
+      close()
+    }
+    helper.runMigrationsAndValidate(DB, 6, true, MIGRATION_5_6).close()
+    val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+      .allowMainThreadQueries()
+      .build()
+    runBlocking {
+      val ask = db.asks().ask("a1")!!
+      assertEquals("c1", ask.conversationId)
+      assertEquals("晴れ", ask.memo)
+      assertEquals(3000L, ask.memoSentUpdatedAt)
+      assertNull(ask.updatedAt)
+      db.asks().upsert(ask.copy(askId = "a2", conversationId = null, status = "offline", updatedAt = 4000))
+      assertNull(db.asks().ask("a2")!!.conversationId)
     }
     db.close()
   }

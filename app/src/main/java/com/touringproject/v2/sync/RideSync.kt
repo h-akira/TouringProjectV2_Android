@@ -4,6 +4,7 @@ import com.touringproject.v2.api.ApiError
 import com.touringproject.v2.api.ApiErrorKind
 import com.touringproject.v2.api.AskMemoBody
 import com.touringproject.v2.api.NoteSaved
+import com.touringproject.v2.api.OfflineAskSaved
 import com.touringproject.v2.api.RideApi
 import com.touringproject.v2.api.RouteBody
 import com.touringproject.v2.ride.Ride
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.SerializationException
 
@@ -39,6 +41,19 @@ data class UnsentNote(
   val sampleLongitude: Double?,
   val sampleAt: Long?,
   val text: String,
+  val updatedAt: Long,
+)
+
+/** An unreached ask that has changed since the Backend last took it (slice 4 spec §5.1). */
+data class UnsentUnreached(
+  val askId: String,
+  val rideId: String,
+  val askedAt: Long,
+  val latitude: Double?,
+  val longitude: Double?,
+  val sampleLatitude: Double?,
+  val sampleLongitude: Double?,
+  val sampleAt: Long?,
   val updatedAt: Long,
 )
 
@@ -68,22 +83,30 @@ interface SyncStore {
   suspend fun noteSent(noteId: String, updatedAt: Long, address: String?, headingDegrees: Double?)
   /** The Backend refused the point memo as of updatedAt (400); that version is not sent again. */
   suspend fun noteRefused(noteId: String, updatedAt: Long)
+  suspend fun unsentUnreached(): List<UnsentUnreached>
+  /** The Backend took the unreached ask as of updatedAt; address and headingDegrees are what it settled, null when it did not say. */
+  suspend fun unreachedSent(askId: String, updatedAt: Long, address: String?, headingDegrees: Double?)
+  /** The Backend refused the unreached ask as of updatedAt (400, or 409 for an id it took in); it is not sent again. */
+  suspend fun unreachedRefused(askId: String, updatedAt: Long)
 }
 
 /** How the Backend answered a send that did not fail on the way. */
 private enum class Reply { TAKEN, REFUSED, GONE }
 
 /**
- * Sends rides, their routes, memos and deletions to the Backend (slice 2 spec §5.3, slice 3 spec §5). A pass reads
- * what is left to send and sends it, deletions first, so a deleted record's old version is never put back in the same
- * pass; with nothing left it makes no request at all. Passes run one at a time; the ones asked for while a pass runs
- * fold into one more. A failure other than a refusal ends the pass, and the next trigger tries again; there is no
- * timer of its own.
+ * Sends rides, their routes, memos, point memos, unreached asks and deletions to the Backend (slice 2 spec §5.3, slice
+ * 3 spec §5, slice 4 spec §5). A pass reads what is left to send and sends it, deletions first, so a deleted record's
+ * old version is never put back in the same pass; with nothing left it makes no request at all. Unreached asks go
+ * before the memos, so a memo on one finds its ask at the Backend. Passes run one at a time; the ones asked for while
+ * a pass runs fold into one more. A failure other than a refusal ends the pass, and the next trigger tries again;
+ * there is no timer of its own. Without a network a pass does not try at all: the network coming back is a trigger.
  */
 class RideSync(
   private val store: SyncStore,
   /** The client for the current key and user name, or null while there is no key or no API URL. */
   private val api: () -> RideApi?,
+  /** Whether the device has a network now (slice 4 spec §5.2). */
+  private val online: () -> Boolean = { true },
   private val log: (event: String, data: Map<String, Any?>) -> Unit,
 ) {
   private val requests = Channel<Unit>(Channel.CONFLATED)
@@ -106,6 +129,7 @@ class RideSync(
   }
 
   suspend fun pass() {
+    if (!online()) return
     val client = api() ?: return
     val deletions = read("deletions") { store.deletions() } ?: return
     for (deletion in deletions) {
@@ -118,6 +142,10 @@ class RideSync(
     val notes = read("notes") { store.unsentNotes() } ?: return
     for (note in notes) {
       if (!attempt(note.id) { sendNote(client, note) }) return
+    }
+    val unreached = read("unreached") { store.unsentUnreached() } ?: return
+    for (ask in unreached) {
+      if (!attempt(ask.askId) { sendUnreached(client, ask) }) return
     }
     val memos = read("ask_memos") { store.unsentAskMemos() } ?: return
     for (memo in memos) {
@@ -186,6 +214,16 @@ class RideSync(
     }
   }
 
+  // GONE: the ask or its ride was deleted on the Backend; it has no address to give.
+  private suspend fun sendUnreached(client: RideApi, ask: UnsentUnreached) {
+    var saved: OfflineAskSaved? = null
+    if (reply(ask.askId, "unreached") { saved = client.putOfflineAsk(ask.askId, ask.toBody()) } == Reply.REFUSED) {
+      store.unreachedRefused(ask.askId, ask.updatedAt)
+    } else {
+      store.unreachedSent(ask.askId, ask.updatedAt, saved?.address, saved?.headingDegrees)
+    }
+  }
+
   private suspend fun sendAskMemo(client: RideApi, memo: UnsentAskMemo) {
     if (reply(memo.askId, "memo") { client.putAskMemo(memo.askId, AskMemoBody(memo.memo, iso(memo.updatedAt))) } == Reply.REFUSED) {
       store.askMemoRefused(memo.askId, memo.updatedAt)
@@ -195,7 +233,8 @@ class RideSync(
   }
 
   /**
-   * TAKEN when the Backend took it; REFUSED when it refused it (400, or 404 for a memo of an ask it does not have) or
+   * TAKEN when the Backend took it; REFUSED when it refused it (400, 404 for a memo of an ask it does not have, or 409
+   * for an unreached ask whose id it took in) or
    * the device could not even build it (a value that cannot be written as JSON, Android #25); GONE when it was deleted
    * there (410). Refusals and GONE are logged. Other failures throw and end the pass.
    */
@@ -204,7 +243,7 @@ class RideSync(
     Reply.TAKEN
   } catch (e: ApiError) {
     when (e.kind) {
-      ApiErrorKind.BAD_REQUEST, ApiErrorKind.NOT_FOUND -> {
+      ApiErrorKind.BAD_REQUEST, ApiErrorKind.NOT_FOUND, ApiErrorKind.CONFLICT -> {
         log("sync_refused", mapOf("id" to id, "what" to what, "error" to e.message))
         Reply.REFUSED
       }
@@ -231,3 +270,15 @@ fun credentialChanges(key: Flow<String?>, userName: Flow<String?>): Flow<Unit> =
     .drop(1)
     .filter { (k, u) -> k != null && u != null }
     .map { }
+
+/**
+ * A trigger each time the device's network comes back (slice 4 spec §5.2): a change from none to one, not the state it
+ * starts in. While the process lives, what waited for the network then goes without the app coming to the front.
+ */
+fun reconnections(online: Flow<Boolean>): Flow<Unit> = flow {
+  var before: Boolean? = null
+  online.collect { now ->
+    if (before == false && now) emit(Unit)
+    before = now
+  }
+}
