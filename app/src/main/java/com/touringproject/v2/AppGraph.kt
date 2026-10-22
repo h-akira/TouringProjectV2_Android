@@ -11,6 +11,7 @@ import com.touringproject.v2.ask.AskDeps
 import com.touringproject.v2.ask.ConversationState
 import com.touringproject.v2.ask.FlowState
 import com.touringproject.v2.ask.IDLE
+import com.touringproject.v2.ask.Source
 import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.ask.rideNow
 import com.touringproject.v2.audio.AudioRoute
@@ -27,6 +28,7 @@ import com.touringproject.v2.location.FusedRouteSource
 import com.touringproject.v2.location.PositionTracker
 import com.touringproject.v2.location.RouteSource
 import com.touringproject.v2.nav.AppLauncher
+import com.touringproject.v2.net.Connectivity
 import com.touringproject.v2.recordings.RecordingCheck
 import com.touringproject.v2.recordings.RecordingKeeper
 import com.touringproject.v2.recordings.RecordingStore
@@ -59,6 +61,10 @@ import com.touringproject.v2.store.RoomRideStore
 import com.touringproject.v2.store.RoomSyncStore
 import com.touringproject.v2.sync.RideSync
 import com.touringproject.v2.sync.credentialChanges
+import com.touringproject.v2.voice.VOICE_IDLE
+import com.touringproject.v2.voice.VoiceDeps
+import com.touringproject.v2.voice.VoiceInput
+import com.touringproject.v2.voice.VoiceState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -199,6 +205,35 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     Log.w("trv2.recordings", message, e)
   }
 
+  /** Whether the device has a network now (SC-19's voice input). */
+  val connectivity = Connectivity(context)
+
+  private val voiceFlow = MutableStateFlow(VOICE_IDLE)
+  val voiceState: StateFlow<VoiceState> = voiceFlow.asStateFlow()
+
+  // SC-19's voice input: its own route control and recorder, like SC-12's trial. The audio route underneath is the
+  // app's one, so the press router keeps asks off it while a voice input unwinds.
+  val voice = VoiceInput(
+    VoiceDeps(
+      now = System::currentTimeMillis,
+      sleep = { delay(it) },
+      micAllowed = micAllowed,
+      online = { connectivity.online.value },
+      api = {
+        val key = apiKeys.current()
+        val user = settings.settings.value?.userName
+        if (apiBaseUrl.isEmpty() || key == null || user == null) null else ApiClient(apiBaseUrl, key, user, http)
+      },
+      route = AudioRouteControl(audioRoute),
+      recorder = PcmRecorder(),
+      cueStart = cues::start,
+      cueFailure = cues::failure,
+      onState = { voiceFlow.value = it },
+      log = { event, data -> Log.i("trv2.note", "$event $data") },
+    ),
+    scope,
+  )
+
   // The media volume at which the rider closed the low-volume band; kept until the process ends (slice 1 spec §5.6).
   private val volumeDismissed = MutableStateFlow<Int?>(null)
   val volumeDismissedAt: StateFlow<Int?> = volumeDismissed.asStateFlow()
@@ -215,6 +250,12 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     askPress = controller::press,
     askStopRecording = controller::stopRecording,
     askTap = controller::tapToTalk,
+    askBusy = { isBusy(controller.state) },
+    voiceAttached = { voice.attached },
+    voicePress = { voice.press(Source.HANDSFREE) },
+    voiceRecording = { voice.recording },
+    voiceStop = voice::stop,
+    voiceBusy = { voice.busy },
   )
 
   /** The screen's "押して話す", routed like an intercom press so it waits for a left trial to unwind. */

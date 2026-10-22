@@ -1,6 +1,7 @@
 package com.touringproject.v2.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -23,6 +24,10 @@ import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.ride.RoutePoint
 import com.touringproject.v2.settings.Settings
 import com.touringproject.v2.store.RoomRecords
+import com.touringproject.v2.ask.Source
+import com.touringproject.v2.voice.VoiceInput
+import com.touringproject.v2.voice.VoiceState
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -148,13 +153,35 @@ fun AskMemoRoute(records: RoomRecords, edits: AskEdits, rideId: String, askId: S
   MemoScreen(target, ask.memo, { edits.memo(askId, it) }, onClose, modifier)
 }
 
+/** SC-19's voice input as the routes take it from AppGraph. */
+class NoteVoice(val input: VoiceInput, val state: StateFlow<VoiceState>, val online: StateFlow<Boolean>)
+
+/**
+ * The voice input while SC-19 is shown: attached, the intercom button goes to it (slice 3 spec §7.3); leaving SC-19
+ * detaches it and drops whatever it was doing.
+ */
+@Composable
+private fun voiceUi(voice: NoteVoice?): NoteVoiceUi? {
+  voice ?: return null
+  DisposableEffect(voice) {
+    val token = voice.input.attach()
+    onDispose { voice.input.detach(token) }
+  }
+  val state by voice.state.collectAsStateWithLifecycle()
+  val online by voice.online.collectAsStateWithLifecycle()
+  return NoteVoiceUi(state.phase, state.failure?.message, state.heard, online)
+}
+
 /** SC-19 opened from Home: the memo is kept for the ride it was opened in when it is first saved (slice 3 spec §7.3). */
 @Composable
-fun NewNoteRoute(records: RoomRecords, notes: NoteEdits, draft: NoteDraft, onClose: () -> Unit, modifier: Modifier = Modifier) {
+fun NewNoteRoute(records: RoomRecords, notes: NoteEdits, draft: NoteDraft, onClose: () -> Unit, modifier: Modifier = Modifier, voice: NoteVoice? = null) {
   val ride = readRide(records, draft.rideId) ?: return
-  val kept = ride.value ?: return
+  val kept = ride.value ?: return NoteNotFound("この走行は見つかりません。", onClose, modifier)
   val header = remember(draft, kept.name) { newNoteHeader(draft, kept.name, ZoneId.systemDefault()) }
-  NoteScreen(header, null, { notes.create(draft, it) }, onClose, modifier)
+  NoteScreen(
+    header, null, { notes.create(draft, it) }, onClose, modifier,
+    voice = voiceUi(voice), onVoice = { voice?.input?.press(Source.SCREEN) }, onHeard = { voice?.input?.taken(it) },
+  )
 }
 
 /**
@@ -162,13 +189,24 @@ fun NewNoteRoute(records: RoomRecords, notes: NoteEdits, draft: NoteDraft, onClo
  * the deletion in progress is not cancelled with the screen and closes it once.
  */
 @Composable
-fun NoteRoute(records: RoomRecords, notes: NoteEdits, rideId: String, noteId: String, onClose: () -> Unit, modifier: Modifier = Modifier) {
+fun NoteRoute(
+  records: RoomRecords,
+  notes: NoteEdits,
+  rideId: String,
+  noteId: String,
+  onClose: () -> Unit,
+  modifier: Modifier = Modifier,
+  voice: NoteVoice? = null,
+) {
   val ride = readRide(records, rideId) ?: return
   val list = readNotes(records, rideId) ?: return
   var shown by remember(noteId) { mutableStateOf(list.firstOrNull { it.id == noteId }) }
   list.firstOrNull { it.id == noteId }?.let { shown = it }
-  val note = shown ?: return
-  val name = ride.value?.name ?: return
+  val note = shown ?: return NoteNotFound("この地点メモは見つかりません。", onClose, modifier)
+  val name = ride.value?.name ?: return NoteNotFound("この走行は見つかりません。", onClose, modifier)
   val header = remember(note, name) { noteHeader(note, name, ZoneId.systemDefault()) }
-  NoteScreen(header, note.text, { notes.text(noteId, it) }, onClose, modifier, onDelete = { notes.delete(noteId) })
+  NoteScreen(
+    header, note.text, { notes.text(noteId, it) }, onClose, modifier, onDelete = { notes.delete(noteId) },
+    voice = voiceUi(voice), onVoice = { voice?.input?.press(Source.SCREEN) }, onHeard = { voice?.input?.taken(it) },
+  )
 }

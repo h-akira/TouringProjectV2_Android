@@ -76,4 +76,17 @@ class TabsTest {
     assertTrue(tabsShown(Phase.IDLE))
     for (phase in Phase.entries - Phase.IDLE) assertFalse(phase.name, tabsShown(phase))
   }
+
+  // Android #57: SC-19 opened from Home lands on Home, not on a tab the rider moved to while its place was read; and a
+  // second press while the first one's memo is on top adds nothing.
+  @Test
+  fun a_screen_is_pushed_only_on_its_tab_and_not_over_one_like_it() {
+    tabs.pushOn(Tab.HOME, "note-1") { it.startsWith("note") }
+    tabs.pushOn(Tab.HOME, "note-2") { it.startsWith("note") }
+    assertEquals(listOf("home", "note-1"), home)
+    tabs.press(Tab.RECORDS)
+    tabs.pushOn(Tab.HOME, "note-3") { false }
+    assertEquals(listOf("records"), records)
+    assertEquals(listOf("home", "note-1"), home)
+  }
 }

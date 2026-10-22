@@ -294,7 +294,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       fail(FailureReason.TIMEOUT, run)
       return null
     }
-    val result = (outcome as PollOutcome.Done).result
+    val result = (outcome as PollOutcome.Done<AskResult>).result
     if (!readable(result)) {
       fail(failureFromServer(result.error), run)
       return null

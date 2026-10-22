@@ -62,6 +62,20 @@ interface AskApi {
   suspend fun getAsk(askId: String): AskResult
 }
 
+/** A point memo's voice, to be turned into text only (slice 3 spec §6.2): 16 kHz mono 16-bit PCM in base64, 0.25 to 60 s. */
+@Serializable data class TranscriptionBody(val audio: String)
+
+@Serializable data class TranscriptionAccepted(val transcriptionId: String)
+
+/** status: processing / done / failed. text is set when done; failure (no_speech / transcribe_failed) when failed. */
+@Serializable
+data class TranscriptionResult(val transcriptionId: String, val status: String, val text: String? = null, val failure: String? = null)
+
+interface TranscriptionApi {
+  suspend fun postTranscription(body: TranscriptionBody): TranscriptionAccepted
+  suspend fun getTranscription(transcriptionId: String): TranscriptionResult
+}
+
 // A ride and its route (slice 2 spec §6.2). Times are ISO 8601 with their time zone.
 @Serializable data class SegmentBody(val startedAt: String, val endedAt: String?)
 
@@ -138,7 +152,7 @@ class ApiClient(
   private val maxAttempts: Int = 3,
   timeoutMs: Long = 15_000,
   private val retryDelay: suspend (Long) -> Unit = { delay(it) },
-) : AskApi, RideApi {
+) : AskApi, RideApi, TranscriptionApi {
   private val baseUrl = baseUrl.trimEnd('/')
   // callTimeout bounds the whole exchange, so a stalled connection cannot hang the ask.
   private val http = http.newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS).build()
@@ -151,6 +165,14 @@ class ApiClient(
     json.decodeFromString(request("POST", "/asks", json.encodeToString(AskBody.serializer(), body), setOf(ApiErrorKind.RATE_LIMITED)))
 
   override suspend fun getAsk(askId: String): AskResult = json.decodeFromString(request("GET", "/asks/$askId", null, TRANSIENT))
+
+  // Like postAsk: a lost response may already have made a transcription, so only 429 is sent again.
+  override suspend fun postTranscription(body: TranscriptionBody): TranscriptionAccepted = json.decodeFromString(
+    request("POST", "/transcriptions", json.encodeToString(TranscriptionBody.serializer(), body), setOf(ApiErrorKind.RATE_LIMITED)),
+  )
+
+  override suspend fun getTranscription(transcriptionId: String): TranscriptionResult =
+    json.decodeFromString(request("GET", "/transcriptions/$transcriptionId", null, TRANSIENT))
 
   override suspend fun putRide(rideId: String, body: RideBody) {
     request("PUT", "/rides/$rideId", rideJson.encodeToString(RideBody.serializer(), body), TRANSIENT)

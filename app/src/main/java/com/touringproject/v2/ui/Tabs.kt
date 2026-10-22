@@ -48,6 +48,18 @@ class TabStacks<K>(
     if (stack.lastOrNull() != key) stack += key
   }
 
+  /**
+   * Opens key in tab only while tab is the one shown and its top screen is not like it (unlessTop): a screen asked for
+   * from one tab never lands on another the rider has moved to meanwhile, and a quick second press adds nothing
+   * (Android #57).
+   */
+  fun pushOn(tab: Tab, key: K, unlessTop: (K) -> Boolean) {
+    if (tab != this.tab) return
+    val top = current.lastOrNull()
+    if (top != null && unlessTop(top)) return
+    current += key
+  }
+
   /** Shows key above the first screen of tab, e.g. the user name from Home's user chip. */
   fun open(tab: Tab, key: K) {
     val stack = stacks.getValue(tab)

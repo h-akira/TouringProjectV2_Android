@@ -17,9 +17,23 @@ import com.touringproject.v2.store.RideDatabase
 import com.touringproject.v2.store.RoomNotes
 import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.store.RoomRideStore
+import com.touringproject.v2.ask.Recorded
+import com.touringproject.v2.ask.Recorder
+import com.touringproject.v2.ask.RouteControl
+import com.touringproject.v2.ask.Source
+import com.touringproject.v2.voice.VOICE_IDLE
+import com.touringproject.v2.voice.VoiceDeps
+import com.touringproject.v2.voice.VoiceInput
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
@@ -73,5 +87,46 @@ class NoteRoutesTest {
     rule.waitForIdle()
     assertEquals(1, closed)
     assertNull(runBlocking { db.notes().note("n1") })
+  }
+
+  private val idleRoute = object : RouteControl {
+    override suspend fun start(source: Source) = true
+    override suspend fun stop() = Unit
+    override fun inputDevice() = null
+  }
+  private val idleRecorder = object : Recorder {
+    override suspend fun start() = Unit
+    override suspend fun stop() = Recorded(ByteArray(0), "voice.pcm")
+    override suspend fun cancel() = Unit
+  }
+  private val input = VoiceInput(
+    VoiceDeps({ 0 }, {}, { true }, { true }, { null }, idleRoute, idleRecorder, {}, {}, {}) { _, _ -> },
+    MainScope(),
+  )
+
+  // Slice 3 spec §7.3: the intercom button belongs to SC-19's voice input only while SC-19 is shown.
+  @Test
+  fun sc19_takes_the_intercom_button_while_it_is_shown() {
+    keepRide()
+    var shown by mutableStateOf(true)
+    rule.setContent {
+      if (shown) NewNoteRoute(records, notes, draft, onClose = {}, voice = NoteVoice(input, MutableStateFlow(VOICE_IDLE), MutableStateFlow(true)))
+    }
+    waitFor("voice")
+    assertTrue(input.attached)
+    shown = false
+    rule.waitForIdle()
+    assertFalse(input.attached)
+  }
+
+  // Android #57: a memo or ride that is not found says so, and the screen can still be closed.
+  @Test
+  fun a_memo_not_found_says_so_and_can_be_closed() {
+    keepRide()
+    rule.setContent { NoteRoute(records, notes, "r1", "n9", onClose = { closed++ }) }
+    waitFor("notFound")
+    rule.onNodeWithTag("notFound").assertTextEquals("この地点メモは見つかりません。")
+    rule.onNodeWithTag("notFoundClose").performClick()
+    assertEquals(1, closed)
   }
 }

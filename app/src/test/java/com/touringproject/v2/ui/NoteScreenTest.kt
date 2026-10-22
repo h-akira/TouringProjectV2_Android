@@ -9,7 +9,13 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.touringproject.v2.voice.Heard
+import com.touringproject.v2.voice.VoiceFailure
+import com.touringproject.v2.voice.VoicePhase
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -113,5 +119,76 @@ class NoteScreenTest {
     rule.waitForIdle()
     assertEquals(0, closed)
     assertEquals("削除できませんでした", ShadowToast.getTextOfLatestToast())
+  }
+
+  private fun showVoice(ui: NoteVoiceUi, initial: String? = null, presses: MutableList<Unit> = mutableListOf()) = rule.setContent {
+    NoteScreen(header, initial, { true }, {}, voice = ui, onVoice = { presses += Unit })
+  }
+
+  // Slice 3 spec §7.3: "🎤 声で入力" starts the recording; the note says the voice goes only to be turned into text.
+  @Test
+  fun the_voice_button_starts_the_recording_and_says_where_the_voice_goes() {
+    val presses = mutableListOf<Unit>()
+    showVoice(NoteVoiceUi(VoicePhase.IDLE, null, null, online = true), presses = presses)
+    rule.onNodeWithText("声は文字にするためだけにサーバーへ送ります。AI には聞きません。").assertExists()
+    rule.onNodeWithTag("voice").assertTextEquals("🎤 声で入力").performClick()
+    assertEquals(1, presses.size)
+  }
+
+  @Test
+  fun while_recording_the_button_stops_it_and_while_the_text_is_made_it_waits() {
+    var phase by mutableStateOf(VoicePhase.RECORDING)
+    rule.setContent { NoteScreen(header, null, { true }, {}, voice = NoteVoiceUi(phase, null, null, online = true)) }
+    rule.onNodeWithTag("voice").assertTextEquals("■ 止めて文字にする").assertIsEnabled()
+    phase = VoicePhase.TRANSCRIBING
+    rule.onNodeWithTag("voice").assertTextEquals("文字にしています…").assertIsNotEnabled()
+  }
+
+  // Slice 3 spec §7.3: without a network the voice button cannot be pressed, and the screen says what still works.
+  @Test
+  fun without_a_network_the_voice_button_cannot_be_pressed() {
+    showVoice(NoteVoiceUi(VoicePhase.IDLE, null, null, online = false))
+    rule.onNodeWithTag("voice").assertIsNotEnabled()
+    rule.onNodeWithText("通信できないため、声では入力できません。文字で書けば保存できます。").assertExists()
+  }
+
+  @Test
+  fun the_reason_of_a_failed_voice_is_told_under_the_field() {
+    showVoice(NoteVoiceUi(VoicePhase.IDLE, VoiceFailure.NO_SPEECH.message, null, online = true))
+    rule.onNodeWithTag("voiceFailure").assertTextEquals("声が聞き取れませんでした。もう一度話してください。")
+  }
+
+  // What was heard goes at the end of the text, once, and can be changed by hand afterwards.
+  @Test
+  fun what_was_heard_is_added_at_the_end_once() {
+    var heard by mutableStateOf<Heard?>(null)
+    val taken = mutableListOf<Int>()
+    rule.setContent {
+      NoteScreen(header, null, { saved += it; true }, {}, voice = NoteVoiceUi(VoicePhase.IDLE, null, heard, online = true), onHeard = { taken += it; heard = null })
+    }
+    rule.onNodeWithTag("memoInput").performTextReplacement("料金所の手前")
+    heard = Heard(1, "展望スペース")
+    rule.waitForIdle()
+    rule.onNodeWithText("料金所の手前\n展望スペース").assertExists()
+    assertEquals(listOf(1), taken)
+    rule.onNodeWithTag("memoSave").performClick()
+    rule.waitForIdle()
+    assertEquals(listOf("料金所の手前\n展望スペース"), saved)
+  }
+
+  // Android #57: while the memo is being deleted, ✕, Back and a second delete do nothing; the screen closes once.
+  @Test
+  fun while_the_memo_is_being_deleted_nothing_else_closes_it() {
+    val gate = kotlinx.coroutines.CompletableDeferred<Boolean>()
+    rule.setContent { NoteScreen(header, "消すメモ", { true }, { closed++ }, onDelete = { deletes++; gate.await() }) }
+    rule.onNodeWithTag("deleteNote").performClick()
+    rule.onNodeWithTag("deleteGo").performClick()
+    rule.onNodeWithTag("memoClose").performClick()
+    rule.runOnUiThread { rule.activity.onBackPressedDispatcher.onBackPressed() }
+    rule.onNodeWithTag("deleteNote").assertIsNotEnabled()
+    gate.complete(true)
+    rule.waitForIdle()
+    assertEquals(1, deletes)
+    assertEquals(1, closed)
   }
 }

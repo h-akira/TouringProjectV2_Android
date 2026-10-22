@@ -37,8 +37,10 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.touringproject.v2.records.MEMO_MAX
+import com.touringproject.v2.records.appendHeard
 import com.touringproject.v2.records.cutMemo
 import com.touringproject.v2.records.memoText
+import com.touringproject.v2.voice.Heard
 import kotlinx.coroutines.launch
 
 /**
@@ -46,7 +48,9 @@ import kotlinx.coroutines.launch
  * below. initial is the text kept now; onSave gets the cleaned text (memoText: null when blank) and says whether it was
  * written: a text that was not is told and the screen stays, so nothing typed is lost (slice 3 spec §8). canSave says
  * whether a cleaned text may be saved. ✕ and Back ask before throwing a change away. While a save runs, 保存, ✕ and
- * Back take nothing, so the screen is closed once (Android #55). The field opens with the cursor at the end.
+ * Back take nothing, so the screen is closed once (Android #55). The field opens with the cursor at the end. heard is
+ * what SC-19's voice input heard: it is added at the end of the text once, and onHeard tells it was. busy is set by
+ * the screen while it does something of its own (SC-19 deleting the memo): 保存, ✕ and Back then take nothing either.
  */
 @Composable
 fun MemoEditor(
@@ -60,6 +64,9 @@ fun MemoEditor(
   saveColor: Color? = null,
   header: @Composable () -> Unit = {},
   footer: @Composable ColumnScope.() -> Unit = {},
+  heard: Heard? = null,
+  onHeard: (Int) -> Unit = {},
+  busy: Boolean = false,
 ) {
   var field by rememberSaveable(stateSaver = TextFieldValue.Saver) {
     mutableStateOf((initial ?: "").let { TextFieldValue(it, TextRange(it.length)) })
@@ -72,8 +79,14 @@ fun MemoEditor(
   val context = LocalContext.current
   val focus = remember { FocusRequester() }
   LaunchedEffect(Unit) { focus.requestFocus() }
+  LaunchedEffect(heard?.seq) {
+    val next = heard ?: return@LaunchedEffect
+    val text = appendHeard(field.text, next.text)
+    field = TextFieldValue(text, TextRange(text.length))
+    onHeard(next.seq)
+  }
   val close = {
-    if (!saving) {
+    if (!saving && !busy) {
       if (changed) discarding = true else onClose()
     }
   }
@@ -92,7 +105,7 @@ fun MemoEditor(
             saving = false
           }
         },
-        enabled = !saving && canSave(clean),
+        enabled = !saving && !busy && canSave(clean),
         colors = saveColor?.let { ButtonDefaults.buttonColors(containerColor = it, contentColor = Color.White) } ?: ButtonDefaults.buttonColors(),
         modifier = Modifier.testTag("memoSave"),
       ) { Text("保存") }

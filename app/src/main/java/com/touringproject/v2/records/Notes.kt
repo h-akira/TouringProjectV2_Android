@@ -58,3 +58,7 @@ fun noteDraft(id: String, rideId: String, at: Long, recent: List<RoutePoint>): N
   val sample = pickHeadingSample(fixes, Fix(newest.lat, newest.lon, newest.t, newest.accuracy))
   return NoteDraft(id, rideId, at, newest.lat, newest.lon, sample?.latitude, sample?.longitude, sample?.let { Instant.parse(it.at).toEpochMilli() })
 }
+
+/** SC-19's voice input: what was heard goes at the end of what is written, on a line of its own, within 2000 characters. */
+fun appendHeard(current: String, heard: String): String =
+  cutMemo(if (current.isEmpty() || current.endsWith("\n")) current + heard else current + "\n" + heard)

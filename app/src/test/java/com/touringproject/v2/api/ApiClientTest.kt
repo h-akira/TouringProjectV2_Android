@@ -268,4 +268,30 @@ class ApiClientTest {
     client().deleteNote("r1", "n1")
     assertEquals("DELETE /Prod/rides/r1/notes/n1", server.takeRequest().let { "${it.method} ${it.path}" })
   }
+
+  // Slice 3 spec §6.2: the voice of a point memo goes to be turned into text only. Like an ask, a lost response may
+  // already have made one, so only 429 is sent again.
+  @Test
+  fun postTranscription_sends_the_audio_and_tries_again_only_on_a_rate_limit() = runTest {
+    server.enqueue(json(503))
+    val error = runCatching { client().postTranscription(TranscriptionBody("AAAA")) }.exceptionOrNull() as ApiError
+    assertEquals(ApiErrorKind.SERVER, error.kind)
+    assertEquals(1, server.requestCount)
+    server.takeRequest()
+    server.enqueue(json(429))
+    server.enqueue(json(202, """{"transcriptionId":"t1"}"""))
+    assertEquals(TranscriptionAccepted("t1"), client().postTranscription(TranscriptionBody("AAAA")))
+    val request = server.takeRequest()
+    assertEquals("POST /Prod/transcriptions", "${request.method} ${request.path}")
+    assertEquals("AAAA", Json.parseToJsonElement(request.body.readUtf8()).jsonObject["audio"]!!.jsonPrimitive.content)
+  }
+
+  @Test
+  fun getTranscription_reads_what_was_heard_or_why_not() = runTest {
+    server.enqueue(json(200, """{"transcriptionId":"t1","status":"done","text":"展望スペース","failure":null}"""))
+    server.enqueue(json(200, """{"transcriptionId":"t2","status":"failed","text":null,"failure":"no_speech"}"""))
+    assertEquals(TranscriptionResult("t1", "done", "展望スペース", null), client().getTranscription("t1"))
+    assertEquals(TranscriptionResult("t2", "failed", null, "no_speech"), client().getTranscription("t2"))
+    assertEquals("GET /Prod/transcriptions/t1", server.takeRequest().let { "${it.method} ${it.path}" })
+  }
 }

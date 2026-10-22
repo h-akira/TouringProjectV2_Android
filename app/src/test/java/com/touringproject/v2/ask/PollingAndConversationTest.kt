@@ -3,6 +3,7 @@ package com.touringproject.v2.ask
 import com.touringproject.v2.api.ApiError
 import com.touringproject.v2.api.ApiErrorKind
 import com.touringproject.v2.api.AskResult
+import com.touringproject.v2.api.TranscriptionResult
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -21,6 +22,16 @@ class PollingTest {
 
   private suspend fun poll(clock: Clock, cancelled: () -> Boolean = { false }, get: suspend () -> AskResult) =
     pollUntilDone(get, clock::sleep, { clock.now }, cancelled)
+
+  // Slice 3 spec §7.3: a transcription is fetched on the same schedule as an ask, until it is no longer processing.
+  @Test
+  fun a_transcription_is_polled_like_an_ask_until_it_has_finished() = runTest {
+    val done = TranscriptionResult("t1", "done", "展望スペース")
+    val results = mutableListOf(TranscriptionResult("t1", "processing"), done)
+    val clock = Clock()
+    assertEquals(PollOutcome.Done(done), pollUntil({ results.removeAt(0) }, { it.status == "processing" }, clock::sleep, { clock.now }, { false }))
+    assertEquals(listOf(1_000L, 1_000L), clock.sleeps)
+  }
 
   @Test
   fun delays_are_1s_for_10s_then_2s() {

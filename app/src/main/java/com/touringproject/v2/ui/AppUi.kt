@@ -101,6 +101,7 @@ fun AppUi(graph: AppGraph) {
   val recordsStack = rememberNavBackStack(RecordsKey)
   val settingsStack = rememberNavBackStack(SettingsKey)
   var selectedTab by rememberSaveable { mutableStateOf(Tab.HOME) }
+  val noteVoice = remember(graph) { NoteVoice(graph.voice, graph.voiceState, graph.connectivity.online) }
   val tabs = remember(homeStack, recordsStack, settingsStack) {
     TabStacks(mapOf(Tab.HOME to homeStack, Tab.RECORDS to recordsStack, Tab.SETTINGS to settingsStack), { selectedTab }, { selectedTab = it })
   }
@@ -156,12 +157,13 @@ fun AppUi(graph: AppGraph) {
                       onMemo = { ride?.let { tabs.push(RideMemoKey(it.id)) } },
                     )
                   },
-                  // The place is read when the button is pressed (slice 3 spec §4.3); a second press while it is read adds nothing.
+                  // The place is read when the button is pressed (slice 3 spec §4.3); a second press while it is read adds
+                  // nothing, and a tab moved to meanwhile is left as it is (Android #57).
                   onNote = ride?.let { active ->
                     {
                       scope.launch {
                         val draft = graph.notes.draft(active.id)
-                        if (tabs.current.lastOrNull() !is NewNoteKey) tabs.push(NewNoteKey(draft))
+                        tabs.pushOn(Tab.HOME, NewNoteKey(draft)) { it is NewNoteKey }
                       }
                     }
                   },
@@ -205,10 +207,10 @@ fun AppUi(graph: AppGraph) {
                 AskMemoRoute(graph.records, graph.askEdits, key.rideId, key.askId, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding())
               }
               entry<NewNoteKey> { key ->
-                NewNoteRoute(graph.records, graph.notes, key.draft, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding())
+                NewNoteRoute(graph.records, graph.notes, key.draft, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding(), voice = noteVoice)
               }
               entry<NoteKey> { key ->
-                NoteRoute(graph.records, graph.notes, key.rideId, key.noteId, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding())
+                NoteRoute(graph.records, graph.notes, key.rideId, key.noteId, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding(), voice = noteVoice)
               }
               entry<SettingsKey> {
                 SettingsScreen(
