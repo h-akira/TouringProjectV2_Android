@@ -67,4 +67,16 @@ class MapDataTest {
     assertEquals(listOf("pin-1-memo", "pin-2"), icons(null))
     assertEquals(listOf("pin-sel-1-memo", "pin-2"), icons("a1"))
   }
+
+  // US-D-08: a point memo's pin is green and numbered apart from the asks; a tap names it by its id.
+  @Test
+  fun a_point_memos_pin_takes_an_image_of_its_own_and_names_its_id() {
+    val map = rideMap(points, ended = true, pins = listOf(MapPin("a1", 1, LatLon(35.0, 139.0)), MapPin("n1", 1, LatLon(35.1, 139.1), kind = PinKind.NOTE)))
+    val properties = { selected: String? ->
+      Json.parseToJsonElement(pinsJson(map, selected)).jsonObject["features"]!!.jsonArray
+        .map { it.jsonObject["properties"]!!.jsonObject.let { p -> p["id"]!!.jsonPrimitive.content to p["icon"]!!.jsonPrimitive.content } }
+    }
+    assertEquals(listOf("a1" to "pin-1", "n1" to "note-1"), properties(null))
+    assertEquals(listOf("a1" to "pin-1", "n1" to "note-sel-1"), properties("n1"))
+  }
 }

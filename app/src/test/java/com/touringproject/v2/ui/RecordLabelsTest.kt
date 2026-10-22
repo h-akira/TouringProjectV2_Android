@@ -2,6 +2,10 @@ package com.touringproject.v2.ui
 
 import com.touringproject.v2.ask.AskOutcome
 import com.touringproject.v2.ask.AskRecord
+import com.touringproject.v2.map.LatLon
+import com.touringproject.v2.map.PinKind
+import com.touringproject.v2.records.NoteDraft
+import com.touringproject.v2.records.NoteRecord
 import com.touringproject.v2.records.RideListItem
 import com.touringproject.v2.records.SaveState
 import com.touringproject.v2.ride.EndReason
@@ -98,7 +102,7 @@ class RecordLabelsTest {
   @Test
   fun pins_are_numbered_like_the_timeline_and_an_ask_without_a_place_has_none() {
     val asks = listOf(ask("a2", ms(16, 10, 30)), ask("a1", ms(16, 9, 41)).copy(latitude = null, longitude = null))
-    assertEquals(listOf("a2" to 2), askPins(asks).map { it.askId to it.number })
+    assertEquals(listOf("a2" to 2), askPins(asks).map { it.id to it.number })
   }
 
   @Test
@@ -130,7 +134,8 @@ class RecordLabelsTest {
     assertEquals("金時山です。", card.answer)
   }
 
-  // Android #41: the day after the night has no ask, yet the ride runs over two days.
+  // Android #41, #51: the day after the night has no ask, yet the ride runs over two days, and the day it resumed on
+  // gets its heading.
   @Test
   fun an_overnight_ride_without_asks_after_midnight_still_gets_its_day_headings() {
     val overnight = newRide("r2", "伊豆", ms(16, 15, 0), 7, 48 * HOUR_MS).pause(ms(16, 21, 10)).resume(ms(17, 8, 30), 7, 48 * HOUR_MS)
@@ -140,6 +145,7 @@ class RecordLabelsTest {
         TimelineRow.Day("10月16日（金）"),
         TimelineRow.Ask("a1", 1, "16:00", "足柄下郡箱根町仙石原", "右手の山は？", false),
         TimelineRow.Pause("⏸ 一時停止 21:10〜10月17日 08:30"),
+        TimelineRow.Day("10月17日（土）"),
       ),
       rideTimeline(overnight, listOf(ask("a1", ms(16, 16, 0))), zone),
     )
@@ -174,5 +180,71 @@ class RecordLabelsTest {
     val asks = listOf(ask("a1", ms(16, 9, 41)), ask("a2", ms(16, 10, 30)))
     assertEquals("会話 2 · 10:30 足柄下郡箱根町仙石原", askMemoTarget(asks, "a2", zone))
     assertNull(askMemoTarget(asks, "a9", zone))
+  }
+
+  private fun note(id: String, at: Long, address: String? = "静岡県御殿場市新橋", sent: Boolean = true, placed: Boolean = true) =
+    NoteRecord(id, "r1", at, if (placed) 35.3 else null, if (placed) 138.9 else null, "料金所の手前の展望スペース", address, sent)
+
+  // US-D-08: point memos have numbers of their own and mix with the asks in time order.
+  @Test
+  fun point_memos_are_numbered_apart_from_the_asks_and_mixed_into_the_timeline() {
+    val asks = listOf(ask("a1", ms(16, 9, 41)), ask("a2", ms(16, 10, 30)))
+    val notes = listOf(note("n2", ms(16, 10, 40), address = null, sent = false), note("n1", ms(16, 9, 50)), note("n0", ms(16, 9, 0), address = null, placed = false))
+    assertEquals(
+      listOf(
+        TimelineRow.Note("n0", 1, "09:00", "位置の記録なし", "料金所の手前の展望スペース"),
+        TimelineRow.Ask("a1", 1, "09:41", "足柄下郡箱根町仙石原", "右手の山は？", false),
+        TimelineRow.Pause("⏸ 一時停止 09:44〜10:02（18分）"),
+        TimelineRow.Note("n1", 2, "09:50", "御殿場市新橋", "料金所の手前の展望スペース"),
+        TimelineRow.Ask("a2", 2, "10:30", "足柄下郡箱根町仙石原", "右手の山は？", false),
+        TimelineRow.Note("n2", 3, "10:40", "住所は送信後", "料金所の手前の展望スペース"),
+      ),
+      rideTimeline(ride, asks, zone, notes),
+    )
+    // A memo without a place keeps its number but has no pin.
+    assertEquals(listOf(Triple("n1", 2, PinKind.NOTE), Triple("n2", 3, PinKind.NOTE)), notePins(notes).map { Triple(it.id, it.number, it.kind) })
+    assertEquals(LatLon(35.3, 138.9), notePins(notes).first().at)
+  }
+
+  @Test
+  fun a_point_memo_without_an_address_says_why() {
+    assertEquals("御殿場市新橋", notePlace(note("n1", 0)))
+    assertEquals("住所は送信後", notePlace(note("n1", 0, address = null, sent = false)))
+    assertEquals("場所不明", notePlace(note("n1", 0, address = null, sent = true)))
+    assertEquals("位置の記録なし", notePlace(note("n1", 0, address = null, sent = false, placed = false)))
+  }
+
+  @Test
+  fun a_point_memos_card_shows_its_green_number_the_time_and_the_place() {
+    val notes = listOf(note("n1", ms(16, 9, 50)), note("n2", ms(16, 10, 40)))
+    assertEquals(
+      PinCardUi("n2", "2 · 10:40 · 御殿場市新橋 · 📝 地点メモ", "料金所の手前の展望スペース", null, PinKind.NOTE),
+      noteCard(notes, "n2", zone),
+    )
+    assertNull(noteCard(notes, "n9", zone))
+  }
+
+  // SC-19: when, where and which ride; the address comes from the Backend once the memo has gone (slice 3 spec §7.3).
+  @Test
+  fun sc_19_says_when_where_and_for_which_ride() {
+    val draft = NoteDraft("n1", "r1", ms(22, 10, 24), 35.3, 138.9, null, null, null)
+    assertEquals(
+      NoteHeaderUi("10月22日（木） 10:24 · 今いる地点", "📍 住所は送ったあとに付きます", "走行「箱根」に入ります"),
+      newNoteHeader(draft, "箱根", zone),
+    )
+    assertEquals("📍 位置を記録できませんでした", newNoteHeader(draft.copy(latitude = null, longitude = null), "箱根", zone).where)
+    assertEquals(
+      NoteHeaderUi("10月16日（金） 09:50", "📍 静岡県御殿場市新橋", "走行「箱根」で書いたメモ"),
+      noteHeader(note("n1", ms(16, 9, 50)), "箱根", zone),
+    )
+    assertEquals("📍 住所は送ったあとに付きます", noteHeader(note("n1", 0, address = null, sent = false), "箱根", zone).where)
+    assertEquals("📍 住所は分かりませんでした", noteHeader(note("n1", 0, address = null, sent = true), "箱根", zone).where)
+    assertEquals("📍 位置を記録できませんでした", noteHeader(note("n1", 0, address = null, placed = false), "箱根", zone).where)
+  }
+
+  @Test
+  fun the_summary_counts_the_point_memos_only_when_there_are_some() {
+    assertEquals("📝 地点メモ 2件", rideSummary(ride, 4, ms(17, 0, 0), zone, notes = 2).notes)
+    assertNull(rideSummary(ride, 4, ms(17, 0, 0), zone).notes)
   }
 }

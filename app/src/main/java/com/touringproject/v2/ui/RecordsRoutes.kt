@@ -50,7 +50,7 @@ fun rideDetailUi(ride: Ride, asks: List<AskRecord>, route: List<RoutePoint>, now
   recording = ride.status != RideStatus.ENDED,
   timeline = rideTimeline(ride, asks, zone),
   map = rideMap(route, ride.status == RideStatus.ENDED, askPins(asks)),
-  cards = asks.mapNotNull { pinCard(asks, it.askId, zone) }.associateBy { it.askId },
+  cards = asks.mapNotNull { pinCard(asks, it.askId, zone) }.associateBy { it.id },
   memo = ride.memo,
 )
 

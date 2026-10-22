@@ -44,7 +44,7 @@ class RecordsScreensTest {
   private val fakeMap: MapSlot = { data, selected, onPin, modifier ->
     Column(modifier.testTag("map")) {
       Text("pins ${data.pins.size} selected $selected", Modifier.testTag("mapState"))
-      data.pins.forEach { pin -> Button(onClick = { onPin(pin.askId) }, Modifier.testTag("pin-${pin.askId}")) { Text("${pin.number}") } }
+      data.pins.forEach { pin -> Button(onClick = { onPin(pin.id) }, Modifier.testTag("pin-${pin.id}")) { Text("${pin.number}") } }
     }
   }
 
@@ -351,5 +351,17 @@ class RecordsScreensTest {
     rule.mainClock.advanceTimeBy(500)
     rule.waitForIdle()
     assertEquals(1, finished)
+  }
+
+  // US-D-08: a point memo's row in the timeline opens it in SC-19.
+  @Test
+  fun a_point_memo_in_the_timeline_opens_it() {
+    val opened = mutableListOf<String>()
+    val ui = detail().copy(timeline = listOf(TimelineRow.Note("n1", 1, "09:50", "御殿場市新橋", "展望スペース")))
+    rule.setContent { RideDetailScreen(ui, fakeMap, true, {}, {}, {}, { true }, {}, onNote = { opened += it }) }
+    rule.onNodeWithTag("timeline").performScrollToNode(hasTestTag("note-n1"))
+    rule.onNodeWithText("09:50 · 御殿場市新橋 · 📝 地点メモ").assertExists()
+    rule.onNodeWithTag("note-n1").performClick()
+    assertEquals(listOf("n1"), opened)
   }
 }

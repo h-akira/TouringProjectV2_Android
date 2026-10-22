@@ -12,8 +12,14 @@ import kotlinx.serialization.json.put
 
 data class LatLon(val lat: Double, val lon: Double)
 
-/** A numbered ask on the map; number is the ask's place in the ride's timeline. memo: the ask has a memo (US-D-04.005). */
-data class MapPin(val askId: String, val number: Int, val at: LatLon, val memo: Boolean = false)
+/** Asks are orange pins, point memos green ones, each numbered on its own (US-D-08). */
+enum class PinKind { ASK, NOTE }
+
+/**
+ * A numbered ask or point memo on the map; id is its askId or noteId, and number its place among the ride's of its
+ * kind. memo: the ask has a memo (US-D-04.005).
+ */
+data class MapPin(val id: String, val number: Int, val at: LatLon, val memo: Boolean = false, val kind: PinKind = PinKind.ASK)
 
 /**
  * routes has one line per recorded segment that has points; pauses joins the last point of a segment to the first
@@ -85,18 +91,20 @@ fun endsJson(data: MapData): String = collection(
   },
 )
 
-/** icon names the pin's image: its number, and whether it is the selected one. */
+/** id is what a tap on the pin names; icon names the pin's image: its kind, its number, and whether it is the selected one. */
 fun pinsJson(data: MapData, selected: String?): String = collection(
   data.pins.map { pin ->
     feature(
       point(pin.at),
       buildJsonObject {
-        put("askId", pin.askId)
-        put("icon", pinIcon(pin.number, pin.askId == selected, pin.memo))
+        put("id", pin.id)
+        put("icon", pinIcon(pin.number, pin.id == selected, pin.memo, pin.kind))
       },
     )
   },
 )
 
-fun pinIcon(number: Int, selected: Boolean, memo: Boolean = false): String =
-  (if (selected) "pin-sel-$number" else "pin-$number") + if (memo) "-memo" else ""
+fun pinIcon(number: Int, selected: Boolean, memo: Boolean = false, kind: PinKind = PinKind.ASK): String {
+  val name = if (kind == PinKind.NOTE) "note" else "pin"
+  return (if (selected) "$name-sel-$number" else "$name-$number") + if (memo) "-memo" else ""
+}
