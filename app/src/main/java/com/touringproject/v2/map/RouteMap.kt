@@ -58,6 +58,8 @@ private const val STYLE_ASSET = "map/gsi-pale.json"
 private const val ROUTE_COLOR = "#F06D1A"
 private const val PAUSE_COLOR = "#8A929C"
 private const val PIN_COLOR = 0xFFE8600F.toInt()
+// The mock's --memo: point memos are green, apart from the asks (US-D-08).
+private const val NOTE_PIN_COLOR = 0xFF13804A.toInt()
 private const val PIN_SELECTED_COLOR = 0xFF1F4FD1.toInt()
 /** The layer a tap on a pin is looked up in (slice 2 spec §7.7). */
 const val PINS_LAYER = "pins"
@@ -67,10 +69,15 @@ private val JAPAN = LatLng(36.2, 138.25)
 private fun styleJson(context: Context) = context.assets.open(STYLE_ASSET).bufferedReader().use { it.readText() }
 
 /**
- * A teardrop pin with its number, the tip at the bottom, as in the mock. memo adds a small white dot at its top right:
- * the ask has a memo (US-D-04.005).
+ * A teardrop pin with its number, the tip at the bottom, as in the mock: orange for an ask, green for a point memo.
+ * memo adds a small white dot at its top right: the ask has a memo (US-D-04.005).
  */
-fun pinBitmap(number: Int, selected: Boolean, density: Float, memo: Boolean = false): Bitmap {
+fun pinBitmap(number: Int, selected: Boolean, density: Float, memo: Boolean = false, kind: PinKind = PinKind.ASK): Bitmap {
+  val fill = when {
+    selected -> PIN_SELECTED_COLOR
+    kind == PinKind.NOTE -> NOTE_PIN_COLOR
+    else -> PIN_COLOR
+  }
   val radius = (if (selected) 16f else 13f) * density
   val stroke = 2f * density
   val tail = radius * 0.8f
@@ -87,7 +94,7 @@ fun pinBitmap(number: Int, selected: Boolean, density: Float, memo: Boolean = fa
     lineTo(cx + radius * 0.6f, cy + radius * 0.7f)
     close()
   }
-  canvas.drawPath(shape, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (selected) PIN_SELECTED_COLOR else PIN_COLOR })
+  canvas.drawPath(shape, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = fill })
   canvas.drawPath(shape, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE; style = Paint.Style.STROKE; strokeWidth = stroke })
   val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     color = android.graphics.Color.WHITE
@@ -100,7 +107,7 @@ fun pinBitmap(number: Int, selected: Boolean, density: Float, memo: Boolean = fa
     val dot = radius * 0.32f
     val dx = cx + radius * 0.7f
     val dy = cy - radius * 0.7f
-    canvas.drawCircle(dx, dy, dot + stroke, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (selected) PIN_SELECTED_COLOR else PIN_COLOR })
+    canvas.drawCircle(dx, dy, dot + stroke, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = fill })
     canvas.drawCircle(dx, dy, dot, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE })
   }
   return bitmap
@@ -144,22 +151,25 @@ private fun addLayers(style: Style, faint: Boolean, dark: Boolean) {
   )
 }
 
-/** The GeoJSON of each source, made off the main thread (Android #42). */
-private class MapJson(val routes: String, val pauses: String, val ends: String, val pins: String)
+/** The GeoJSON of the route's sources, made off the main thread (Android #42). The pins are made apart (Android #49). */
+private class RouteJson(val routes: String, val pauses: String, val ends: String)
 
-private fun mapJson(data: MapData, selected: String?) = MapJson(routesJson(data), pausesJson(data), endsJson(data), pinsJson(data, selected))
+private fun routeJson(data: MapData) = RouteJson(routesJson(data), pausesJson(data), endsJson(data))
 
-private fun draw(style: Style, data: MapData, json: MapJson, density: Float) {
-  data.pins.forEach { pin ->
-    listOf(false, true).forEach { sel ->
-      val name = pinIcon(pin.number, sel, pin.memo)
-      if (style.getImage(name) == null) style.addImage(name, pinBitmap(pin.number, sel, density, pin.memo))
-    }
-  }
+private fun drawRoute(style: Style, json: RouteJson) {
   style.getSourceAs<GeoJsonSource>("routes")?.setGeoJson(json.routes)
   style.getSourceAs<GeoJsonSource>("pauses")?.setGeoJson(json.pauses)
   style.getSourceAs<GeoJsonSource>("ends")?.setGeoJson(json.ends)
-  style.getSourceAs<GeoJsonSource>(PINS_LAYER)?.setGeoJson(json.pins)
+}
+
+private fun drawPins(style: Style, data: MapData, json: String, density: Float) {
+  data.pins.forEach { pin ->
+    listOf(false, true).forEach { sel ->
+      val name = pinIcon(pin.number, sel, pin.memo, pin.kind)
+      if (style.getImage(name) == null) style.addImage(name, pinBitmap(pin.number, sel, density, pin.memo, pin.kind))
+    }
+  }
+  style.getSourceAs<GeoJsonSource>(PINS_LAYER)?.setGeoJson(json)
 }
 
 /** Takes in the whole route and every pin; a single place is shown close up (slice 2 spec §7.5). */
@@ -175,7 +185,7 @@ private fun fit(map: MapLibreMap, extent: List<LatLon>, padding: Int) {
 }
 
 /**
- * onPin gets the askId of a tapped pin, or null for a tap elsewhere. The camera takes in data once its first places
+ * onPin gets the id of a tapped pin (an askId or a noteId), or null for a tap elsewhere. The camera takes in data once its first places
  * arrive, and then stays where the rider moves it. onMap hands the map to the emulator tests once it has drawn.
  */
 @Composable
@@ -238,7 +248,7 @@ fun RouteMap(
               val point = map.projection.toScreenLocation(at)
               val reach = 20f * density
               val hit = map.queryRenderedFeatures(RectF(point.x - reach, point.y - reach, point.x + reach, point.y + reach), PINS_LAYER)
-              tapped(hit.firstOrNull()?.getStringProperty("askId"))
+              tapped(hit.firstOrNull()?.getStringProperty("id"))
               true
             }
             ready(map)
@@ -247,18 +257,24 @@ fun RouteMap(
       }
     }
   }
-  LaunchedEffect(loaded, data, selected) {
+  LaunchedEffect(loaded, data) {
     val (map, style) = loaded ?: return@LaunchedEffect
-    val json = withContext(Dispatchers.Default) { mapJson(data, selected) }
+    val json = withContext(Dispatchers.Default) { routeJson(data) }
     // MapLibre is touched only on the UI thread; where the effect resumes is not left to chance.
     withContext(Dispatchers.Main) {
-      draw(style, data, json, density)
+      drawRoute(style, json)
       // Until the first places arrive the map shows Japan, and the camera fits again once they do.
       if (!fitted) {
         fit(map, data.extent, (48 * density).toInt())
         fitted = data.extent.isNotEmpty()
       }
     }
+  }
+  // Selecting a pin makes only the pins again, not the route of tens of thousands of points (Android #49).
+  LaunchedEffect(loaded, data, selected) {
+    val (_, style) = loaded ?: return@LaunchedEffect
+    val json = withContext(Dispatchers.Default) { pinsJson(data, selected) }
+    withContext(Dispatchers.Main) { drawPins(style, data, json, density) }
   }
   Box(modifier) {
     AndroidView({ view }, Modifier.matchParentSize())

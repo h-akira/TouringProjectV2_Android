@@ -34,6 +34,7 @@ import com.touringproject.v2.recordings.TRIAL_IDLE
 import com.touringproject.v2.recordings.TrialController
 import com.touringproject.v2.recordings.TrialDeps
 import com.touringproject.v2.recordings.TrialState
+import com.touringproject.v2.records.RideListItem
 import com.touringproject.v2.records.activeAskCount
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.RideController
@@ -52,6 +53,7 @@ import com.touringproject.v2.settings.maxRecordingChanges
 import com.touringproject.v2.store.RideDatabase
 import com.touringproject.v2.store.RoomAskEdits
 import com.touringproject.v2.store.RoomAskLog
+import com.touringproject.v2.store.RoomNotes
 import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.store.RoomRideStore
 import com.touringproject.v2.store.RoomSyncStore
@@ -92,12 +94,18 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val rideStore = RoomRideStore(database.rides())
   val askLog = RoomAskLog(database.asks(), scope) { message, e -> Log.w("trv2.ask", message, e) }
   /** What the Records tab reads (SC-05, SC-06, SC-07). */
-  val records = RoomRecords(database.rides(), database.asks())
+  val records = RoomRecords(database.rides(), database.asks(), database.notes())
+
+  /**
+   * SC-05's list, shared so that coming back from a ride shows the list it left at once (Android #49). It is read only
+   * while the list is shown and for 5 s after: Room runs the query again for every route point (Android #42).
+   */
+  val recordsList: StateFlow<List<RideListItem>?> = records.list.stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
   private val notices = RideNotices(context)
 
-  /** Sends rides and routes; a pass runs on each trigger (slice 2 spec §5.3). */
+  /** Sends rides, routes, memos, point memos and deletions; a pass runs on each trigger (slice 2 spec §5.3). */
   val sync = RideSync(
-    RoomSyncStore(database.rides(), database.asks()),
+    RoomSyncStore(database.rides(), database.asks(), database.notes()),
     api = {
       val key = apiKeys.current()
       val user = settings.settings.value?.userName
@@ -108,6 +116,11 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
 
   /** SC-07 and SC-08 change kept asks through here; each change is something new to send (slice 3 spec §5.1). */
   val askEdits = RoomAskEdits(database.asks(), System::currentTimeMillis, sync::request) { message, e -> Log.w("trv2.ask", message, e) }
+
+  /** SC-19 writes point memos through here; each change is something new to send (slice 3 spec §5.1). */
+  val notes = RoomNotes(database.notes(), database.rides(), System::currentTimeMillis, { UUID.randomUUID().toString() }, sync::request) { message, e ->
+    Log.w("trv2.note", message, e)
+  }
 
   val rides = RideController(
     RideDeps(

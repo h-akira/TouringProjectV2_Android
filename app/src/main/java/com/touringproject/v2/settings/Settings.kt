@@ -40,6 +40,8 @@ data class Settings(
   val maxRecordingHours: Int = DEFAULT_MAX_RECORDING_HOURS,
   /** SC-06: whether the map shows the asks' pins; kept for the next time a ride is opened (slice 2 spec §7.5). */
   val showAskPins: Boolean = true,
+  /** SC-06: whether the map shows the point memos' pins, kept like showAskPins (slice 3 spec §7.6). */
+  val showNotePins: Boolean = true,
 )
 
 /**
@@ -74,6 +76,7 @@ fun decodeSettings(raw: String?, random: Random = Random.Default): Pair<Settings
     maxRecordingHours = runCatching { obj["maxRecordingHours"]?.jsonPrimitive?.intOrNull }.getOrNull()
       ?.takeIf { it in MAX_RECORDING_HOURS_CHOICES } ?: DEFAULT_MAX_RECORDING_HOURS,
     showAskPins = runCatching { obj["showAskPins"]?.jsonPrimitive?.booleanOrNull }.getOrNull() ?: true,
+    showNotePins = runCatching { obj["showNotePins"]?.jsonPrimitive?.booleanOrNull }.getOrNull() ?: true,
   )
   return settings to (savedName == null)
 }
@@ -89,6 +92,7 @@ fun encodeSettings(settings: Settings): String = json.encodeToString(
     answerVolumeDb = settings.answerVolumeDb,
     maxRecordingHours = settings.maxRecordingHours,
     showAskPins = settings.showAskPins,
+    showNotePins = settings.showNotePins,
   ),
 )
 
@@ -102,6 +106,7 @@ private data class SavedSettings(
   val answerVolumeDb: Int,
   val maxRecordingHours: Int,
   val showAskPins: Boolean,
+  val showNotePins: Boolean,
 )
 
 fun withRecentApp(recent: List<LaunchableApp>, app: LaunchableApp, max: Int = 5): List<LaunchableApp> =

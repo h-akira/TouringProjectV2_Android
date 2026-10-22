@@ -10,6 +10,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+/**
+ * The memo is not copied: the loop writes an ask once, at its end, and SC-08 changes its memo apart (AskDao.writeMemo),
+ * so the row starts without one (Android #55).
+ */
 fun AskRecord.toEntity() = AskEntity(
   askId = askId,
   askedAt = askedAt,
@@ -38,9 +42,10 @@ class RoomAskLog(private val dao: AskDao, private val scope: CoroutineScope, pri
     scope.launch { save(record) }
   }
 
+  /** An ask whose ride was deleted meanwhile is dropped (Android #54). */
   suspend fun save(record: AskRecord) {
     try {
-      dao.upsert(record.toEntity())
+      dao.keep(record.toEntity())
       failing.value = false
     } catch (e: CancellationException) {
       throw e

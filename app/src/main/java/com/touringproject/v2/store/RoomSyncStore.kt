@@ -6,8 +6,9 @@ import com.touringproject.v2.sync.PendingDeletion
 import com.touringproject.v2.sync.SyncStore
 import com.touringproject.v2.sync.Unsent
 import com.touringproject.v2.sync.UnsentAskMemo
+import com.touringproject.v2.sync.UnsentNote
 
-class RoomSyncStore(private val dao: RideDao, private val asks: AskDao) : SyncStore {
+class RoomSyncStore(private val dao: RideDao, private val asks: AskDao, private val notes: NoteDao) : SyncStore {
   override suspend fun unsent(): List<Unsent> = dao.unsentSnapshot().map {
     Unsent(it.ride.toRide(it.segments), it.ride.sentUpdatedAt, it.ride.rejectedUpdatedAt, it.sentPoints, it.totalPoints)
   }
@@ -32,4 +33,13 @@ class RoomSyncStore(private val dao: RideDao, private val asks: AskDao) : SyncSt
   override suspend fun askMemoSent(askId: String, updatedAt: Long) = asks.markMemoSent(askId, updatedAt)
 
   override suspend fun askMemoRefused(askId: String, updatedAt: Long) = asks.markMemoRefused(askId, updatedAt)
+
+  override suspend fun unsentNotes(): List<UnsentNote> = notes.unsent().map {
+    UnsentNote(it.id, it.rideId, it.at, it.latitude, it.longitude, it.sampleLatitude, it.sampleLongitude, it.sampleAt, it.text, it.updatedAt)
+  }
+
+  override suspend fun noteSent(noteId: String, updatedAt: Long, address: String?, headingDegrees: Double?) =
+    notes.markSent(noteId, updatedAt, address, headingDegrees)
+
+  override suspend fun noteRefused(noteId: String, updatedAt: Long) = notes.markRefused(noteId, updatedAt)
 }

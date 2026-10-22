@@ -4,6 +4,9 @@ import com.touringproject.v2.ask.AskOutcome
 import com.touringproject.v2.ask.AskRecord
 import com.touringproject.v2.map.LatLon
 import com.touringproject.v2.map.MapPin
+import com.touringproject.v2.map.PinKind
+import com.touringproject.v2.records.NoteDraft
+import com.touringproject.v2.records.NoteRecord
 import com.touringproject.v2.records.RideListItem
 import com.touringproject.v2.records.SaveState
 import com.touringproject.v2.ride.EndReason
@@ -100,7 +103,10 @@ fun rideSections(items: List<RideListItem>, now: Long, zone: ZoneId): List<RideS
   return sections
 }
 
-/** SC-06's summary. pauses is null without one; autoEnded says the longest recording time ended the ride. */
+/**
+ * SC-06's summary. pauses is null without one; autoEnded says the longest recording time ended the ride; notes counts
+ * its point memos, null without one (the mock).
+ */
 data class RideSummaryUi(
   val date: String,
   val span: String,
@@ -109,9 +115,10 @@ data class RideSummaryUi(
   val questions: String,
   val pauses: String?,
   val autoEnded: Boolean,
+  val notes: String? = null,
 )
 
-fun rideSummary(ride: Ride, questions: Int, now: Long, zone: ZoneId) = RideSummaryUi(
+fun rideSummary(ride: Ride, questions: Int, now: Long, zone: ZoneId, notes: Int = 0) = RideSummaryUi(
   date = rideDateLabel(ride, now, zone),
   span = rideSpanLabel(ride, zone),
   elapsed = elapsedLabel(ride.recordedMs(now)),
@@ -119,6 +126,7 @@ fun rideSummary(ride: Ride, questions: Int, now: Long, zone: ZoneId) = RideSumma
   questions = questions.toString(),
   pauses = pausesLabel(ride.pauses()),
   autoEnded = ride.endReason == EndReason.AUTO,
+  notes = if (notes > 0) "📝 地点メモ ${notes}件" else null,
 )
 
 /** The asks in the order they were asked, numbered from 1: the numbers of the pins and the timeline. */
@@ -135,10 +143,35 @@ fun askPins(asks: List<AskRecord>): List<MapPin> {
   }
 }
 
+/** The point memos in the order they were opened, numbered from 1 apart from the asks (US-D-08). */
+fun noteNumbers(notes: List<NoteRecord>): Map<String, Int> =
+  notes.sortedBy { it.at }.mapIndexed { i, note -> note.id to i + 1 }.toMap()
+
+/** The ride's point memos that have a place, as green numbered pins. */
+fun notePins(notes: List<NoteRecord>): List<MapPin> {
+  val numbers = noteNumbers(notes)
+  return notes.sortedBy { it.at }.mapNotNull { note ->
+    val lat = note.latitude ?: return@mapNotNull null
+    val lon = note.longitude ?: return@mapNotNull null
+    MapPin(note.id, numbers.getValue(note.id), LatLon(lat, lon), kind = PinKind.NOTE)
+  }
+}
+
 private val PREFECTURE = Regex("^(東京都|北海道|(京都|大阪)府|.{2,3}県)")
 
 /** The mock's short place: the address without its prefecture; an address that starts otherwise is kept whole (Android #45). */
 fun shortPlace(address: String?): String = address?.replace(PREFECTURE, "")?.ifBlank { null } ?: "場所不明"
+
+/**
+ * Where a point memo is, in short: its address once the Backend has settled it. Until it has gone, the address is
+ * still to come; one that has gone without one could not be told (slice 3 spec §6.2).
+ */
+fun notePlace(note: NoteRecord): String = when {
+  note.latitude == null -> "位置の記録なし"
+  note.address != null -> shortPlace(note.address)
+  note.sent -> "場所不明"
+  else -> "住所は送信後"
+}
 
 /** What a list shows of an ask: what was heard, or why nothing was. */
 fun askText(ask: AskRecord): String = ask.transcript?.takeIf { it.isNotBlank() } ?: when {
@@ -160,6 +193,8 @@ sealed interface TimelineRow {
     val failed: Boolean,
     val memo: Boolean = false,
   ) : TimelineRow
+  /** A point memo: its green number, when, where and the start of its text (the mock). */
+  data class Note(val noteId: String, val number: Int, val time: String, val place: String, val text: String) : TimelineRow
   data class Pause(val label: String) : TimelineRow
   data object NewConversation : TimelineRow
 }
@@ -172,22 +207,30 @@ fun pauseLabel(from: Long, to: Long, zone: ZoneId): String {
   return "⏸ 一時停止 ${TIME.format(a)}〜${dayLabel(b.toLocalDate(), weekday = false)} ${TIME.format(b)}"
 }
 
+/** order puts events of the same moment in a fixed order: a segment's start, then an ask, a point memo, a pause. */
 private sealed interface Event {
   val t: Long
-  data class AskAt(override val t: Long, val ask: AskRecord) : Event
-  data class PauseAt(override val t: Long, val until: Long?) : Event
+  val order: Int
+  /** Shows nothing of itself, but a day the ride started or resumed on gets its heading (Android #51). */
+  data class StartAt(override val t: Long, override val order: Int = 0) : Event
+  data class AskAt(override val t: Long, val ask: AskRecord, override val order: Int = 1) : Event
+  data class NoteAt(override val t: Long, val note: NoteRecord, override val order: Int = 2) : Event
+  data class PauseAt(override val t: Long, val until: Long?, override val order: Int = 3) : Event
 }
 
 /**
- * SC-06's timeline: the ride's asks, its pauses and the breaks between conversations, in time order. A ride over
- * more than one day gets a heading for each day (slice 2 spec §7.5). A paused ride ends with its pause so far.
+ * SC-06's timeline: the ride's asks, its point memos, its pauses and the breaks between conversations, in time order.
+ * A ride over more than one day gets a heading for each day, including a day it only resumed on (slice 2 spec §7.5,
+ * Android #51). A paused ride ends with its pause so far.
  */
-fun rideTimeline(ride: Ride, asks: List<AskRecord>, zone: ZoneId): List<TimelineRow> {
+fun rideTimeline(ride: Ride, asks: List<AskRecord>, zone: ZoneId, notes: List<NoteRecord> = emptyList()): List<TimelineRow> {
   val numbers = askNumbers(asks)
+  val noteNumbers = noteNumbers(notes)
+  val starts = ride.segments.map { Event.StartAt(it.startedAt) }
   val pauses = ride.segments.zipWithNext { a, b -> Event.PauseAt(a.endedAt ?: b.startedAt, b.startedAt) }
   val open = if (ride.status == RideStatus.PAUSED) listOfNotNull(ride.segments.last().endedAt?.let { Event.PauseAt(it, null) }) else emptyList()
-  // An ask comes before a pause that starts at the same moment.
-  val events = (asks.map { Event.AskAt(it.askedAt, it) } + pauses + open).sortedWith(compareBy<Event> { it.t }.thenBy { if (it is Event.AskAt) 0 else 1 })
+  val events = (starts + asks.map { Event.AskAt(it.askedAt, it) } + notes.map { Event.NoteAt(it.at, it) } + pauses + open)
+    .sortedWith(compareBy<Event> { it.t }.thenBy { it.order })
   // Every day the ride recorded on counts, not only the days with an ask or a pause (Android #41).
   val recorded = ride.segments.flatMap { listOfNotNull(it.startedAt, it.endedAt) }
   val days = (events.map { it.t } + recorded).map { at(it, zone).toLocalDate() }.toSet()
@@ -199,6 +242,11 @@ fun rideTimeline(ride: Ride, asks: List<AskRecord>, zone: ZoneId): List<Timeline
     if (days.size > 1 && date != day) rows += TimelineRow.Day(dayLabel(date))
     day = date
     when (event) {
+      is Event.StartAt -> Unit
+      is Event.NoteAt -> {
+        val note = event.note
+        rows += TimelineRow.Note(note.id, noteNumbers.getValue(note.id), TIME.format(at(note.at, zone)), notePlace(note), note.text)
+      }
       is Event.AskAt -> {
         val ask = event.ask
         if (ask.newConversation && asked) rows += TimelineRow.NewConversation
@@ -271,13 +319,51 @@ fun askDetail(asks: List<AskRecord>, askId: String, zone: ZoneId): AskDetailUi? 
   )
 }
 
-/** The card of a tapped pin: 3 · 09:41 · 仙石原, then the question and the start of the answer. */
-data class PinCardUi(val askId: String, val heading: String, val question: String, val answer: String?)
+/**
+ * The card of a tapped pin: 3 · 09:41 · 仙石原, then the question and the start of the answer; for a point memo, its
+ * text. id is the askId or noteId the card opens.
+ */
+data class PinCardUi(val id: String, val heading: String, val question: String, val answer: String?, val kind: PinKind = PinKind.ASK)
 
 fun pinCard(asks: List<AskRecord>, askId: String, zone: ZoneId): PinCardUi? {
   val ask = asks.firstOrNull { it.askId == askId } ?: return null
   val number = askNumbers(asks).getValue(askId)
   return PinCardUi(askId, "$number · ${TIME.format(at(ask.askedAt, zone))} · ${shortPlace(ask.address)}", askText(ask), ask.answer?.ifBlank { null })
+}
+
+/** A point memo's card: 2 · 10:24 · 新橋 · 📝 地点メモ, then its text (the mock). */
+fun noteCard(notes: List<NoteRecord>, noteId: String, zone: ZoneId): PinCardUi? {
+  val note = notes.firstOrNull { it.id == noteId } ?: return null
+  val number = noteNumbers(notes).getValue(noteId)
+  return PinCardUi(noteId, "$number · ${TIME.format(at(note.at, zone))} · ${notePlace(note)} · 📝 地点メモ", note.text, null, PinKind.NOTE)
+}
+
+/** SC-19's top: when, where and which ride the memo is in (slice 3 spec §7.3). */
+data class NoteHeaderUi(val time: String, val where: String, val ride: String)
+
+private const val NO_PLACE = "📍 位置を記録できませんでした"
+private const val ADDRESS_TO_COME = "📍 住所は送ったあとに付きます"
+
+/** A memo opened from Home: its address comes once it has been sent, as the Backend settles it (slice 3 spec §6.2). */
+fun newNoteHeader(draft: NoteDraft, rideName: String, zone: ZoneId): NoteHeaderUi {
+  val time = at(draft.at, zone)
+  return NoteHeaderUi(
+    "${dayLabel(time.toLocalDate())} ${TIME.format(time)} · 今いる地点",
+    if (draft.latitude == null) NO_PLACE else ADDRESS_TO_COME,
+    "走行「$rideName」に入ります",
+  )
+}
+
+/** A kept memo opened from SC-06. One that has gone without an address is one the Backend could not tell. */
+fun noteHeader(note: NoteRecord, rideName: String, zone: ZoneId): NoteHeaderUi {
+  val time = at(note.at, zone)
+  val where = when {
+    note.latitude == null -> NO_PLACE
+    note.address != null -> "📍 ${note.address}"
+    note.sent -> "📍 住所は分かりませんでした"
+    else -> ADDRESS_TO_COME
+  }
+  return NoteHeaderUi("${dayLabel(time.toLocalDate())} ${TIME.format(time)}", where, "走行「$rideName」で書いたメモ")
 }
 
 /** What SC-08 says it is writing for an ask: 会話 3 · 09:41 箱根町仙石原 (the mock). null when the ask is not among them. */

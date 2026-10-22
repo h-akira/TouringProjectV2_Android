@@ -37,6 +37,7 @@ import com.touringproject.v2.AppGraph
 import com.touringproject.v2.BuildConfig
 import com.touringproject.v2.api.ApiClient
 import com.touringproject.v2.ask.isBusy
+import com.touringproject.v2.records.NoteDraft
 import com.touringproject.v2.settings.LaunchableApp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -56,9 +57,12 @@ import kotlinx.serialization.Serializable
 @Serializable data class AskKey(val rideId: String, val askId: String) : NavKey
 @Serializable data class RideMemoKey(val rideId: String) : NavKey
 @Serializable data class AskMemoKey(val rideId: String, val askId: String) : NavKey
+/** SC-19 opened from Home; the draft says where and when, so it stays the same when the activity is recreated. */
+@Serializable data class NewNoteKey(val draft: NoteDraft) : NavKey
+@Serializable data class NoteKey(val rideId: String, val noteId: String) : NavKey
 
-/** SC-08 covers the tabs, as the mock draws it. */
-private fun coversTabs(key: NavKey?) = key is RideMemoKey || key is AskMemoKey
+/** SC-08 and SC-19 cover the tabs, as the mock draws them. */
+private fun coversTabs(key: NavKey?) = key is RideMemoKey || key is AskMemoKey || key is NewNoteKey || key is NoteKey
 
 private enum class RideSheet { START, END }
 
@@ -152,11 +156,19 @@ fun AppUi(graph: AppGraph) {
                       onMemo = { ride?.let { tabs.push(RideMemoKey(it.id)) } },
                     )
                   },
+                  // The place is read when the button is pressed (slice 3 spec §4.3); a second press while it is read adds nothing.
+                  onNote = ride?.let { active ->
+                    {
+                      scope.launch {
+                        val draft = graph.notes.draft(active.id)
+                        if (tabs.current.lastOrNull() !is NewNoteKey) tabs.push(NewNoteKey(draft))
+                      }
+                    }
+                  },
                 )
               }
               entry<RecordsKey> {
-                // Read only while the list is shown: Room runs the query again for every route point (Android #42).
-                val rideList by graph.records.list.collectAsStateWithLifecycle(null)
+                val rideList by graph.recordsList.collectAsStateWithLifecycle()
                 RideListScreen(
                   rideList?.let { rideSections(it, System.currentTimeMillis(), ZoneId.systemDefault()) },
                   onRide = { tabs.push(RideKey(it)) },
@@ -173,6 +185,7 @@ fun AppUi(graph: AppGraph) {
                   onFullMap = { mapFull = it },
                   onMemo = { tabs.push(RideMemoKey(key.rideId)) },
                   modifier = Modifier.safeDrawingPadding(),
+                  onNote = { tabs.push(NoteKey(key.rideId, it)) },
                 )
               }
               entry<AskKey> { key ->
@@ -190,6 +203,12 @@ fun AppUi(graph: AppGraph) {
               }
               entry<AskMemoKey> { key ->
                 AskMemoRoute(graph.records, graph.askEdits, key.rideId, key.askId, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding())
+              }
+              entry<NewNoteKey> { key ->
+                NewNoteRoute(graph.records, graph.notes, key.draft, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding())
+              }
+              entry<NoteKey> { key ->
+                NoteRoute(graph.records, graph.notes, key.rideId, key.noteId, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding())
               }
               entry<SettingsKey> {
                 SettingsScreen(

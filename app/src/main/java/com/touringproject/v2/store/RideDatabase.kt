@@ -102,8 +102,8 @@ data class AskEntity(
   val failure: String?,
   /**
    * The ride that was recording when the ask started. Asks need a recording ride since version 4 (slice 2 spec §4.7), so
-   * it is set on every ask; the column stays nullable for the API's sake. Not a foreign key: a ride's row may be
-   * missing for a while after a failed save.
+   * it is set on every ask; the column stays nullable for the API's sake. Not a foreign key, but an ask is kept only
+   * while its ride is ([AskDao.keep]).
    */
   val rideId: String?,
   /** The conversation's memo (US-D-04.001); null when there is none. */
@@ -151,6 +151,20 @@ data class DeletionEntity(val kind: String, val id: String, val rideId: String?,
 interface AskDao {
   @Upsert
   suspend fun upsert(ask: AskEntity)
+
+  @Query("SELECT EXISTS (SELECT 1 FROM rides WHERE id = :rideId)")
+  suspend fun rideKept(rideId: String): Boolean
+
+  /**
+   * Writes an ask at the end of its loop, unless its ride is no longer kept: it was deleted while the ask waited for the
+   * answer (Android #54). False when it was not written.
+   */
+  @Transaction
+  suspend fun keep(ask: AskEntity): Boolean {
+    if (ask.rideId != null && !rideKept(ask.rideId)) return false
+    upsert(ask)
+    return true
+  }
 
   @Query("SELECT * FROM asks WHERE askId = :askId")
   suspend fun ask(askId: String): AskEntity?
@@ -209,6 +223,77 @@ interface AskDao {
 
 data class AskMemoRow(val askId: String, val memo: String?, val memoUpdatedAt: Long)
 
+@Dao
+interface NoteDao {
+  @Insert
+  suspend fun insert(note: NoteEntity)
+
+  @Query("SELECT * FROM notes WHERE id = :id")
+  suspend fun note(id: String): NoteEntity?
+
+  /** The ride's point memos in the order they were opened (SC-06). */
+  @Query("SELECT * FROM notes WHERE rideId = :rideId ORDER BY at")
+  fun forRide(rideId: String): Flow<List<NoteEntity>>
+
+  @Query("SELECT EXISTS (SELECT 1 FROM rides WHERE id = :rideId)")
+  suspend fun rideKept(rideId: String): Boolean
+
+  /** SC-19 from Home. False when the memo's ride is no longer kept. */
+  @Transaction
+  suspend fun create(note: NoteEntity): Boolean {
+    if (!rideKept(note.rideId)) return false
+    insert(note)
+    return true
+  }
+
+  @Query("UPDATE notes SET text = :text, updatedAt = :at WHERE id = :id")
+  suspend fun setText(id: String, text: String, at: Long)
+
+  /** SC-19 from the records. False when the memo is not kept; the same text again changes nothing. */
+  @Transaction
+  suspend fun writeText(id: String, text: String, now: Long): Boolean {
+    val note = note(id) ?: return false
+    if (note.text == text) return true
+    setText(id, text, memoTime(now, note.updatedAt))
+    return true
+  }
+
+  @Query("DELETE FROM notes WHERE id = :id")
+  suspend fun deleteRow(id: String)
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun markDeleted(deletion: DeletionEntity)
+
+  /** DL-01: removes the memo and marks it for the Backend, together (slice 3 spec §4.2). False when it is not kept. */
+  @Transaction
+  suspend fun delete(id: String, at: Long): Boolean {
+    val note = note(id) ?: return false
+    deleteRow(id)
+    markDeleted(DeletionEntity("note", id, note.rideId, at))
+    return true
+  }
+
+  // Sending (slice 3 spec §5.1): the memos changed since they were taken, unless that version was refused.
+  @Query(
+    "SELECT * FROM notes WHERE (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
+      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt) ORDER BY updatedAt",
+  )
+  suspend fun unsent(): List<NoteEntity>
+
+  /**
+   * The marker never moves back. The address and heading are settled by the Backend once; a send it answers without
+   * them (410: deleted there) keeps what the memo has.
+   */
+  @Query(
+    "UPDATE notes SET sentUpdatedAt = MAX(IFNULL(sentUpdatedAt, :updatedAt), :updatedAt), address = IFNULL(:address, address), " +
+      "headingDegrees = IFNULL(:headingDegrees, headingDegrees) WHERE id = :id",
+  )
+  suspend fun markSent(id: String, updatedAt: Long, address: String?, headingDegrees: Double?)
+
+  @Query("UPDATE notes SET rejectedUpdatedAt = :updatedAt WHERE id = :id")
+  suspend fun markRefused(id: String, updatedAt: Long)
+}
+
 /** What one ride has left to send, read together (Android #23). */
 data class UnsentRow(val ride: RideEntity, val segments: List<SegmentEntity>, val sentPoints: Int, val totalPoints: Int)
 
@@ -219,7 +304,8 @@ data class RideWithSegments(
 
 /**
  * A ride as SC-05 lists it. pointsLeft is true while one of its points has not been taken (unsent or refused);
- * memosLeft while the memo of one of its asks has not been taken (slice 3 spec §5.3).
+ * memosLeft while the memo of one of its asks has not been taken, and notesLeft one of its point memos (slice 3 spec
+ * §5.3).
  */
 data class RideRow(
   @Embedded val ride: RideEntity,
@@ -227,6 +313,7 @@ data class RideRow(
   val questions: Int,
   val pointsLeft: Boolean,
   val memosLeft: Boolean,
+  val notesLeft: Boolean,
 )
 
 @Dao
@@ -247,7 +334,9 @@ interface RideDao {
       "(EXISTS (SELECT 1 FROM route_points WHERE chunk IS NULL AND route_points.rideId = rides.id) OR " +
       "EXISTS (SELECT 1 FROM route_points WHERE refused = 1 AND route_points.rideId = rides.id)) AS pointsLeft, " +
       "EXISTS (SELECT 1 FROM asks WHERE asks.rideId = rides.id AND asks.memoUpdatedAt IS NOT NULL AND " +
-      "(asks.memoSentUpdatedAt IS NULL OR asks.memoSentUpdatedAt < asks.memoUpdatedAt)) AS memosLeft FROM rides",
+      "(asks.memoSentUpdatedAt IS NULL OR asks.memoSentUpdatedAt < asks.memoUpdatedAt)) AS memosLeft, " +
+      "EXISTS (SELECT 1 FROM notes WHERE notes.rideId = rides.id AND " +
+      "(notes.sentUpdatedAt IS NULL OR notes.sentUpdatedAt < notes.updatedAt)) AS notesLeft FROM rides",
   )
   fun rows(): Flow<List<RideRow>>
 
@@ -272,6 +361,10 @@ interface RideDao {
 
   @Query("SELECT * FROM route_points WHERE rideId = :rideId ORDER BY id")
   suspend fun points(rideId: String): List<RoutePointEntity>
+
+  /** The ride's last count points, newest first: where a point memo opened now is (slice 3 spec §4.3). */
+  @Query("SELECT * FROM route_points WHERE rideId = :rideId ORDER BY id DESC LIMIT :count")
+  suspend fun lastPoints(rideId: String, count: Int): List<RoutePointEntity>
 
   @Query("UPDATE rides SET distanceMeters = :distanceMeters, lastAliveAt = :aliveAt WHERE id = :rideId")
   suspend fun updateDistance(rideId: String, distanceMeters: Double, aliveAt: Long)
@@ -382,6 +475,7 @@ interface RideDao {
 abstract class RideDatabase : RoomDatabase() {
   abstract fun rides(): RideDao
   abstract fun asks(): AskDao
+  abstract fun notes(): NoteDao
 
   companion object {
     fun open(context: Context): RideDatabase =

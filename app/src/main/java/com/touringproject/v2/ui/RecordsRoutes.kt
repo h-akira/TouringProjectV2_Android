@@ -2,6 +2,8 @@ package com.touringproject.v2.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -12,6 +14,9 @@ import com.touringproject.v2.map.MapPin
 import com.touringproject.v2.map.RouteMap
 import com.touringproject.v2.map.rideMap
 import com.touringproject.v2.records.AskEdits
+import com.touringproject.v2.records.NoteDraft
+import com.touringproject.v2.records.NoteEdits
+import com.touringproject.v2.records.NoteRecord
 import com.touringproject.v2.ride.Ride
 import com.touringproject.v2.ride.RideController
 import com.touringproject.v2.ride.RideStatus
@@ -41,16 +46,21 @@ private fun readAsks(records: RoomRecords, rideId: String): List<AskRecord>? =
   remember(rideId) { records.asks(rideId) }.collectAsStateWithLifecycle(null).value
 
 @Composable
+private fun readNotes(records: RoomRecords, rideId: String): List<NoteRecord>? =
+  remember(rideId) { records.notes(rideId) }.collectAsStateWithLifecycle(null).value
+
+@Composable
 private fun readRoute(records: RoomRecords, rideId: String): List<RoutePoint>? =
   produceState<List<RoutePoint>?>(null, rideId) { value = records.route(rideId) }.value
 
-fun rideDetailUi(ride: Ride, asks: List<AskRecord>, route: List<RoutePoint>, now: Long, zone: ZoneId) = RideDetailUi(
+/** The asks' and the point memos' cards share one map: their ids are UUIDs, so they never meet. */
+fun rideDetailUi(ride: Ride, asks: List<AskRecord>, notes: List<NoteRecord>, route: List<RoutePoint>, now: Long, zone: ZoneId) = RideDetailUi(
   name = ride.name,
-  summary = rideSummary(ride, asks.size, now, zone),
+  summary = rideSummary(ride, asks.size, now, zone, notes.size),
   recording = ride.status != RideStatus.ENDED,
-  timeline = rideTimeline(ride, asks, zone),
-  map = rideMap(route, ride.status == RideStatus.ENDED, askPins(asks)),
-  cards = asks.mapNotNull { pinCard(asks, it.askId, zone) }.associateBy { it.askId },
+  timeline = rideTimeline(ride, asks, zone, notes),
+  map = rideMap(route, ride.status == RideStatus.ENDED, askPins(asks) + notePins(notes)),
+  cards = (asks.mapNotNull { pinCard(asks, it.askId, zone) } + notes.mapNotNull { noteCard(notes, it.id, zone) }).associateBy { it.id },
   memo = ride.memo,
 )
 
@@ -66,13 +76,15 @@ fun RideDetailRoute(
   onFullMap: (Boolean) -> Unit,
   onMemo: () -> Unit,
   modifier: Modifier = Modifier,
+  onNote: (String) -> Unit = {},
 ) {
   val ride = readRide(records, rideId) ?: return
   val asks = readAsks(records, rideId) ?: return
+  val notes = readNotes(records, rideId) ?: return
   val route = readRoute(records, rideId) ?: return
   // A long ride has tens of thousands of points: the map's data is made off the main thread (Android #42).
-  val ui = produceState<Read<RideDetailUi?>?>(null, ride, asks, route) {
-    value = Read(withContext(Dispatchers.Default) { ride.value?.let { rideDetailUi(it, asks, route, System.currentTimeMillis(), ZoneId.systemDefault()) } })
+  val ui = produceState<Read<RideDetailUi?>?>(null, ride, asks, notes, route) {
+    value = Read(withContext(Dispatchers.Default) { ride.value?.let { rideDetailUi(it, asks, notes, route, System.currentTimeMillis(), ZoneId.systemDefault()) } })
   }.value ?: return
   RideDetailScreen(
     ui.value, routeMap,
@@ -85,6 +97,9 @@ fun RideDetailRoute(
     modifier = modifier,
     onMemo = onMemo,
     onDelete = { rides.delete(rideId).also { if (it) onBack() } },
+    onNote = onNote,
+    showNotes = settings.showNotePins,
+    onShowNotes = { updateSettings(settings.copy(showNotePins = it)) },
   )
 }
 
@@ -131,4 +146,29 @@ fun AskMemoRoute(records: RoomRecords, edits: AskEdits, rideId: String, askId: S
   val ask = asks.firstOrNull { it.askId == askId } ?: return
   val target = remember(asks, askId) { askMemoTarget(asks, askId, ZoneId.systemDefault()) } ?: return
   MemoScreen(target, ask.memo, { edits.memo(askId, it) }, onClose, modifier)
+}
+
+/** SC-19 opened from Home: the memo is kept for the ride it was opened in when it is first saved (slice 3 spec §7.3). */
+@Composable
+fun NewNoteRoute(records: RoomRecords, notes: NoteEdits, draft: NoteDraft, onClose: () -> Unit, modifier: Modifier = Modifier) {
+  val ride = readRide(records, draft.rideId) ?: return
+  val kept = ride.value ?: return
+  val header = remember(draft, kept.name) { newNoteHeader(draft, kept.name, ZoneId.systemDefault()) }
+  NoteScreen(header, null, { notes.create(draft, it) }, onClose, modifier)
+}
+
+/**
+ * SC-19 opened from SC-06, to change or delete a kept memo. The memo last read stays on screen once it is deleted, so
+ * the deletion in progress is not cancelled with the screen and closes it once.
+ */
+@Composable
+fun NoteRoute(records: RoomRecords, notes: NoteEdits, rideId: String, noteId: String, onClose: () -> Unit, modifier: Modifier = Modifier) {
+  val ride = readRide(records, rideId) ?: return
+  val list = readNotes(records, rideId) ?: return
+  var shown by remember(noteId) { mutableStateOf(list.firstOrNull { it.id == noteId }) }
+  list.firstOrNull { it.id == noteId }?.let { shown = it }
+  val note = shown ?: return
+  val name = ride.value?.name ?: return
+  val header = remember(note, name) { noteHeader(note, name, ZoneId.systemDefault()) }
+  NoteScreen(header, note.text, { notes.text(noteId, it) }, onClose, modifier, onDelete = { notes.delete(noteId) })
 }

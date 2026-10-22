@@ -83,6 +83,13 @@ data class RideBody(
 /** A conversation's memo (slice 3 spec §6.2); null removes it. */
 @Serializable data class AskMemoBody(val memo: String?, val updatedAt: String)
 
+/** A point memo as a whole (slice 3 spec §6.2). location is null for one opened before its ride had a point. */
+@Serializable
+data class NoteBody(val at: String, val location: Point?, val headingSample: HeadingSample?, val text: String, val updatedAt: String)
+
+/** What the Backend settled for a point memo when it first took it; null when it could not tell (no place, no heading). */
+@Serializable data class NoteSaved(val address: String? = null, val headingDegrees: Double? = null)
+
 /**
  * Every call may be sent again and again: the Backend keeps one copy of each, and a deletion is the same however often
  * it comes. A 400 throws BAD_REQUEST, a 404 NOT_FOUND and a 410 (deleted) GONE.
@@ -91,8 +98,10 @@ interface RideApi {
   suspend fun putRide(rideId: String, body: RideBody)
   suspend fun putRoute(rideId: String, seq: Int, body: RouteBody)
   suspend fun putAskMemo(askId: String, body: AskMemoBody)
+  suspend fun putNote(rideId: String, noteId: String, body: NoteBody): NoteSaved
   suspend fun deleteRide(rideId: String)
   suspend fun deleteAsk(askId: String)
+  suspend fun deleteNote(rideId: String, noteId: String)
 }
 
 private val TRANSIENT = setOf(ApiErrorKind.RATE_LIMITED, ApiErrorKind.SERVER, ApiErrorKind.NETWORK)
@@ -155,12 +164,19 @@ class ApiClient(
     request("PUT", "/asks/$askId/memo", rideJson.encodeToString(AskMemoBody.serializer(), body), TRANSIENT)
   }
 
+  override suspend fun putNote(rideId: String, noteId: String, body: NoteBody): NoteSaved =
+    json.decodeFromString(NoteSaved.serializer(), request("PUT", "/rides/$rideId/notes/$noteId", rideJson.encodeToString(NoteBody.serializer(), body), TRANSIENT))
+
   override suspend fun deleteRide(rideId: String) {
     request("DELETE", "/rides/$rideId", null, TRANSIENT)
   }
 
   override suspend fun deleteAsk(askId: String) {
     request("DELETE", "/asks/$askId", null, TRANSIENT)
+  }
+
+  override suspend fun deleteNote(rideId: String, noteId: String) {
+    request("DELETE", "/rides/$rideId/notes/$noteId", null, TRANSIENT)
   }
 
   suspend fun checkKey() {

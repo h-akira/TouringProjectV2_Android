@@ -15,8 +15,8 @@ enum class SaveState { RECORDING, UNSENT, SAVED }
 
 /**
  * "記録中" while the ride records or is paused; "未送信あり" while its newest version has not been taken (a refused one
- * included) or something of it has not gone or was refused (pointsLeft: a point, or the memo of one of its asks;
- * slice 3 spec §5.3); "保存済み" otherwise (slice 2 spec §5.4).
+ * included) or something of it has not gone or was refused (pointsLeft: a point, the memo of one of its asks or
+ * one of its point memos; slice 3 spec §5.3); "保存済み" otherwise (slice 2 spec §5.4).
  */
 fun saveState(status: RideStatus, updatedAt: Long, sentUpdatedAt: Long?, pointsLeft: Boolean): SaveState = when {
   status != RideStatus.ENDED -> SaveState.RECORDING

@@ -30,9 +30,9 @@ class RoomRecordsTest {
     .allowMainThreadQueries()
     .build()
   private val rides = RoomRideStore(db.rides())
-  private val sync = RoomSyncStore(db.rides(), db.asks())
+  private val sync = RoomSyncStore(db.rides(), db.asks(), db.notes())
   private val log = RoomAskLog(db.asks(), MainScope()) { _, _ -> }
-  private val records = RoomRecords(db.rides(), db.asks())
+  private val records = RoomRecords(db.rides(), db.asks(), db.notes())
 
   @After
   fun close() = db.close()
@@ -100,6 +100,18 @@ class RoomRecordsTest {
     assertEquals(SaveState.UNSENT, records.list.first().single().saveState)
     assertEquals("また来たい", records.asks("r1").first().single().memo)
     sync.askMemoSent("a1", 5_000)
+    assertEquals(SaveState.SAVED, records.list.first().single().saveState)
+  }
+
+  // Slice 3 spec §5.3: a point memo not yet taken leaves its ride "未送信あり".
+  @Test
+  fun a_point_memo_not_yet_sent_leaves_the_ride_unsent() = runBlocking {
+    val ended = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS).end(4_000, EndReason.MANUAL, 4_000)
+    rides.save(ended)
+    sync.rideSent("r1", ended.updatedAt)
+    db.notes().create(NoteEntity("n1", "r1", 1_500, null, null, null, null, null, "展望", 5_000, null, null, null, null))
+    assertEquals(SaveState.UNSENT, records.list.first().single().saveState)
+    sync.noteSent("n1", 5_000, null, null)
     assertEquals(SaveState.SAVED, records.list.first().single().saveState)
   }
 }

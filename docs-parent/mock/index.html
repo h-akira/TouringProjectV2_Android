@@ -1238,6 +1238,7 @@ const SPEC = {
 <li>走行を記録していないときは書けない（ホームの「📝 地点メモ」は出さない）。新規で開いたとき、どの走行に入るかを上部に出す。</li></ul>
 <h3>開き方</h3><ul>
 <li>ホームの「📝 地点メモ」から新規で開く。停車してすぐ書けるように、確認などを挟まない。位置は開いた時点の現在地。</li>
+<li>住所は、送ったときに Backend が付ける。それまでは「📍 住所は送ったあとに付きます」、位置を記録できなかったときは「📍 位置を記録できませんでした」、送っても住所が分からなかったときは「📍 住所は分かりませんでした」。時系列とピンの要約では「住所は送信後」「位置の記録なし」「場所不明」。</li>
 <li>記録（SC-06）のピンや時系列の行から、既存のメモを開いて直す・消す。</li></ul>
 <h3>入力</h3><ul>
 <li>文字で書く（2000字まで）。開いたら入力欄にフォーカスしてキーボードを出す。</li>
@@ -1770,7 +1771,7 @@ function renderPointMemo() {
   const isNew = !mm;
   if (!pmKeep) $("#pmText").value = mm ? mm.text : "";
   $("#pmWhen").textContent = mm ? `${fmtDay(mm.day)} ${mm.t}` : "10月16日（金） 10:24 · 今いる地点";
-  $("#pmWhere").textContent = "📍 " + (mm ? mm.addr : "静岡県御殿場市新橋");
+  $("#pmWhere").textContent = "📍 " + (mm ? mm.addr : "住所は送ったあとに付きます");
   const home = states["SC-02"];
   $("#pmRide").textContent = mm
     ? (mm.ride ? `走行「${rideById(mm.ride).title}」で書いたメモ` : "")

@@ -56,6 +56,18 @@ class HomeScreenTest {
     rule.onNodeWithTag("askHint").assertTextEquals("再開すると、インカムのボタンで話せます")
   }
 
+  // Slice 3 spec §7.1: "📝 地点メモ" is there only while a ride records or is paused, and opens SC-19 at once.
+  @Test
+  fun the_point_memo_button_is_there_only_while_a_ride_records_or_is_paused() {
+    var notes = 0
+    var riding by mutableStateOf(false)
+    rule.setContent { HomeScreen(HomeUi("rider01", null, "新しい会話です"), {}, {}, {}, {}, onNote = if (riding) ({ notes++ }) else null) }
+    rule.onNodeWithTag("newNote").assertDoesNotExist()
+    riding = true
+    rule.onNodeWithTag("newNote").performClick()
+    assertEquals(1, notes)
+  }
+
   @Test
   fun while_a_ride_records_the_hint_says_the_intercom_is_ready() {
     rule.setContent { HomeScreen(HomeUi("rider01", null, "新しい会話です"), {}, {}, {}, {}) }

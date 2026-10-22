@@ -67,4 +67,28 @@ class MapDataTest {
     assertEquals(listOf("pin-1-memo", "pin-2"), icons(null))
     assertEquals(listOf("pin-sel-1-memo", "pin-2"), icons("a1"))
   }
+
+  // US-D-08: a point memo's pin is green and numbered apart from the asks; a tap names it by its id.
+  @Test
+  fun a_point_memos_pin_takes_an_image_of_its_own_and_names_its_id() {
+    val map = rideMap(points, ended = true, pins = listOf(MapPin("a1", 1, LatLon(35.0, 139.0)), MapPin("n1", 1, LatLon(35.1, 139.1), kind = PinKind.NOTE)))
+    val properties = { selected: String? ->
+      Json.parseToJsonElement(pinsJson(map, selected)).jsonObject["features"]!!.jsonArray
+        .map { it.jsonObject["properties"]!!.jsonObject.let { p -> p["id"]!!.jsonPrimitive.content to p["icon"]!!.jsonPrimitive.content } }
+    }
+    assertEquals(listOf("a1" to "pin-1", "n1" to "note-1"), properties(null))
+    assertEquals(listOf("a1" to "pin-1", "n1" to "note-sel-1"), properties("n1"))
+  }
+
+  // SC-06: the asks' and the point memos' pins are shown or hidden apart; with both hidden only the route is left.
+  @Test
+  fun each_kind_of_pin_is_shown_or_hidden_on_its_own() {
+    val map = rideMap(points, ended = true, pins = listOf(MapPin("a1", 1, LatLon(35.0, 139.0)), MapPin("n1", 1, LatLon(35.1, 139.1), kind = PinKind.NOTE)))
+    assertEquals(listOf("a1", "n1"), map.showing(asks = true, notes = true).pins.map { it.id })
+    assertEquals(listOf("n1"), map.showing(asks = false, notes = true).pins.map { it.id })
+    assertEquals(listOf("a1"), map.showing(asks = true, notes = false).pins.map { it.id })
+    val bare = map.showing(asks = false, notes = false)
+    assertEquals(emptyList<MapPin>(), bare.pins)
+    assertEquals(map.routes, bare.routes)
+  }
 }
