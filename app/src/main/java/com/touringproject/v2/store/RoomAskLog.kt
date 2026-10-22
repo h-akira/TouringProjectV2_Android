@@ -38,9 +38,10 @@ class RoomAskLog(private val dao: AskDao, private val scope: CoroutineScope, pri
     scope.launch { save(record) }
   }
 
+  /** An ask whose ride was deleted meanwhile is dropped (Android #54). */
   suspend fun save(record: AskRecord) {
     try {
-      dao.upsert(record.toEntity())
+      dao.keep(record.toEntity())
       failing.value = false
     } catch (e: CancellationException) {
       throw e

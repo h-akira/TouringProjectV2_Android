@@ -92,7 +92,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val rideStore = RoomRideStore(database.rides())
   val askLog = RoomAskLog(database.asks(), scope) { message, e -> Log.w("trv2.ask", message, e) }
   /** What the Records tab reads (SC-05, SC-06, SC-07). */
-  val records = RoomRecords(database.rides(), database.asks())
+  val records = RoomRecords(database.rides(), database.asks(), database.notes())
   private val notices = RideNotices(context)
 
   /** Sends rides and routes; a pass runs on each trigger (slice 2 spec §5.3). */
