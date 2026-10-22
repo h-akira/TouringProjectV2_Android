@@ -15,6 +15,7 @@ import com.touringproject.v2.ride.resume
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -72,5 +73,41 @@ class RoomRideStoreTest {
     assertEquals(900L, saved.rejectedUpdatedAt)
     assertTrue(saved.routeRejected)
     assertEquals(RideStatus.PAUSED, store.active()?.status)
+  }
+
+  @Test
+  fun a_ride_keeps_its_memo_and_drops_it_when_saved_without_one() = runBlocking {
+    val ended = ride.end(5_000, EndReason.MANUAL, 5_000)
+    store.save(ended.copy(memo = "また来たい"))
+    assertEquals("また来たい", store.ride("r1")?.memo)
+    store.save(ended.copy(memo = null, updatedAt = 6_000))
+    assertNull(store.ride("r1")?.memo)
+  }
+
+  // Slice 3 spec §4.2: the ride goes with its segments, points and asks, and its deletion waits to be sent.
+  @Test
+  fun deleting_an_ended_ride_removes_all_of_it_and_marks_it() = runBlocking {
+    val ended = ride.end(5_000, EndReason.MANUAL, 5_000)
+    store.save(ended)
+    store.addPoint("r1", RoutePoint(0, 2_000, 35.0, 139.0, 5.0), 0.0, 2_000)
+    db.asks().upsert(AskEntity("a1", 2_000, 3_000, "Q", "A", 35.0, 139.0, null, null, "voice", "c1", true, "answered", null, "r1"))
+    db.asks().upsert(AskEntity("a2", 2_000, 3_000, "Q", "A", 35.0, 139.0, null, null, "voice", "c1", true, "answered", null, "r2"))
+    assertTrue(store.delete("r1", 9_000))
+    assertNull(store.ride("r1"))
+    assertTrue(dao.points("r1").isEmpty())
+    assertTrue(dao.segments("r1").isEmpty())
+    assertNull(db.asks().ask("a1"))
+    assertEquals("r2", db.asks().ask("a2")?.rideId)
+    assertEquals(listOf(DeletionEntity("ride", "r1", null, 9_000)), db.query("SELECT * FROM deletions", null).use { c ->
+      buildList { while (c.moveToNext()) add(DeletionEntity(c.getString(0), c.getString(1), c.getString(2), c.getLong(3))) }
+    })
+  }
+
+  @Test
+  fun a_ride_still_recording_or_not_kept_is_not_deleted() = runBlocking {
+    store.save(ride)
+    assertFalse(store.delete("r1", 9_000))
+    assertFalse(store.delete("r9", 9_000))
+    assertEquals(ride, store.ride("r1"))
   }
 }

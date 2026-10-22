@@ -30,7 +30,7 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 2, true, MIGRATION_1_2).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
       .allowMainThreadQueries()
       .build()
     runBlocking {
@@ -56,7 +56,7 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 3, true, MIGRATION_2_3).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
       .allowMainThreadQueries()
       .build()
     runBlocking {
@@ -78,12 +78,39 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 4, true, MIGRATION_3_4).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
       .allowMainThreadQueries()
       .build()
     runBlocking {
       assertEquals("r1", db.asks().ask("a1")?.rideId)
       assertNull(db.asks().ask("a2"))
+    }
+    db.close()
+  }
+
+  // Slice 3 spec §4.1: memos, point memos and deletions are added; what was kept stays as it was.
+  @Test
+  fun version_4_moves_to_5_keeping_rides_and_asks_without_memos() {
+    helper.createDatabase(DB, 4).apply {
+      execSQL("INSERT INTO rides VALUES ('r1', '箱根', 'ended', 'manual', NULL, 5000, 120.0, 6000, 6000, NULL, 0)")
+      execSQL("INSERT INTO ride_segments VALUES ('r1', 0, 1000, 5000, 7)")
+      val columns = "(askId, askedAt, answeredAt, transcript, answer, latitude, longitude, address, headingDegrees, input, conversationId, newConversation, status, failure, rideId)"
+      execSQL("INSERT INTO asks $columns VALUES ('a1', 1000, 2000, 'Q', 'A', 35.0, 139.0, '箱根町', 90.0, 'voice', 'c1', 1, 'answered', NULL, 'r1')")
+      close()
+    }
+    helper.runMigrationsAndValidate(DB, 5, true, MIGRATION_4_5).close()
+    val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+      .allowMainThreadQueries()
+      .build()
+    runBlocking {
+      val ride = db.rides().ride("r1")!!
+      assertEquals("箱根", ride.name)
+      assertNull(ride.memo)
+      val ask = db.asks().ask("a1")!!
+      assertEquals("Q", ask.transcript)
+      assertNull(ask.memo)
+      assertNull(ask.memoUpdatedAt)
     }
     db.close()
   }

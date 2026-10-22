@@ -9,6 +9,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Relation
@@ -18,6 +19,7 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.touringproject.v2.records.memoTime
 import kotlinx.coroutines.flow.Flow
 
 // The device's record of rides (slice 2 spec §5.1). Every schema version is exported to app/schemas and is moved
@@ -45,6 +47,8 @@ data class RideEntity(
    * segments and points refer to.
    */
   @ColumnInfo(defaultValue = "0") val routeRejected: Boolean = false,
+  /** The ride's memo (US-D-04.002); null when there is none. Part of the meta that is sent (slice 3 spec §4.1). */
+  val memo: String? = null,
 )
 
 @Entity(
@@ -102,7 +106,46 @@ data class AskEntity(
    * missing for a while after a failed save.
    */
   val rideId: String?,
+  /** The conversation's memo (US-D-04.001); null when there is none. */
+  val memo: String? = null,
+  /** When the memo last changed; null while it has never had one. */
+  val memoUpdatedAt: Long? = null,
+  /** The memoUpdatedAt the Backend last accepted; null until then. */
+  val memoSentUpdatedAt: Long? = null,
+  /** The memoUpdatedAt the Backend refused (400 or 404); that version is not sent again (slice 3 spec §5.2). */
+  val memoRejectedUpdatedAt: Long? = null,
 )
+
+/**
+ * A point memo (slice 3 spec §4.1, US-D-08). Written while its ride records or is paused, and gone with the ride. The
+ * place it was written at is null when the ride had no point yet; the sample is the older point the Backend takes the
+ * heading from. address and headingDegrees are what the Backend answered; null until it has.
+ */
+@Entity(
+  tableName = "notes",
+  indices = [Index(value = ["rideId"])],
+  foreignKeys = [ForeignKey(entity = RideEntity::class, parentColumns = ["id"], childColumns = ["rideId"], onDelete = ForeignKey.CASCADE)],
+)
+data class NoteEntity(
+  @PrimaryKey val id: String,
+  val rideId: String,
+  val at: Long,
+  val latitude: Double?,
+  val longitude: Double?,
+  val sampleLatitude: Double?,
+  val sampleLongitude: Double?,
+  val sampleAt: Long?,
+  val text: String,
+  val updatedAt: Long,
+  val sentUpdatedAt: Long?,
+  val rejectedUpdatedAt: Long?,
+  val address: String?,
+  val headingDegrees: Double?,
+)
+
+/** A record deleted on the device whose deletion has not reached the Backend yet (slice 3 spec §4.2). kind: ask / ride / note. */
+@Entity(tableName = "deletions", primaryKeys = ["kind", "id"])
+data class DeletionEntity(val kind: String, val id: String, val rideId: String?, val deletedAt: Long)
 
 @Dao
 interface AskDao {
@@ -119,19 +162,71 @@ interface AskDao {
   /** The ride's asks in the order they were asked (SC-06, SC-07). */
   @Query("SELECT * FROM asks WHERE rideId = :rideId ORDER BY askedAt")
   fun forRide(rideId: String): Flow<List<AskEntity>>
+
+  @Query("UPDATE asks SET memo = :memo, memoUpdatedAt = :at WHERE askId = :askId")
+  suspend fun setMemo(askId: String, memo: String?, at: Long)
+
+  /** SC-08. False when the ask is not kept; the same memo again changes nothing. */
+  @Transaction
+  suspend fun writeMemo(askId: String, memo: String?, now: Long): Boolean {
+    val ask = ask(askId) ?: return false
+    if (ask.memo == memo) return true
+    setMemo(askId, memo, memoTime(now, ask.memoUpdatedAt))
+    return true
+  }
+
+  @Query("DELETE FROM asks WHERE askId = :askId")
+  suspend fun deleteRow(askId: String)
+
+  // Sending memos (slice 3 spec §5.1): the asks whose memo changed since it was taken, unless that version was refused.
+  @Query(
+    "SELECT askId, memo, memoUpdatedAt FROM asks WHERE memoUpdatedAt IS NOT NULL AND " +
+      "(memoSentUpdatedAt IS NULL OR memoSentUpdatedAt < memoUpdatedAt) AND " +
+      "(memoRejectedUpdatedAt IS NULL OR memoRejectedUpdatedAt != memoUpdatedAt) ORDER BY memoUpdatedAt",
+  )
+  suspend fun unsentMemos(): List<AskMemoRow>
+
+  @Query(
+    "UPDATE asks SET memoSentUpdatedAt = :updatedAt WHERE askId = :askId AND (memoSentUpdatedAt IS NULL OR memoSentUpdatedAt < :updatedAt)",
+  )
+  suspend fun markMemoSent(askId: String, updatedAt: Long)
+
+  @Query("UPDATE asks SET memoRejectedUpdatedAt = :updatedAt WHERE askId = :askId")
+  suspend fun markMemoRefused(askId: String, updatedAt: Long)
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun markDeleted(deletion: DeletionEntity)
+
+  /** DL-01: removes the ask and marks it for the Backend, together (slice 3 spec §4.2). False when it is not kept. */
+  @Transaction
+  suspend fun delete(askId: String, at: Long): Boolean {
+    val ask = ask(askId) ?: return false
+    deleteRow(askId)
+    markDeleted(DeletionEntity("ask", askId, ask.rideId, at))
+    return true
+  }
 }
+
+data class AskMemoRow(val askId: String, val memo: String?, val memoUpdatedAt: Long)
+
+/** What one ride has left to send, read together (Android #23). */
+data class UnsentRow(val ride: RideEntity, val segments: List<SegmentEntity>, val sentPoints: Int, val totalPoints: Int)
 
 data class RideWithSegments(
   @Embedded val ride: RideEntity,
   @Relation(parentColumn = "id", entityColumn = "rideId") val segments: List<SegmentEntity>,
 )
 
-/** A ride as SC-05 lists it. pointsLeft is true while one of its points has not been taken (unsent or refused). */
+/**
+ * A ride as SC-05 lists it. pointsLeft is true while one of its points has not been taken (unsent or refused);
+ * memosLeft while the memo of one of its asks has not been taken (slice 3 spec §5.3).
+ */
 data class RideRow(
   @Embedded val ride: RideEntity,
   @Relation(parentColumn = "id", entityColumn = "rideId") val segments: List<SegmentEntity>,
   val questions: Int,
   val pointsLeft: Boolean,
+  val memosLeft: Boolean,
 )
 
 @Dao
@@ -150,7 +245,9 @@ interface RideDao {
   @Query(
     "SELECT *, (SELECT COUNT(*) FROM asks WHERE asks.rideId = rides.id) AS questions, " +
       "(EXISTS (SELECT 1 FROM route_points WHERE chunk IS NULL AND route_points.rideId = rides.id) OR " +
-      "EXISTS (SELECT 1 FROM route_points WHERE refused = 1 AND route_points.rideId = rides.id)) AS pointsLeft FROM rides",
+      "EXISTS (SELECT 1 FROM route_points WHERE refused = 1 AND route_points.rideId = rides.id)) AS pointsLeft, " +
+      "EXISTS (SELECT 1 FROM asks WHERE asks.rideId = rides.id AND asks.memoUpdatedAt IS NOT NULL AND " +
+      "(asks.memoSentUpdatedAt IS NULL OR asks.memoSentUpdatedAt < asks.memoUpdatedAt)) AS memosLeft FROM rides",
   )
   fun rows(): Flow<List<RideRow>>
 
@@ -230,16 +327,65 @@ interface RideDao {
     insertPoint(point)
     updateDistance(point.rideId, distanceMeters, aliveAt)
   }
+
+  // Deleting a ride (slice 3 spec §4.2). Each table is cleared by name rather than through the foreign keys, and the
+  // asks have none.
+  @Query("DELETE FROM asks WHERE rideId = :rideId")
+  suspend fun deleteAsks(rideId: String)
+
+  @Query("DELETE FROM notes WHERE rideId = :rideId")
+  suspend fun deleteNotes(rideId: String)
+
+  @Query("DELETE FROM route_points WHERE rideId = :rideId")
+  suspend fun deletePoints(rideId: String)
+
+  @Query("DELETE FROM rides WHERE id = :rideId")
+  suspend fun deleteRideRow(rideId: String)
+
+  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  suspend fun markDeleted(deletion: DeletionEntity)
+
+  @Query("SELECT * FROM deletions ORDER BY deletedAt")
+  suspend fun deletions(): List<DeletionEntity>
+
+  @Query("DELETE FROM deletions WHERE kind = :kind AND id = :id")
+  suspend fun deletionSent(kind: String, id: String)
+
+  /**
+   * The rides with something left to send, each with its segments and point counts, in one transaction: a save that
+   * lands meanwhile cannot pair an old status with new segments (Android #23).
+   */
+  @Transaction
+  suspend fun unsentSnapshot(): List<UnsentRow> =
+    unsentRides().map { UnsentRow(it, segments(it.id), sentPointCount(it.id), pointCount(it.id)) }
+
+  /** Removes an ended ride and everything of it, and marks it for the Backend. False when it is not kept or not ended. */
+  @Transaction
+  suspend fun deleteEnded(rideId: String, at: Long): Boolean {
+    val ride = ride(rideId) ?: return false
+    if (ride.status != "ended") return false
+    deleteAsks(rideId)
+    deleteNotes(rideId)
+    deletePoints(rideId)
+    deleteSegments(rideId)
+    deleteRideRow(rideId)
+    markDeleted(DeletionEntity("ride", rideId, null, at))
+    return true
+  }
 }
 
-@Database(entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class], version = 4, exportSchema = true)
+@Database(
+  entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class, NoteEntity::class, DeletionEntity::class],
+  version = 5,
+  exportSchema = true,
+)
 abstract class RideDatabase : RoomDatabase() {
   abstract fun rides(): RideDao
   abstract fun asks(): AskDao
 
   companion object {
     fun open(context: Context): RideDatabase =
-      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
   }
 }
 
@@ -284,5 +430,30 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
 val MIGRATION_3_4 = object : Migration(3, 4) {
   override fun migrate(db: SupportSQLiteDatabase) {
     db.execSQL("DELETE FROM `asks` WHERE `rideId` IS NULL")
+  }
+}
+
+/**
+ * 4 -> 5 (slice 3 spec §4.1): memos on rides and asks, the point memos and the deletions waiting to be sent. It only
+ * adds, like 1 -> 2, so it stays quick inside RideController.load() (adr/0006).
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+  override fun migrate(db: SupportSQLiteDatabase) {
+    db.execSQL("ALTER TABLE `rides` ADD COLUMN `memo` TEXT")
+    db.execSQL("ALTER TABLE `asks` ADD COLUMN `memo` TEXT")
+    db.execSQL("ALTER TABLE `asks` ADD COLUMN `memoUpdatedAt` INTEGER")
+    db.execSQL("ALTER TABLE `asks` ADD COLUMN `memoSentUpdatedAt` INTEGER")
+    db.execSQL("ALTER TABLE `asks` ADD COLUMN `memoRejectedUpdatedAt` INTEGER")
+    db.execSQL(
+      "CREATE TABLE IF NOT EXISTS `notes` (`id` TEXT NOT NULL, `rideId` TEXT NOT NULL, `at` INTEGER NOT NULL, `latitude` REAL, " +
+        "`longitude` REAL, `sampleLatitude` REAL, `sampleLongitude` REAL, `sampleAt` INTEGER, `text` TEXT NOT NULL, " +
+        "`updatedAt` INTEGER NOT NULL, `sentUpdatedAt` INTEGER, `rejectedUpdatedAt` INTEGER, `address` TEXT, `headingDegrees` REAL, " +
+        "PRIMARY KEY(`id`), FOREIGN KEY(`rideId`) REFERENCES `rides`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+    )
+    db.execSQL("CREATE INDEX IF NOT EXISTS `index_notes_rideId` ON `notes` (`rideId`)")
+    db.execSQL(
+      "CREATE TABLE IF NOT EXISTS `deletions` (`kind` TEXT NOT NULL, `id` TEXT NOT NULL, `rideId` TEXT, `deletedAt` INTEGER NOT NULL, " +
+        "PRIMARY KEY(`kind`, `id`))",
+    )
   }
 }

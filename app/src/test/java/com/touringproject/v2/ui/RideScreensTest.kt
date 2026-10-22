@@ -147,4 +147,13 @@ class RideScreensTest {
     rule.onNodeWithText("走行を続ける").performClick()
     assertEquals(1, dismissed)
   }
+
+  // Slice 3 spec §7.1: the ride's memo opens from the card while it records or is paused.
+  @Test
+  fun the_card_opens_the_rides_memo() {
+    var memos = 0
+    rule.setContent { RideCard(RideCardUi("箱根", true, "1:26", "52.8 km", "4"), {}, {}, {}, {}, onMemo = { memos++ }) }
+    rule.onNodeWithTag("rideMemo").performClick()
+    assertEquals(1, memos)
+  }
 }

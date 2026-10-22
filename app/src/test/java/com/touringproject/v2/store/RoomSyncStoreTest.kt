@@ -10,7 +10,10 @@ import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.RoutePoint
 import com.touringproject.v2.ride.end
 import com.touringproject.v2.ride.newRide
+import com.touringproject.v2.ride.pause
 import com.touringproject.v2.sync.ChunkRange
+import com.touringproject.v2.sync.PendingDeletion
+import com.touringproject.v2.sync.UnsentAskMemo
 import com.touringproject.v2.sync.RideSync
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -31,7 +34,7 @@ class RoomSyncStoreTest {
     .build()
   private val dao = db.rides()
   private val rides = RoomRideStore(dao)
-  private val store = RoomSyncStore(dao)
+  private val store = RoomSyncStore(dao, db.asks())
   private val ride = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS)
 
   @After
@@ -108,5 +111,48 @@ class RoomSyncStoreTest {
     sync.pass()
     assertEquals(3, server.requestCount)
     server.shutdown()
+  }
+
+  private suspend fun keepAsk(askId: String) =
+    db.asks().upsert(AskEntity(askId, 1_000, 2_000, "Q", "A", 35.0, 139.0, null, null, "voice", "c1", true, "answered", null, "r1"))
+
+  @Test
+  fun a_deletion_waits_until_it_is_sent() = runBlocking {
+    rides.save(ride.end(5_000, EndReason.MANUAL, 5_000))
+    keepAsk("a1")
+    db.asks().delete("a1", 6_000)
+    rides.delete("r1", 7_000)
+    assertEquals(listOf(PendingDeletion("ask", "a1", "r1"), PendingDeletion("ride", "r1", null)), store.deletions())
+    store.deletionSent(PendingDeletion("ask", "a1", "r1"))
+    assertEquals(listOf("r1"), store.deletions().map { it.id })
+  }
+
+  @Test
+  fun a_memo_is_unsent_until_its_version_is_taken_or_refused() = runBlocking {
+    keepAsk("a1")
+    keepAsk("a2")
+    assertEquals(emptyList<UnsentAskMemo>(), store.unsentAskMemos())
+    db.asks().writeMemo("a1", "また来たい", 5_000)
+    db.asks().writeMemo("a2", "給油", 6_000)
+    assertEquals(listOf(UnsentAskMemo("a1", "また来たい", 5_000), UnsentAskMemo("a2", "給油", 6_000)), store.unsentAskMemos())
+    store.askMemoSent("a1", 5_000)
+    store.askMemoRefused("a2", 6_000)
+    assertEquals(emptyList<UnsentAskMemo>(), store.unsentAskMemos())
+    db.asks().writeMemo("a1", null, 7_000)
+    assertEquals(listOf(UnsentAskMemo("a1", null, 7_000)), store.unsentAskMemos())
+  }
+
+  // Android #23: the ride and its segments come from one read, so they are of one version.
+  @Test
+  fun an_unsent_ride_comes_with_its_segments_and_counts_read_together() = runBlocking {
+    val paused = ride.pause(5_000)
+    rides.save(paused)
+    addPoints(3)
+    store.chunkSent("r1", ChunkRange(0, 0, 2), refused = false)
+    val unsent = store.unsent().single()
+    assertEquals(paused.status, unsent.ride.status)
+    assertEquals(paused.segments, unsent.ride.segments)
+    assertEquals(2, unsent.sentPoints)
+    assertEquals(3, unsent.totalPoints)
   }
 }

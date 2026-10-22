@@ -26,6 +26,7 @@ fun AskEntity.toRecord() = AskRecord(
   outcome = AskOutcome.valueOf(status.uppercase()),
   failure = failure,
   rideId = rideId,
+  memo = memo,
 )
 
 /** What the records screens read (SC-05, SC-06, SC-07). Each Flow follows the database as it changes. */
@@ -34,7 +35,7 @@ class RoomRecords(private val rides: RideDao, private val asks: AskDao) {
     orderRides(
       rows.map { row ->
         val ride = row.ride.toRide(row.segments.sortedBy { it.seq })
-        RideListItem(ride, row.questions, saveState(ride.status, ride.updatedAt, row.ride.sentUpdatedAt, row.pointsLeft))
+        RideListItem(ride, row.questions, saveState(ride.status, ride.updatedAt, row.ride.sentUpdatedAt, row.pointsLeft || row.memosLeft))
       },
     )
   }

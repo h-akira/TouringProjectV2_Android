@@ -58,6 +58,12 @@ class RoomAskLogTest {
       override suspend fun ask(askId: String): AskEntity? = null
       override fun countForRide(rideId: String) = kotlinx.coroutines.flow.flowOf(0)
       override fun forRide(rideId: String) = kotlinx.coroutines.flow.flowOf(emptyList<AskEntity>())
+      override suspend fun setMemo(askId: String, memo: String?, at: Long) = error("not used")
+      override suspend fun deleteRow(askId: String) = error("not used")
+      override suspend fun markDeleted(deletion: DeletionEntity) = error("not used")
+      override suspend fun unsentMemos(): List<AskMemoRow> = error("not used")
+      override suspend fun markMemoSent(askId: String, updatedAt: Long) = error("not used")
+      override suspend fun markMemoRefused(askId: String, updatedAt: Long) = error("not used")
     }
     val failing = RoomAskLog(dao, kotlinx.coroutines.MainScope()) { message, _ -> errors += message }
     failing.save(record)

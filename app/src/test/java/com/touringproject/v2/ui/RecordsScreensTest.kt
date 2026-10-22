@@ -21,6 +21,7 @@ import androidx.compose.ui.test.onChildAt
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.navigation3.runtime.NavEntry
@@ -49,10 +50,10 @@ class RecordsScreensTest {
 
   private val row = RideRowUi("r1", "箱根", "10月16日（金） · 08:58〜10:46", "52.8 km · 1:30 · 質問 2 · ⏸ 1", "保存済み", true)
 
-  private fun detail(autoEnded: Boolean = false) = RideDetailUi(
+  private fun detail(autoEnded: Boolean = false, recording: Boolean = false, memo: String? = null) = RideDetailUi(
     name = "箱根",
     summary = RideSummaryUi("10月16日（金）", "08:58〜10:46", "1:30", "52.8 km", "2", "一時停止 1回（18分）は走行時間に含めません", autoEnded),
-    recording = false,
+    recording = recording,
     timeline = listOf(
       TimelineRow.Ask("a1", 1, "09:41", "箱根町仙石原", "右手の山は？", false),
       TimelineRow.Pause("⏸ 一時停止 09:44〜10:02（18分）"),
@@ -61,6 +62,7 @@ class RecordsScreensTest {
     ),
     map = MapData(emptyList(), emptyList(), null, null, listOf(MapPin("a1", 1, LatLon(35.2, 139.0)), MapPin("a2", 2, LatLon(35.3, 138.9)))),
     cards = mapOf("a1" to PinCardUi("a1", "1 · 09:41 · 箱根町仙石原", "右手の山は？", "金時山です。")),
+    memo = memo,
   )
 
   private fun back() = rule.runOnUiThread { rule.activity.onBackPressedDispatcher.onBackPressed() }
@@ -227,5 +229,127 @@ class RecordsScreensTest {
     rule.waitForIdle()
     assertEquals(listOf("list", "ride"), stack.toList())
     rule.onNodeWithTag("timeline").assertExists()
+  }
+
+  // US-D-04.005: SC-05 marks a ride that has a memo.
+  @Test
+  fun the_list_marks_a_ride_with_a_memo() {
+    rule.setContent { RideListScreen(listOf(RideSection("2026年10月", listOf(row, row.copy(id = "r2", memo = true)))), {}) }
+    rule.onNodeWithTag("rideMemoMark-r2", useUnmergedTree = true).assertExists()
+    rule.onNodeWithTag("rideMemoMark-r1", useUnmergedTree = true).assertDoesNotExist()
+  }
+
+  @Test
+  fun the_ride_shows_its_memo_which_opens_sc_08_and_without_one_offers_to_write_it() {
+    var memos = 0
+    var memo by mutableStateOf<String?>(null)
+    rule.setContent { RideDetailScreen(detail(memo = memo), fakeMap, true, {}, {}, {}, { true }, {}, onMemo = { memos++ }) }
+    rule.onNodeWithTag("timeline").performScrollToNode(hasTestTag("rideMemoAdd"))
+    rule.onNodeWithTag("rideMemoAdd").performClick()
+    memo = "峠の茶屋が良かった"
+    rule.waitForIdle()
+    rule.onNodeWithTag("timeline").performScrollToNode(hasTestTag("rideMemo"))
+    rule.onNodeWithTag("rideMemo").performClick()
+    rule.onNodeWithTag("rideMenu").performClick()
+    rule.onNodeWithTag("rideMemoMenu").performClick()
+    assertEquals(3, memos)
+    rule.onNodeWithText("峠の茶屋が良かった").assertExists()
+  }
+
+  @Test
+  fun the_timeline_marks_an_ask_with_a_memo() {
+    val withMemo = detail().let { it.copy(timeline = listOf(TimelineRow.Ask("a1", 1, "09:41", "箱根町仙石原", "右手の山は？", false, memo = true))) }
+    rule.setContent { RideDetailScreen(withMemo, fakeMap, true, {}, {}, {}, { true }, {}) }
+    rule.onNodeWithTag("timeline").performScrollToNode(hasTestTag("ask-a1"))
+    rule.onNodeWithText("09:41 · 箱根町仙石原 · 📝").assertExists()
+  }
+
+  // US-D-06.002, US-D-06.003: an ended ride is deleted after DL-01 says what goes.
+  @Test
+  fun an_ended_ride_is_deleted_after_the_confirmation() {
+    var deletes = 0
+    rule.setContent { RideDetailScreen(detail(), fakeMap, true, {}, {}, {}, { true }, {}, onDelete = { deletes++; true }) }
+    rule.onNodeWithTag("rideMenu").performClick()
+    rule.onNodeWithTag("deleteRide").performClick()
+    rule.onNodeWithText("ルート・走行のメモと、その走行の質問・地点メモが削除されます。元に戻せません。").assertExists()
+    rule.onNodeWithTag("deleteCancel").performClick()
+    assertEquals(0, deletes)
+    rule.onNodeWithTag("rideMenu").performClick()
+    rule.onNodeWithTag("deleteRide").performClick()
+    rule.onNodeWithTag("deleteGo").performClick()
+    rule.waitForIdle()
+    assertEquals(1, deletes)
+  }
+
+  // Slice 3 spec §2: the ride recording or paused is ended first.
+  @Test
+  fun the_ride_recording_cannot_be_deleted() {
+    rule.setContent { RideDetailScreen(detail(recording = true), fakeMap, true, {}, {}, {}, { true }, {}) }
+    rule.onNodeWithTag("rideMenu").performClick()
+    rule.onNodeWithTag("renameRide").assertExists()
+    rule.onNodeWithTag("deleteRide").assertDoesNotExist()
+  }
+
+  @Test
+  fun a_ride_that_could_not_be_deleted_is_told() {
+    rule.setContent { RideDetailScreen(detail(), fakeMap, true, {}, {}, {}, { true }, {}, onDelete = { false }) }
+    rule.onNodeWithTag("rideMenu").performClick()
+    rule.onNodeWithTag("deleteRide").performClick()
+    rule.onNodeWithTag("deleteGo").performClick()
+    rule.waitForIdle()
+    assertEquals("削除できませんでした", ShadowToast.getTextOfLatestToast())
+  }
+
+  private val answered = AskDetailUi("会話 1 / 2", "10月16日（金） 09:41", "神奈川県箱根町仙石原", "停車中", "🎤 声で質問", "右手の山は？", "金時山です。", null, null, "a2")
+
+  @Test
+  fun the_ask_shows_its_memo_and_opens_sc_08() {
+    var memos = 0
+    rule.setContent { AskDetailScreen(answered.copy(memo = "給油した"), null, fakeMap, "a1", {}, {}, onMemo = { memos++ }) }
+    rule.onNodeWithText("給油した").assertExists()
+    rule.onNodeWithTag("askMemo").performScrollTo().performClick()
+    assertEquals(1, memos)
+  }
+
+  @Test
+  fun an_ask_without_a_memo_offers_to_write_one() {
+    var memos = 0
+    rule.setContent { AskDetailScreen(answered, null, fakeMap, "a1", {}, {}, onMemo = { memos++ }) }
+    rule.onNodeWithTag("askMemoAdd").performScrollTo().performClick()
+    assertEquals(1, memos)
+  }
+
+  // US-D-06.001: an ask is deleted after DL-01.
+  @Test
+  fun an_ask_is_deleted_after_the_confirmation() {
+    var deletes = 0
+    rule.setContent { AskDetailScreen(answered, null, fakeMap, "a1", {}, {}, onDelete = { deletes++; true }) }
+    rule.onNodeWithTag("deleteAsk").performScrollTo().performClick()
+    rule.onNodeWithText("質問・回答・メモが削除されます。元に戻せません。").assertExists()
+    rule.onNodeWithTag("deleteGo").performClick()
+    rule.waitForIdle()
+    assertEquals(1, deletes)
+  }
+
+  // Final review: the ride deleted, its detail turns "not found" while the deletion is still finishing; going back to
+  // SC-05 must not be cancelled with it.
+  @Test
+  fun the_deletion_finishes_even_when_the_ride_is_gone_from_the_screen_meanwhile() {
+    var ui by mutableStateOf<RideDetailUi?>(detail())
+    var finished = 0
+    rule.setContent {
+      RideDetailScreen(ui, fakeMap, true, {}, {}, {}, { true }, {}, onDelete = {
+        ui = null
+        kotlinx.coroutines.delay(100)
+        finished++
+        true
+      })
+    }
+    rule.onNodeWithTag("rideMenu").performClick()
+    rule.onNodeWithTag("deleteRide").performClick()
+    rule.onNodeWithTag("deleteGo").performClick()
+    rule.mainClock.advanceTimeBy(500)
+    rule.waitForIdle()
+    assertEquals(1, finished)
   }
 }

@@ -34,6 +34,8 @@ data class AskRecord(
   val failure: String?,
   /** The ride that was recording when the ask started (slice 2 spec §4.6). */
   val rideId: String?,
+  /** The conversation's memo (US-D-04.001). The ask loop never sets it; only SC-08 does, through AskEdits. */
+  val memo: String? = null,
 )
 
 /** What the loop knows once the Backend has taken the ask in. */

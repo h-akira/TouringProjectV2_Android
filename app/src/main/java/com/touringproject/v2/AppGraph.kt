@@ -50,11 +50,13 @@ import com.touringproject.v2.settings.KeystoreCipher
 import com.touringproject.v2.settings.SettingsRepository
 import com.touringproject.v2.settings.maxRecordingChanges
 import com.touringproject.v2.store.RideDatabase
+import com.touringproject.v2.store.RoomAskEdits
 import com.touringproject.v2.store.RoomAskLog
 import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.store.RoomRideStore
 import com.touringproject.v2.store.RoomSyncStore
 import com.touringproject.v2.sync.RideSync
+import com.touringproject.v2.sync.credentialChanges
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -95,7 +97,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
 
   /** Sends rides and routes; a pass runs on each trigger (slice 2 spec §5.3). */
   val sync = RideSync(
-    RoomSyncStore(database.rides()),
+    RoomSyncStore(database.rides(), database.asks()),
     api = {
       val key = apiKeys.current()
       val user = settings.settings.value?.userName
@@ -103,6 +105,9 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     },
     log = { event, data -> Log.i("trv2.sync", "$event $data") },
   )
+
+  /** SC-07 and SC-08 change kept asks through here; each change is something new to send (slice 3 spec §5.1). */
+  val askEdits = RoomAskEdits(database.asks(), System::currentTimeMillis, sync::request) { message, e -> Log.w("trv2.ask", message, e) }
 
   val rides = RideController(
     RideDeps(
@@ -225,6 +230,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       readiness.settingsLoaded()
       // The start of the app is a trigger; before this the key and the user name are not known.
       sync.request()
+      // From now on, a key or user name saved may let what waits on the device go at last (Android #29).
+      credentialChanges(apiKeys.apiKey, settings.settings.map { it?.userName }).collect { sync.request() }
     }
   }
 

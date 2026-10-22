@@ -30,7 +30,7 @@ class RoomRecordsTest {
     .allowMainThreadQueries()
     .build()
   private val rides = RoomRideStore(db.rides())
-  private val sync = RoomSyncStore(db.rides())
+  private val sync = RoomSyncStore(db.rides(), db.asks())
   private val log = RoomAskLog(db.asks(), MainScope()) { _, _ -> }
   private val records = RoomRecords(db.rides(), db.asks())
 
@@ -86,5 +86,20 @@ class RoomRecordsTest {
     assertEquals(listOf("a1", "a2"), records.asks("r1").first().map { it.askId })
     assertEquals(listOf(1_500L), records.route("r1").map { it.t })
     assertNull(records.ride("r9").first())
+  }
+
+  // Slice 3 spec §5.3: a memo of one of the ride's asks not yet taken leaves the ride "未送信あり".
+  @Test
+  fun a_memo_not_yet_sent_leaves_the_ride_unsent() = runBlocking {
+    val ended = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS).end(4_000, EndReason.MANUAL, 4_000)
+    rides.save(ended)
+    log.save(ask("a1", 1_200, "r1"))
+    sync.rideSent("r1", ended.updatedAt)
+    assertEquals(SaveState.SAVED, records.list.first().single().saveState)
+    db.asks().writeMemo("a1", "また来たい", 5_000)
+    assertEquals(SaveState.UNSENT, records.list.first().single().saveState)
+    assertEquals("また来たい", records.asks("r1").first().single().memo)
+    sync.askMemoSent("a1", 5_000)
+    assertEquals(SaveState.SAVED, records.list.first().single().saveState)
   }
 }

@@ -2,6 +2,7 @@ package com.touringproject.v2.ride
 
 import com.touringproject.v2.location.Fix
 import com.touringproject.v2.location.acceptRoutePoint
+import com.touringproject.v2.records.memoFits
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
@@ -208,6 +209,39 @@ class RideController(private val deps: RideDeps) {
     }
     val ride = read("ride") { deps.store.ride(rideId) } ?: return@locked false
     save(ride.rename(clean, now))
+  }
+
+  /**
+   * SC-08 (and SC-02's 走行メモ): sets or, for null, removes any kept ride's memo. Returns false when the memo is too
+   * long, the ride is not kept, or the memo could not be written now. The same memo again changes nothing.
+   */
+  suspend fun memo(rideId: String, memo: String?): Boolean = locked {
+    if (!memoFits(memo)) return@locked false
+    val now = deps.now()
+    val active = activeRide.value
+    if (active?.id == rideId) {
+      if (active.memo == memo) return@locked true
+      val changed = active.withMemo(memo, now)
+      val saved = save(changed)
+      activeRide.value = changed
+      return@locked saved
+    }
+    val ride = read("ride") { deps.store.ride(rideId) } ?: return@locked false
+    if (ride.memo == memo) return@locked true
+    save(ride.withMemo(memo, now))
+  }
+
+  /**
+   * DL-01: removes an ended ride and all that belongs to it (US-D-06.002). The ride recording or paused cannot be
+   * deleted (slice 3 spec §2). A save of this ride still waiting is dropped, so it does not write the ride back.
+   */
+  suspend fun delete(rideId: String): Boolean = locked {
+    if (activeRide.value?.id == rideId) return@locked false
+    if (unsaved?.id == rideId) unsaved = null
+    var deleted = false
+    val written = write("delete") { deleted = deps.store.delete(rideId, deps.now()) }
+    if (written && deleted) deps.changed()
+    written && deleted
   }
 
   /**

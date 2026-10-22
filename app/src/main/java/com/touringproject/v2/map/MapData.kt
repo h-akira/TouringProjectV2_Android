@@ -12,8 +12,8 @@ import kotlinx.serialization.json.put
 
 data class LatLon(val lat: Double, val lon: Double)
 
-/** A numbered ask on the map; number is the ask's place in the ride's timeline. */
-data class MapPin(val askId: String, val number: Int, val at: LatLon)
+/** A numbered ask on the map; number is the ask's place in the ride's timeline. memo: the ask has a memo (US-D-04.005). */
+data class MapPin(val askId: String, val number: Int, val at: LatLon, val memo: Boolean = false)
 
 /**
  * routes has one line per recorded segment that has points; pauses joins the last point of a segment to the first
@@ -92,10 +92,11 @@ fun pinsJson(data: MapData, selected: String?): String = collection(
       point(pin.at),
       buildJsonObject {
         put("askId", pin.askId)
-        put("icon", pinIcon(pin.number, pin.askId == selected))
+        put("icon", pinIcon(pin.number, pin.askId == selected, pin.memo))
       },
     )
   },
 )
 
-fun pinIcon(number: Int, selected: Boolean): String = if (selected) "pin-sel-$number" else "pin-$number"
+fun pinIcon(number: Int, selected: Boolean, memo: Boolean = false): String =
+  (if (selected) "pin-sel-$number" else "pin-$number") + if (memo) "-memo" else ""

@@ -2,6 +2,7 @@ package com.touringproject.v2.ui
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,8 +24,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -94,7 +98,8 @@ fun RideListScreen(sections: List<RideSection>?, onRide: (String) -> Unit, modif
 private fun RideRow(row: RideRowUi, onRide: (String) -> Unit) {
   Column(Modifier.fillMaxWidth().clickable { onRide(row.id) }.padding(horizontal = 16.dp, vertical = 10.dp).testTag("ride-${row.id}")) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-      Text(row.name, Modifier.weight(1f), fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      Text(row.name, Modifier.weight(1f, fill = false), fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      if (row.memo) Text(" 📝", Modifier.weight(1f).testTag("rideMemoMark-${row.id}"), fontSize = 15.sp) else Spacer(Modifier.weight(1f))
       Text(
         row.state, Modifier.padding(start = 8.dp).testTag("state-${row.id}"), fontSize = 13.sp,
         color = if (row.saved) MaterialTheme.colorScheme.onSurfaceVariant else Accent,
@@ -113,12 +118,15 @@ data class RideDetailUi(
   val timeline: List<TimelineRow>,
   val map: MapData,
   val cards: Map<String, PinCardUi>,
+  /** The ride's memo (SC-06); null when it has none. */
+  val memo: String? = null,
 )
 
 /**
  * SC-06. The map can fill the screen (onFullMap tells AppUi to hide the tabs), its pins can be hidden (showPins is
  * kept in the settings), and a tapped pin shows its card above the map's bottom edge. onRename says whether the new
- * name was saved; one that was not is told (Android #46).
+ * name was saved; one that was not is told (Android #46). onMemo opens SC-08 for the ride's memo. An ended ride can be
+ * deleted after DL-01; onDelete says whether it was (slice 3 spec §7.4), and AppUi then goes back to SC-05.
  */
 @Composable
 fun RideDetailScreen(
@@ -131,7 +139,12 @@ fun RideDetailScreen(
   onRename: suspend (String) -> Boolean,
   onFullMap: (Boolean) -> Unit,
   modifier: Modifier = Modifier,
+  onMemo: () -> Unit = {},
+  onDelete: suspend () -> Boolean = { false },
 ) {
+  // Above the early return: a deletion in progress outlives the ride turning "not found" on screen (final review).
+  val scope = rememberCoroutineScope()
+  val context = LocalContext.current
   if (ui == null) {
     Column(modifier.fillMaxSize()) {
       TopBar("走行", onBack)
@@ -143,8 +156,7 @@ fun RideDetailScreen(
   var full by rememberSaveable { mutableStateOf(false) }
   var menu by rememberSaveable { mutableStateOf(false) }
   var renaming by rememberSaveable { mutableStateOf<String?>(null) }
-  val scope = rememberCoroutineScope()
-  val context = LocalContext.current
+  var deleting by rememberSaveable { mutableStateOf(false) }
   LaunchedEffect(full) { onFullMap(full) }
   DisposableEffect(Unit) { onDispose { onFullMap(false) } }
   BackHandler(enabled = full) { full = false }
@@ -177,6 +189,17 @@ fun RideDetailScreen(
               menu = false
               renaming = ui.name
             }, modifier = Modifier.testTag("renameRide"))
+            DropdownMenuItem(text = { Text("走行のメモ") }, onClick = {
+              menu = false
+              onMemo()
+            }, modifier = Modifier.testTag("rideMemoMenu"))
+            // The ride recording or paused is ended before it can be deleted (slice 3 spec §2).
+            if (!ui.recording) {
+              DropdownMenuItem(text = { Text("この走行を削除", color = Rec) }, onClick = {
+                menu = false
+                deleting = true
+              }, modifier = Modifier.testTag("deleteRide"))
+            }
           }
         }
       }
@@ -185,6 +208,7 @@ fun RideDetailScreen(
     if (!full) {
       LazyColumn(Modifier.fillMaxSize().testTag("timeline")) {
         item { Summary(ui.summary, ui.recording) }
+        item { MemoBox("走行のメモ", ui.memo, "＋ 走行のメモ", onMemo, "rideMemo") }
         item { Muted("時系列", Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp)) }
         if (ui.timeline.isEmpty()) item { Muted("この走行の記録中にした質問はありません。", Modifier.padding(horizontal = 16.dp)) }
         items(ui.timeline) { row -> TimelineItem(row, onAsk) }
@@ -212,6 +236,36 @@ fun RideDetailScreen(
       },
       dismissButton = { TextButton(onClick = { renaming = null }) { Text("やめる") } },
     )
+  }
+  if (deleting) {
+    DeleteDialog(
+      DeleteKind.RIDE,
+      onConfirm = {
+        deleting = false
+        scope.launch { if (!onDelete()) Toast.makeText(context, "削除できませんでした", Toast.LENGTH_SHORT).show() }
+      },
+      onDismiss = { deleting = false },
+    )
+  }
+}
+
+/** A memo in SC-06 and SC-07: its text under a heading, opening SC-08; without one, a button to write it (the mock). */
+@Composable
+private fun MemoBox(heading: String, memo: String?, add: String, onMemo: () -> Unit, tag: String) {
+  if (memo == null) {
+    FilledTonalButton(onClick = onMemo, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("${tag}Add")) { Text(add) }
+    return
+  }
+  Column(
+    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+      .clickable(onClick = onMemo).padding(12.dp).testTag(tag),
+    verticalArrangement = Arrangement.spacedBy(4.dp),
+  ) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+      Muted("📝 $heading", size = 13)
+      Text("編集", color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+    Text(memo, fontSize = 15.sp)
   }
 }
 
@@ -270,7 +324,7 @@ private fun TimelineItem(row: TimelineRow, onAsk: (String) -> Unit) {
         Text(row.number.toString(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
       }
       Column(Modifier.weight(1f)) {
-        Muted("${row.time} · ${row.place}", size = 13)
+        Muted("${row.time} · ${row.place}" + if (row.memo) " · 📝" else "", size = 13)
         Text(
           row.text, maxLines = 2, overflow = TextOverflow.Ellipsis,
           fontWeight = if (row.failed) FontWeight.Normal else FontWeight.Bold,
@@ -283,10 +337,24 @@ private fun TimelineItem(row: TimelineRow, onAsk: (String) -> Unit) {
 
 /**
  * SC-07. map is the ask's place on the faint route of its ride (null when the ask has no place). ‹ › move among the
- * ride's asks; the map is made again for each ask, so it opens on that ask.
+ * ride's asks; the map is made again for each ask, so it opens on that ask. onMemo opens SC-08 for its memo. The ask
+ * can be deleted after DL-01; onDelete says whether it was, and AppUi then goes back to SC-06 (slice 3 spec §7.4).
  */
 @Composable
-fun AskDetailScreen(detail: AskDetailUi?, map: MapData?, mapSlot: MapSlot, askId: String, onBack: () -> Unit, onMove: (String) -> Unit, modifier: Modifier = Modifier) {
+fun AskDetailScreen(
+  detail: AskDetailUi?,
+  map: MapData?,
+  mapSlot: MapSlot,
+  askId: String,
+  onBack: () -> Unit,
+  onMove: (String) -> Unit,
+  modifier: Modifier = Modifier,
+  onMemo: () -> Unit = {},
+  onDelete: suspend () -> Boolean = { false },
+) {
+  var deleting by rememberSaveable { mutableStateOf(false) }
+  val scope = rememberCoroutineScope()
+  val context = LocalContext.current
   Column(modifier.fillMaxSize()) {
     TopBar(detail?.title ?: "会話", onBack) {
       TextButton(onClick = { detail?.previous?.let(onMove) }, enabled = detail?.previous != null, modifier = Modifier.testTag("askPrev")) { Text("‹", fontSize = 24.sp) }
@@ -322,7 +390,23 @@ fun AskDetailScreen(detail: AskDetailUi?, map: MapData?, mapSlot: MapSlot, askId
           Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(12.dp).testTag("askAnswer"),
         )
       }
+      MemoBox("メモ", detail.memo, "＋ メモを追加", onMemo, "askMemo")
+      OutlinedButton(
+        onClick = { deleting = true },
+        modifier = Modifier.fillMaxWidth().testTag("deleteAsk"),
+        border = BorderStroke(1.dp, Rec),
+      ) { Text("この会話を削除", color = Rec, fontWeight = FontWeight.Bold) }
     }
+  }
+  if (deleting) {
+    DeleteDialog(
+      DeleteKind.ASK,
+      onConfirm = {
+        deleting = false
+        scope.launch { if (!onDelete()) Toast.makeText(context, "削除できませんでした", Toast.LENGTH_SHORT).show() }
+      },
+      onDismiss = { deleting = false },
+    )
   }
 }
 

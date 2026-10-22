@@ -10,7 +10,7 @@ import com.touringproject.v2.ride.Segment
 private fun RideStatus.column() = name.lowercase()
 private fun EndReason.column() = name.lowercase()
 
-fun Ride.toEntity() = RideEntity(id, name, status.column(), endReason?.column(), deadline, lastAliveAt, distanceMeters, updatedAt, null)
+fun Ride.toEntity() = RideEntity(id, name, status.column(), endReason?.column(), deadline, lastAliveAt, distanceMeters, updatedAt, null, memo = memo)
 
 fun RideEntity.toRide(segments: List<SegmentEntity>) = Ride(
   id = id,
@@ -22,6 +22,7 @@ fun RideEntity.toRide(segments: List<SegmentEntity>) = Ride(
   lastAliveAt = lastAliveAt,
   distanceMeters = distanceMeters,
   updatedAt = updatedAt,
+  memo = memo,
 )
 
 fun RoutePointEntity.toPoint() = RoutePoint(segment, t, lat, lon, accuracy)
@@ -40,4 +41,6 @@ class RoomRideStore(private val dao: RideDao) : RideStore {
     dao.addPoint(RoutePointEntity(rideId = rideId, segment = point.segment, t = point.t, lat = point.lat, lon = point.lon, accuracy = point.accuracy, chunk = null), distanceMeters, aliveAt)
 
   override suspend fun markAlive(rideId: String, at: Long) = dao.markAlive(rideId, at)
+
+  override suspend fun delete(rideId: String, at: Long): Boolean = dao.deleteEnded(rideId, at)
 }

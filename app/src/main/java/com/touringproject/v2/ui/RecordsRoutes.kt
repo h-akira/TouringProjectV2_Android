@@ -11,6 +11,7 @@ import com.touringproject.v2.map.LatLon
 import com.touringproject.v2.map.MapPin
 import com.touringproject.v2.map.RouteMap
 import com.touringproject.v2.map.rideMap
+import com.touringproject.v2.records.AskEdits
 import com.touringproject.v2.ride.Ride
 import com.touringproject.v2.ride.RideController
 import com.touringproject.v2.ride.RideStatus
@@ -50,6 +51,7 @@ fun rideDetailUi(ride: Ride, asks: List<AskRecord>, route: List<RoutePoint>, now
   timeline = rideTimeline(ride, asks, zone),
   map = rideMap(route, ride.status == RideStatus.ENDED, askPins(asks)),
   cards = asks.mapNotNull { pinCard(asks, it.askId, zone) }.associateBy { it.askId },
+  memo = ride.memo,
 )
 
 @Composable
@@ -62,6 +64,7 @@ fun RideDetailRoute(
   onBack: () -> Unit,
   onAsk: (String) -> Unit,
   onFullMap: (Boolean) -> Unit,
+  onMemo: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val ride = readRide(records, rideId) ?: return
@@ -80,6 +83,8 @@ fun RideDetailRoute(
     onRename = { name -> rides.rename(rideId, name) },
     onFullMap = onFullMap,
     modifier = modifier,
+    onMemo = onMemo,
+    onDelete = { rides.delete(rideId).also { if (it) onBack() } },
   )
 }
 
@@ -92,12 +97,38 @@ fun askMap(ask: AskRecord?, asks: List<AskRecord>, route: List<RoutePoint>, ende
 }
 
 @Composable
-fun AskDetailRoute(records: RoomRecords, rideId: String, askId: String, onBack: () -> Unit, onMove: (String) -> Unit, modifier: Modifier = Modifier) {
+fun AskDetailRoute(
+  records: RoomRecords,
+  edits: AskEdits,
+  rideId: String,
+  askId: String,
+  onBack: () -> Unit,
+  onMove: (String) -> Unit,
+  onMemo: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
   val ride = readRide(records, rideId) ?: return
   val asks = readAsks(records, rideId) ?: return
   val route = readRoute(records, rideId) ?: return
   val zone = ZoneId.systemDefault()
   val detail = remember(asks, askId) { askDetail(asks, askId, zone) }
   val map = remember(asks, route, askId, ride) { askMap(asks.firstOrNull { it.askId == askId }, asks, route, ride.value?.status == RideStatus.ENDED) }
-  AskDetailScreen(detail, map, routeMap, askId, onBack, onMove, modifier)
+  AskDetailScreen(detail, map, routeMap, askId, onBack, onMove, modifier, onMemo, onDelete = { edits.delete(askId).also { if (it) onBack() } })
+}
+
+/** SC-08 for a ride's memo, from SC-02 or SC-06. Nothing is drawn until the ride has been read, nor for a ride not kept. */
+@Composable
+fun RideMemoRoute(records: RoomRecords, rides: RideController, rideId: String, onClose: () -> Unit, modifier: Modifier = Modifier) {
+  val ride = readRide(records, rideId) ?: return
+  val kept = ride.value ?: return
+  MemoScreen("走行のメモ · ${kept.name}", kept.memo, { rides.memo(rideId, it) }, onClose, modifier)
+}
+
+/** SC-08 for an ask's memo, from SC-07. */
+@Composable
+fun AskMemoRoute(records: RoomRecords, edits: AskEdits, rideId: String, askId: String, onClose: () -> Unit, modifier: Modifier = Modifier) {
+  val asks = readAsks(records, rideId) ?: return
+  val ask = asks.firstOrNull { it.askId == askId } ?: return
+  val target = remember(asks, askId) { askMemoTarget(asks, askId, ZoneId.systemDefault()) } ?: return
+  MemoScreen(target, ask.memo, { edits.memo(askId, it) }, onClose, modifier)
 }
