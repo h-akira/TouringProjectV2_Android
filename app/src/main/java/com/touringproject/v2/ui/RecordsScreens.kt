@@ -349,7 +349,8 @@ private fun TimelineItem(row: TimelineRow, onAsk: (String) -> Unit, onNote: (Str
         Text(row.number.toString(), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
       }
       Column(Modifier.weight(1f)) {
-        Muted("${row.time} · ${row.place}" + if (row.memo) " · 📝" else "", size = 13)
+        // As the mock's timeline marks them: a memo, then an ask that never reached the Backend.
+        Muted("${row.time} · ${row.place}" + (if (row.memo) " · 📝" else "") + (if (row.unreached) " · 📵" else ""), size = 13)
         Text(
           row.text, maxLines = 2, overflow = TextOverflow.Ellipsis,
           fontWeight = if (row.failed) FontWeight.Normal else FontWeight.Bold,

@@ -201,7 +201,7 @@ fun askText(ask: AskRecord): String = if (ask.outcome == AskOutcome.OFFLINE) UNR
 
 sealed interface TimelineRow {
   data class Day(val label: String) : TimelineRow
-  /** memo: the ask has a memo (US-D-04.005). */
+  /** memo: the ask has a memo (US-D-04.005). unreached: it never reached the Backend (slice 4 spec §4.3, Android #65). */
   data class Ask(
     val askId: String,
     val number: Int,
@@ -210,6 +210,7 @@ sealed interface TimelineRow {
     val text: String,
     val failed: Boolean,
     val memo: Boolean = false,
+    val unreached: Boolean = false,
   ) : TimelineRow
   /** A point memo: its green number, when, where and the start of its text (the mock). */
   data class Note(val noteId: String, val number: Int, val time: String, val place: String, val text: String) : TimelineRow
@@ -271,7 +272,7 @@ fun rideTimeline(ride: Ride, asks: List<AskRecord>, zone: ZoneId, notes: List<No
         asked = true
         rows += TimelineRow.Ask(
           ask.askId, numbers.getValue(ask.askId), TIME.format(at(ask.askedAt, zone)), askPlace(ask), askText(ask),
-          ask.outcome != AskOutcome.ANSWERED, memo = ask.memo != null,
+          ask.outcome != AskOutcome.ANSWERED, memo = ask.memo != null, unreached = ask.outcome == AskOutcome.OFFLINE,
         )
       }
       is Event.PauseAt -> rows += TimelineRow.Pause(

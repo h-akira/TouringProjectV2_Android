@@ -275,6 +275,7 @@ class RecordLabelsTest {
     assertEquals(listOf("右手の山は？", UNREACHED_TEXT, UNREACHED_TEXT), rows.map { it.text })
     assertEquals(listOf("足柄下郡箱根町仙石原", "住所は送信後", "位置の記録なし"), rows.map { it.place })
     assertEquals(listOf(false, true, true), rows.map { it.failed })
+    assertEquals(listOf(false, true, true), rows.map { it.unreached })
     assertEquals("足柄下郡箱根町仙石原", askPlace(unreached("u1", 0, address = "神奈川県足柄下郡箱根町仙石原", sent = true)))
     assertEquals("場所不明", askPlace(unreached("u1", 0, sent = true)))
   }
