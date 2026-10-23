@@ -318,4 +318,68 @@ class ApiClientTest {
     assertEquals(ApiErrorKind.CONFLICT, error.kind)
     assertEquals(1, server.requestCount)
   }
+
+  // Slice 4 spec §6.2: every kind of record, values the Backend has not got as null, and whole numbers as numbers.
+  @Test
+  fun records_reads_each_kind_of_record() = runTest {
+    server.enqueue(
+      json(
+        200,
+        """{"items":[
+          {"kind":"ride","rideId":"r1","name":"箱根","status":"ended","segments":[{"startedAt":"2026-10-22T01:00:00Z","endedAt":"2026-10-22T02:00:00Z"}],"autoEnded":false,"updatedAt":"2026-10-22T02:00:00.123Z","memo":null},
+          {"kind":"route","rideId":"r1","seq":0,"points":[{"t":"2026-10-22T01:00:05Z","lat":35,"lon":139.5,"accuracy":null,"segment":0}]},
+          {"kind":"note","rideId":"r1","noteId":"n1","at":"2026-10-22T01:10:00Z","location":{"latitude":35.1,"longitude":139},"text":"展望","updatedAt":"2026-10-22T01:10:00Z","address":null,"headingDegrees":90},
+          {"kind":"ask","askId":"a1","status":"completed","askedAt":"2026-10-22T01:20:00Z","question":null,"transcript":"右手の山は","answer":"金時山です","error":null,"answeredAt":"2026-10-22T01:20:12Z","location":null,"address":"箱根町仙石原","headingDegrees":12.5,"inputType":"audio","conversationId":"c1","newConversation":true,"rideId":"r1","memo":null,"memoUpdatedAt":null,"updatedAt":null},
+          {"kind":"deleted","target":"note","id":"n2","rideId":"r1","deletedAt":"2026-10-22T03:00:00Z"}
+        ],"cursor":null}""",
+      ),
+    )
+    val page = client().records(null)
+    assertEquals(null, page.cursor)
+    assertEquals(
+      listOf(
+        CloudRide("r1", "箱根", "ended", listOf(SegmentBody("2026-10-22T01:00:00Z", "2026-10-22T02:00:00Z")), false, "2026-10-22T02:00:00.123Z", null),
+        CloudRoute("r1", 0, listOf(PointBody("2026-10-22T01:00:05Z", 35.0, 139.5, null, 0))),
+        CloudNote("r1", "n1", "2026-10-22T01:10:00Z", Point(35.1, 139.0), "展望", "2026-10-22T01:10:00Z", null, 90.0),
+        CloudAsk(
+          "a1", "completed", "2026-10-22T01:20:00Z", null, "右手の山は", "金時山です", null, "2026-10-22T01:20:12Z", null, "箱根町仙石原", 12.5,
+          "audio", "c1", true, "r1", null, null, null,
+        ),
+        CloudDeleted("note", "n2", "r1", "2026-10-22T03:00:00Z"),
+      ),
+      page.items,
+    )
+    val request = server.takeRequest()
+    assertEquals("GET /Prod/records", "${request.method} ${request.path}")
+    assertEquals("rider01", request.getHeader("x-user-name"))
+  }
+
+  // The cursor is opaque: it goes back as it came, whatever characters it has.
+  @Test
+  fun records_sends_the_cursor_back_and_tells_there_is_more() = runTest {
+    server.enqueue(json(200, """{"items":[],"cursor":"eyJw+IjoiIn0="}"""))
+    server.enqueue(json(200, """{"items":[],"cursor":null}"""))
+    val first = client().records(null)
+    assertEquals("eyJw+IjoiIn0=", first.cursor)
+    client().records(first.cursor)
+    server.takeRequest()
+    assertEquals("/Prod/records?cursor=eyJw%2BIjoiIn0%3D", server.takeRequest().path)
+  }
+
+  // A kind the device does not know yet is left out; a record of a known kind it cannot read fails the whole page.
+  @Test
+  fun records_leaves_out_unknown_kinds_and_fails_on_a_broken_record() = runTest {
+    server.enqueue(json(200, """{"items":[{"kind":"transcription","id":"t1"}],"cursor":null}"""))
+    server.enqueue(json(200, """{"items":[{"kind":"ride","rideId":"r1"}],"cursor":null}"""))
+    assertEquals(emptyList<CloudRecord>(), client().records(null).items)
+    assertTrue(runCatching { client().records(null) }.exceptionOrNull() is kotlinx.serialization.SerializationException)
+  }
+
+  @Test
+  fun records_retries_a_server_failure() = runTest {
+    server.enqueue(json(503))
+    server.enqueue(json(200, """{"items":[],"cursor":null}"""))
+    assertEquals(CloudPage(emptyList(), null), client().records(null))
+    assertEquals(2, server.requestCount)
+  }
 }
