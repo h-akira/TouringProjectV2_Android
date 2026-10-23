@@ -57,6 +57,7 @@ private class World {
   }
   var online = true
   var hasKey = true
+  var retries = 0
   var gate: CompletableDeferred<Unit>? = null
   var passes = 0
 
@@ -99,6 +100,9 @@ private class World {
     override suspend fun noteRefused(noteId: String, updatedAt: Long) {
       notes.getValue(noteId).refused = updatedAt
       calls += "refused:note/$noteId"
+    }
+    override suspend fun retryPlaces() {
+      retries += 1
     }
     override suspend fun unsentUnreached() =
       unreached.values.filter { (it.sent ?: -1) < it.ask.updatedAt && it.refused != it.ask.updatedAt }.map { it.ask }
@@ -523,6 +527,20 @@ class RideSyncTest {
     runCurrent()
     assertEquals(1, w.passes)
     read.cancel()
+    job.cancel()
+  }
+
+  // Android #67: the places the Backend could not tell are asked for again once per start, not on every pass.
+  @Test
+  fun places_left_unknown_are_asked_for_again_once_per_start() = runTest {
+    val w = World()
+    val job = launch { w.sync.run() }
+    runCurrent()
+    repeat(3) {
+      w.sync.request()
+      runCurrent()
+    }
+    assertEquals(1, w.retries)
     job.cancel()
   }
 }

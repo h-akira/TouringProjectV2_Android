@@ -223,4 +223,23 @@ class RoomSyncStoreTest {
     db.asks().upsert(db.asks().ask("u1")!!.copy(askId = "a1", status = "answered", updatedAt = null, sentUpdatedAt = null))
     assertEquals(emptyList<UnsentUnreached>(), store.unsentUnreached())
   }
+
+  // Android #67: what the Backend took without a place gets a newer version and goes again; the others stay as they are.
+  @Test
+  fun a_place_the_backend_could_not_tell_is_asked_for_again() = runBlocking {
+    val store = RoomSyncStore(dao, db.asks(), db.notes()) { 9_000 }
+    rides.save(ride)
+    keepNote("n1", "住所なし", 5_000)
+    keepNote("n2", "住所あり", 5_000)
+    db.notes().create(NoteEntity("n3", "r1", 1_500, null, null, null, null, null, "位置なし", 5_000, null, null, null, null))
+    keepNote("n4", "未送信", 5_000)
+    listOf("n1", "n3").forEach { store.noteSent(it, 5_000, null, null) }
+    store.noteSent("n2", 5_000, "静岡県御殿場市新橋", 90.0)
+    val log = RoomAskLog(db.asks(), MainScope()) { _, _ -> }
+    log.save(unreachedAsk("u1", 1_400, Fix(35.0, 139.0, 1_400, 5.0), null, "r1"))
+    store.unreachedSent("u1", 1_400, null, null)
+    store.retryPlaces()
+    assertEquals(listOf("n4" to 5_000L, "n1" to 9_000L), store.unsentNotes().map { it.id to it.updatedAt })
+    assertEquals(listOf("u1" to 9_000L), store.unsentUnreached().map { it.askId to it.updatedAt })
+  }
 }

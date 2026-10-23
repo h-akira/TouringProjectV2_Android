@@ -35,6 +35,7 @@ private val nothingToSend = object : SyncStore {
   override suspend fun unsentNotes() = emptyList<UnsentNote>()
   override suspend fun noteSent(noteId: String, updatedAt: Long, address: String?, headingDegrees: Double?) = Unit
   override suspend fun noteRefused(noteId: String, updatedAt: Long) = Unit
+  override suspend fun retryPlaces() = Unit
   override suspend fun unsentUnreached() = emptyList<UnsentUnreached>()
   override suspend fun unreachedSent(askId: String, updatedAt: Long, address: String?, headingDegrees: Double?) = Unit
   override suspend fun unreachedRefused(askId: String, updatedAt: Long) = Unit

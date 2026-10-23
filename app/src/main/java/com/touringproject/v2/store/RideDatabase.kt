@@ -502,6 +502,26 @@ interface RideDao {
   @Query("SELECT * FROM deletions ORDER BY deletedAt")
   suspend fun deletions(): List<DeletionEntity>
 
+  // Android #67: the Backend looks a place up again only for a newer version, so a point memo or an unreached ask it took
+  // without one is given a new version, and goes again.
+  @Query(
+    "UPDATE notes SET updatedAt = MAX(:now, updatedAt + 1) WHERE address IS NULL AND latitude IS NOT NULL AND " +
+      "sentUpdatedAt IS NOT NULL AND sentUpdatedAt >= updatedAt",
+  )
+  suspend fun retryNotePlaces(now: Long)
+
+  @Query(
+    "UPDATE asks SET updatedAt = MAX(:now, updatedAt + 1) WHERE status = 'offline' AND address IS NULL AND latitude IS NOT NULL AND " +
+      "sentUpdatedAt IS NOT NULL AND sentUpdatedAt >= updatedAt",
+  )
+  suspend fun retryUnreachedPlaces(now: Long)
+
+  @Transaction
+  suspend fun retryPlaces(now: Long) {
+    retryNotePlaces(now)
+    retryUnreachedPlaces(now)
+  }
+
   @Query("DELETE FROM deletions WHERE kind = :kind AND id = :id")
   suspend fun deletionSent(kind: String, id: String)
 

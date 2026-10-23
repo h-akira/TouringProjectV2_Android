@@ -88,6 +88,11 @@ interface SyncStore {
   suspend fun noteSent(noteId: String, updatedAt: Long, address: String?, headingDegrees: Double?)
   /** The Backend refused the point memo as of updatedAt (400); that version is not sent again. */
   suspend fun noteRefused(noteId: String, updatedAt: Long)
+  /**
+   * Gives the point memos and unreached asks the Backend took without a place a new version, so they go again and the
+   * Backend looks their place up again (Android #67).
+   */
+  suspend fun retryPlaces()
   suspend fun unsentUnreached(): List<UnsentUnreached>
   /** The Backend took the unreached ask as of updatedAt; address and headingDegrees are what it settled, null when it did not say. */
   suspend fun unreachedSent(askId: String, updatedAt: Long, address: String?, headingDegrees: Double?)
@@ -136,8 +141,12 @@ class RideSync(
     if (points % ROUTE_CHUNK_POINTS == 0) request()
   }
 
-  /** Runs the passes, one after another, until cancelled. */
+  /**
+   * Runs the passes, one after another, until cancelled. A place the Backend could not tell is asked for again once per
+   * start: often it was a lookup that failed for a while (Android #67); a place with no address at all costs one request.
+   */
   suspend fun run() {
+    read("retry_places") { store.retryPlaces() }
     for (request in requests) pass()
   }
 
