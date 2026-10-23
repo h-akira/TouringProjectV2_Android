@@ -103,7 +103,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val routeSource: RouteSource = FusedRouteSource(context)
   private val database = RideDatabase.open(context)
   val rideStore = RoomRideStore(database.rides())
-  val askLog = RoomAskLog(database.asks(), scope) { message, e -> Log.w("trv2.ask", message, e) }
+  // sync is made below; it is read only when an unreached ask has been written.
+  val askLog = RoomAskLog(database.asks(), scope, unreachedKept = { sync.request() }) { message, e -> Log.w("trv2.ask", message, e) }
   /** What the Records tab reads (SC-05, SC-06, SC-07). */
   val records = RoomRecords(database.rides(), database.asks(), database.notes())
 

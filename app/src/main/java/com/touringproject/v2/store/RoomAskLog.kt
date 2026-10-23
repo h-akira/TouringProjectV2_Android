@@ -39,9 +39,15 @@ fun AskRecord.toEntity() = AskEntity(
 
 /**
  * Keeps asks in Room without holding up the ask loop. A failed write is logged and shown, like a ride's (slice 2 spec
- * §8); so is an ask dropped because its ride is not kept, without a throwable (Android #58).
+ * §8); so is an ask dropped because its ride is not kept, without a throwable (Android #58). An unreached ask written
+ * is something new to send (unreachedKept): the network may still be there, the Backend having failed (Android #64).
  */
-class RoomAskLog(private val dao: AskDao, private val scope: CoroutineScope, private val log: (String, Throwable?) -> Unit) : AskLog {
+class RoomAskLog(
+  private val dao: AskDao,
+  private val scope: CoroutineScope,
+  private val unreachedKept: () -> Unit = {},
+  private val log: (String, Throwable?) -> Unit,
+) : AskLog {
   private val failing = MutableStateFlow(false)
   /** True once an ask could not be written, until the rider closes the band or the next ask is written (Android #28). */
   val failed: StateFlow<Boolean> = failing.asStateFlow()
@@ -66,6 +72,7 @@ class RoomAskLog(private val dao: AskDao, private val scope: CoroutineScope, pri
         return
       }
       failing.value = false
+      if (record.outcome == AskOutcome.OFFLINE) unreachedKept()
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
