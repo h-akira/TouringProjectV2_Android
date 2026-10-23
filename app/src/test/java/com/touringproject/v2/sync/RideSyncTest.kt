@@ -134,7 +134,8 @@ private class World {
     }
   }
 
-  val sync = RideSync(store, { if (hasKey) api else null }, { online }) { _, _ -> }
+  var saves = 0
+  val sync = RideSync(store, { if (hasKey) api else null }, { online }, saved = { saves += 1 }) { _, _ -> }
 }
 
 class RideSyncTest {
@@ -475,5 +476,53 @@ class RideSyncTest {
     w.online = true
     w.sync.pass()
     assertEquals(listOf("ride/r1:recording", "route/r1/0:300", "unreached/u1:r1"), w.calls)
+  }
+
+  // Slice 4 spec §7.1: a pass that ran to its end is SC-14's last save, even with nothing to send; one cut short is not.
+  @Test
+  fun only_a_pass_that_ran_to_its_end_counts_as_saved() = runTest {
+    val w = World()
+    w.sync.pass()
+    assertEquals(1, w.saves)
+    w.add(recording.end(5_000, EndReason.MANUAL, 5_000), points = 10)
+    w.fail["route/r1/0:10"] = ApiErrorKind.NETWORK
+    w.sync.pass()
+    w.online = false
+    w.sync.pass()
+    w.online = true
+    w.hasKey = false
+    w.sync.pass()
+    assertEquals(1, w.saves)
+  }
+
+  @Test
+  fun sending_is_told_while_a_pass_talks_to_the_backend() = runTest {
+    val w = World()
+    w.gate = CompletableDeferred()
+    val job = launch { w.sync.pass() }
+    runCurrent()
+    assertTrue(w.sync.sending.value)
+    w.gate!!.complete(Unit)
+    runCurrent()
+    assertEquals(false, w.sync.sending.value)
+    job.cancel()
+  }
+
+  // Slice 4 spec §6.3: while the cloud's records are read in, no pass runs; the triggers meanwhile make one after.
+  @Test
+  fun no_pass_runs_while_records_are_read_in() = runTest {
+    val w = World()
+    val job = launch { w.sync.run() }
+    val reading = CompletableDeferred<Unit>()
+    val read = launch { w.sync.withoutPasses { reading.await() } }
+    runCurrent()
+    w.sync.request()
+    runCurrent()
+    assertEquals(0, w.passes)
+    reading.complete(Unit)
+    runCurrent()
+    assertEquals(1, w.passes)
+    read.cancel()
+    job.cancel()
   }
 }

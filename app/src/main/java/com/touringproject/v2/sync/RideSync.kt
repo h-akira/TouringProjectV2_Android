@@ -13,12 +13,17 @@ import com.touringproject.v2.ride.RoutePoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerializationException
 
 /** A ride that may have something left to send, with what the Backend already has of it. */
@@ -100,6 +105,7 @@ private enum class Reply { TAKEN, REFUSED, GONE }
  * before the memos, so a memo on one finds its ask at the Backend. Passes run one at a time; the ones asked for while
  * a pass runs fold into one more. A failure other than a refusal ends the pass, and the next trigger tries again;
  * there is no timer of its own. Without a network a pass does not try at all: the network coming back is a trigger.
+ * While the cloud's records are read in, no pass runs (slice 4 spec §6.3).
  */
 class RideSync(
   private val store: SyncStore,
@@ -107,10 +113,17 @@ class RideSync(
   private val api: () -> RideApi?,
   /** Whether the device has a network now (slice 4 spec §5.2). */
   private val online: () -> Boolean = { true },
+  /** A pass ran to its end, nothing it tried having failed: SC-14's 最後に保存した時刻 (slice 4 spec §7.1). */
+  private val saved: suspend () -> Unit = {},
   private val log: (event: String, data: Map<String, Any?>) -> Unit,
 ) {
   private val requests = Channel<Unit>(Channel.CONFLATED)
   private var points = 0
+  private val passing = Mutex()
+  private val sendingNow = MutableStateFlow(false)
+
+  /** True while a pass talks to the Backend (SC-14's 今すぐ保存 waits for it). */
+  val sending: StateFlow<Boolean> = sendingNow.asStateFlow()
 
   /** A trigger: something changed, the app came to the front, it started, or the key or user name changed. Safe from any thread. */
   fun request() {
@@ -128,29 +141,47 @@ class RideSync(
     for (request in requests) pass()
   }
 
-  suspend fun pass() {
-    if (!online()) return
-    val client = api() ?: return
-    val deletions = read("deletions") { store.deletions() } ?: return
+  suspend fun pass() = passing.withLock {
+    if (!online()) return@withLock
+    val client = api() ?: return@withLock
+    sendingNow.value = true
+    val done = try {
+      send(client)
+    } finally {
+      sendingNow.value = false
+    }
+    if (done) saved()
+  }
+
+  /**
+   * Runs block with no pass under way or begun meanwhile (slice 4 spec §6.3): one under way finishes first, and the
+   * triggers that come meanwhile wait until block is done.
+   */
+  suspend fun <T> withoutPasses(block: suspend () -> T): T = passing.withLock { block() }
+
+  // False when something failed and the pass ended early.
+  private suspend fun send(client: RideApi): Boolean {
+    val deletions = read("deletions") { store.deletions() } ?: return false
     for (deletion in deletions) {
-      if (!attempt(deletion.id) { sendDeletion(client, deletion) }) return
+      if (!attempt(deletion.id) { sendDeletion(client, deletion) }) return false
     }
-    val rides = read("unsent") { store.unsent() } ?: return
+    val rides = read("unsent") { store.unsent() } ?: return false
     for (unsent in rides) {
-      if (!attempt(unsent.ride.id) { sendRide(client, unsent) }) return
+      if (!attempt(unsent.ride.id) { sendRide(client, unsent) }) return false
     }
-    val notes = read("notes") { store.unsentNotes() } ?: return
+    val notes = read("notes") { store.unsentNotes() } ?: return false
     for (note in notes) {
-      if (!attempt(note.id) { sendNote(client, note) }) return
+      if (!attempt(note.id) { sendNote(client, note) }) return false
     }
-    val unreached = read("unreached") { store.unsentUnreached() } ?: return
+    val unreached = read("unreached") { store.unsentUnreached() } ?: return false
     for (ask in unreached) {
-      if (!attempt(ask.askId) { sendUnreached(client, ask) }) return
+      if (!attempt(ask.askId) { sendUnreached(client, ask) }) return false
     }
-    val memos = read("ask_memos") { store.unsentAskMemos() } ?: return
+    val memos = read("ask_memos") { store.unsentAskMemos() } ?: return false
     for (memo in memos) {
-      if (!attempt(memo.askId) { sendAskMemo(client, memo) }) return
+      if (!attempt(memo.askId) { sendAskMemo(client, memo) }) return false
     }
+    return true
   }
 
   private suspend fun <T> read(op: String, block: suspend () -> T): T? = try {
