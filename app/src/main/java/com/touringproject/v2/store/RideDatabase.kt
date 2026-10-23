@@ -355,6 +355,18 @@ data class RideRow(
   val unreachedLeft: Boolean,
 )
 
+// What SC-14 counts (SaveSummary): what the next pass would send, but the recording ride's, and all that is kept.
+private const val SUMMARY = "SELECT (SELECT COUNT(*) FROM asks WHERE status = 'offline' AND (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
+  "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt)) AS unreached, " +
+  "(SELECT COUNT(*) FROM rides WHERE status != 'recording' AND ((sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
+  "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt) OR " +
+  "EXISTS (SELECT 1 FROM route_points WHERE chunk IS NULL AND route_points.rideId = rides.id))) AS unsentRides, " +
+  "(SELECT COUNT(*) FROM notes WHERE (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
+  "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt)) AS notes, " +
+  "(SELECT COUNT(*) FROM asks WHERE memoUpdatedAt IS NOT NULL AND (memoSentUpdatedAt IS NULL OR memoSentUpdatedAt < memoUpdatedAt) AND " +
+  "(memoRejectedUpdatedAt IS NULL OR memoRejectedUpdatedAt != memoUpdatedAt)) AS memos, " +
+  "(SELECT COUNT(*) FROM deletions) AS deletions, (SELECT COUNT(*) FROM rides) AS rides, (SELECT COUNT(*) FROM asks) AS asks"
+
 @Dao
 interface RideDao {
   @Query("SELECT * FROM rides WHERE status != 'ended' LIMIT 1")
@@ -385,19 +397,13 @@ interface RideDao {
   @Query("SELECT * FROM rides WHERE id = :id")
   fun watch(id: String): Flow<RideWithSegments?>
 
-  @Query(
-    "SELECT (SELECT COUNT(*) FROM asks WHERE status = 'offline' AND (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
-      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt)) AS unreached, " +
-      "(SELECT COUNT(*) FROM rides WHERE status != 'recording' AND ((sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
-      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt) OR " +
-      "EXISTS (SELECT 1 FROM route_points WHERE chunk IS NULL AND route_points.rideId = rides.id))) AS unsentRides, " +
-      "(SELECT COUNT(*) FROM notes WHERE (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
-      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt)) AS notes, " +
-      "(SELECT COUNT(*) FROM asks WHERE memoUpdatedAt IS NOT NULL AND (memoSentUpdatedAt IS NULL OR memoSentUpdatedAt < memoUpdatedAt) AND " +
-      "(memoRejectedUpdatedAt IS NULL OR memoRejectedUpdatedAt != memoUpdatedAt)) AS memos, " +
-      "(SELECT COUNT(*) FROM deletions) AS deletions, (SELECT COUNT(*) FROM rides) AS rides, (SELECT COUNT(*) FROM asks) AS asks",
-  )
+  /** SC-14 (slice 4 spec §7.1). */
+  @Query(SUMMARY)
   fun summary(): Flow<SaveSummary>
+
+  /** What is left to send now, read once: a user name is not changed while there is any (US-E-06.008). */
+  @Query(SUMMARY)
+  suspend fun summaryNow(): SaveSummary
 
   @Upsert
   suspend fun upsertRide(ride: RideEntity)
@@ -522,6 +528,66 @@ interface RideDao {
   }
 }
 
+data class KeptRideRow(val id: String, val updatedAt: Long, val points: Int)
+
+data class NoteVersion(val id: String, val updatedAt: Long)
+
+data class AskVersion(val askId: String, val updatedAt: Long?, val memoUpdatedAt: Long?)
+
+/** Reading the cloud's records in (slice 4 spec §6.3): what the merge reads of the device, and what it writes. */
+@Dao
+interface TakeoverDao {
+  @Query("SELECT COUNT(*) FROM rides WHERE status != 'ended'")
+  suspend fun activeRides(): Int
+
+  @Query("SELECT id, updatedAt, (SELECT COUNT(*) FROM route_points WHERE route_points.rideId = rides.id) AS points FROM rides")
+  suspend fun rides(): List<KeptRideRow>
+
+  @Query("SELECT id, updatedAt FROM notes")
+  suspend fun notes(): List<NoteVersion>
+
+  @Query("SELECT askId, updatedAt, memoUpdatedAt FROM asks")
+  suspend fun asks(): List<AskVersion>
+
+  @Query("DELETE FROM route_points")
+  suspend fun clearPoints()
+
+  @Query("DELETE FROM ride_segments")
+  suspend fun clearSegments()
+
+  @Query("DELETE FROM notes")
+  suspend fun clearNotes()
+
+  @Query("DELETE FROM asks")
+  suspend fun clearAsks()
+
+  @Query("DELETE FROM deletions")
+  suspend fun clearDeletions()
+
+  @Query("DELETE FROM rides")
+  suspend fun clearRides()
+
+  /** Another user's records: nothing of this one's stays, its deletions not yet sent included. */
+  @Transaction
+  suspend fun clearAll() {
+    clearPoints()
+    clearSegments()
+    clearNotes()
+    clearAsks()
+    clearDeletions()
+    clearRides()
+  }
+
+  @Insert
+  suspend fun insertPoints(points: List<RoutePointEntity>)
+
+  @Query("UPDATE rides SET distanceMeters = :distanceMeters WHERE id = :rideId")
+  suspend fun setDistance(rideId: String, distanceMeters: Double)
+
+  @Upsert
+  suspend fun upsertNote(note: NoteEntity)
+}
+
 @Database(
   entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class, NoteEntity::class, DeletionEntity::class],
   version = 6,
@@ -531,6 +597,7 @@ abstract class RideDatabase : RoomDatabase() {
   abstract fun rides(): RideDao
   abstract fun asks(): AskDao
   abstract fun notes(): NoteDao
+  abstract fun takeover(): TakeoverDao
 
   companion object {
     fun open(context: Context): RideDatabase =
