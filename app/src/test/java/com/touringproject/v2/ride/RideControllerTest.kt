@@ -797,6 +797,24 @@ class RideControllerTest {
     assertNull(w.stored().memo)
   }
 
+  // Android #66: with the failed memo dropped, nothing waits to be written, so the home band goes; a waiting change keeps it.
+  @Test
+  fun the_band_goes_with_the_failed_memo_unless_a_change_still_waits() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 5_000
+    w.controller.end("箱根")
+    w.failSaves = 1
+    assertFalse(w.controller.memo("r1", "書けない"))
+    assertFalse(w.controller.storeFailed.value)
+    w.failSaves = 1
+    assertFalse(w.controller.rename("r1", "御殿場"))
+    w.failSaves = 2
+    assertFalse(w.controller.memo("r1", "これも書けない"))
+    assertTrue(w.controller.storeFailed.value)
+  }
+
   @Test
   fun the_active_rides_memo_that_could_not_be_written_is_neither_shown_nor_written_later() = runTest {
     val w = World()
