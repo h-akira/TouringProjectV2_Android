@@ -240,6 +240,7 @@ fun AppUi(graph: AppGraph) {
                 val sending by graph.sync.sending.collectAsStateWithLifecycle()
                 val take by graph.takeover.state.collectAsStateWithLifecycle()
                 val recordings by graph.recordingCheck.items.collectAsStateWithLifecycle()
+                DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
                 DataScreen(
                   DataUi(
                     summary = summary ?: SaveSummary(),
@@ -292,7 +293,24 @@ fun AppUi(graph: AppGraph) {
                 )
               }
               entry<UserKey> {
-                UserScreen(current.userName, { name -> scope.launch { graph.settings.update(current.copy(userName = name)) } }, Modifier.safeDrawingPadding())
+                val summary by graph.saveSummary.collectAsStateWithLifecycle()
+                val take by graph.takeover.state.collectAsStateWithLifecycle()
+                DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
+                // The write checks again in its own transaction (US-E-06.008); a change still waiting to be written counts.
+                val block = when {
+                  ride != null -> UserBlock.RIDE
+                  (summary?.unsent ?: 0) > 0 || storeFailed -> UserBlock.UNSENT
+                  else -> null
+                }
+                UserScreen(
+                  current.userName, block,
+                  reading = take.running != null,
+                  message = take.result?.takeIf { take.last == TakeOp.SWITCH }?.let(::switchMessage),
+                  peek = graph.takeover::peek,
+                  onChange = { peek -> graph.takeover.switchTo(peek, graph::switchedTo) },
+                  onData = { tabs.push(DataKey) },
+                  modifier = Modifier.safeDrawingPadding(),
+                )
               }
               entry<ReturnAppKey> {
                 var apps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }

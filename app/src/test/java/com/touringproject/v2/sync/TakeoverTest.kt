@@ -159,4 +159,19 @@ class TakeoverTest {
     assertEquals(1, c.taken.size)
     passes.cancel()
   }
+
+  @Test
+  fun a_result_seen_goes_but_a_read_under_way_stays() = runTest {
+    val c = Cloud(this)
+    c.pages["rider01"] = mapOf(null to CloudPage(emptyList(), null))
+    c.gate = CompletableDeferred()
+    c.takeover.reread("rider01")
+    c.takeover.seen()
+    assertEquals(TakeOp.REREAD, c.takeover.state.value.running)
+    c.gate!!.complete(Unit)
+    runCurrent()
+    assertEquals(TakeResult.Done(2), c.takeover.state.value.result)
+    c.takeover.seen()
+    assertEquals(TakeState(), c.takeover.state.value)
+  }
 }

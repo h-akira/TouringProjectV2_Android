@@ -8,6 +8,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 // Reading the user's records back from the cloud (slice 4 spec §6, adr/0010): when the user name changes, and when SC-14
@@ -61,6 +62,11 @@ class Takeover(
 ) {
   private val stateNow = MutableStateFlow(TakeState())
   val state: StateFlow<TakeState> = stateNow.asStateFlow()
+
+  /** The screen that told the last result has gone, so the next visit starts without it; a read under way is kept. */
+  fun seen() {
+    stateNow.update { if (it.running == null) TakeState() else it }
+  }
 
   /** null when the page could not be read. */
   suspend fun peek(userName: String): Peek? = try {

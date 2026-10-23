@@ -321,6 +321,15 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   }
 
   /**
+   * A change of user name has read the new name's records in (slice 4 spec §6.4): the name is saved, and the
+   * conversation ends, since the Agent keeps one per user name. SC-12's recordings are the device's and stay.
+   */
+  suspend fun switchedTo(userName: String) {
+    settings.update(settings.current().copy(userName = userName))
+    conversation.reset()
+  }
+
+  /**
    * True once per process: the first activity of this process asks for permissions, whether it starts fresh or is
    * restored after process death (Android #38). An activity recreated in the same process does not ask again.
    */

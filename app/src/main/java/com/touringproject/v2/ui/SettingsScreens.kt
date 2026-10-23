@@ -49,6 +49,7 @@ import com.touringproject.v2.settings.USER_NAME_RE
 import com.touringproject.v2.settings.VOLUME_DB_CHOICES
 import com.touringproject.v2.settings.maskKey
 import com.touringproject.v2.settings.withRecentApp
+import com.touringproject.v2.sync.Peek
 import kotlinx.coroutines.launch
 
 private val Blue = Color(0xFF1F4FD1)
@@ -305,36 +306,90 @@ fun ConnectionScreen(
   }
 }
 
-// SC-18
+/** Why the user name cannot change now (slice 4 spec §6.4, US-E-06.008). */
+enum class UserBlock(val message: String) {
+  RIDE("走行を終えてから変えられます"),
+  UNSENT("未送信の記録があります。先に「データの保存」で送ってください"),
+}
+
+/**
+ * SC-18. peek reads the new name's first page (null when it cannot), and DL-03 tells from it whether the name has
+ * records (slice 4 spec §6.4). onChange starts the change after DL-03; reading is true while a read of the cloud is under
+ * way, and message is what the last change came to.
+ */
 @Composable
-fun UserScreen(userName: String, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
+fun UserScreen(
+  userName: String,
+  block: UserBlock?,
+  reading: Boolean,
+  message: String?,
+  peek: suspend (String) -> Peek?,
+  onChange: (Peek) -> Unit,
+  onData: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val scope = rememberCoroutineScope()
   // Saveable, so a name being typed survives a trip to another tab (Android #34).
   var input by rememberSaveable { mutableStateOf("") }
-  var error by remember { mutableStateOf(false) }
-  var confirming by remember { mutableStateOf<String?>(null) }
-  Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+  var error by remember { mutableStateOf<String?>(null) }
+  var checking by remember { mutableStateOf(false) }
+  var confirming by remember { mutableStateOf<Peek?>(null) }
+  Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
     Text("今のユーザー名", color = Color(0xFF666666), fontSize = 16.sp)
     Text(userName, fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-    Text("別の端末に記録を引き継ぐときに使います。控えておいてください。", color = Color(0xFF666666), fontSize = 14.sp)
+    Text("記録はユーザー名ごとに分かれます。別の端末で同じユーザー名を設定すると、記録を引き継げます。控えておいてください。", color = Color(0xFF666666), fontSize = 14.sp)
     OutlinedTextField(input, { input = it }, Modifier.fillMaxWidth().testTag("userInput"), placeholder = { Text("新しいユーザー名") }, singleLine = true)
-    if (error) Text("英小文字と数字の3〜20文字にしてください", color = Red, modifier = Modifier.testTag("userError"))
+    error?.let { Text(it, color = Red, modifier = Modifier.testTag("userError")) }
     Button(
       onClick = {
         val name = input.trim()
-        error = !USER_NAME_RE.matches(name)
-        if (!error) confirming = name
+        error = when {
+          !USER_NAME_RE.matches(name) -> "英小文字と数字の3〜20文字にしてください"
+          name == userName -> "今のユーザー名と同じです"
+          else -> null
+        }
+        if (error != null) return@Button
+        checking = true
+        scope.launch {
+          val peeked = peek(name)
+          checking = false
+          if (peeked == null) error = "読み込めませんでした" else confirming = peeked
+        }
       },
+      enabled = block == null && !reading && !checking,
       modifier = Modifier.fillMaxWidth().testTag("changeUser"),
       colors = ButtonDefaults.buttonColors(containerColor = Blue),
-    ) { Text("変更する", fontSize = 18.sp) }
+    ) { Text(if (reading || checking) "読み込んでいます…" else "変更する", fontSize = 18.sp) }
+    block?.let { Text(it.message, modifier = Modifier.testTag("userBlock")) }
+    if (block == UserBlock.UNSENT) TextButton(onClick = onData, modifier = Modifier.testTag("toData")) { Text("データの保存へ") }
+    message?.let { Text(it, modifier = Modifier.testTag("userMessage")) }
+    Text(
+      "変えると、今の記録は引き継がれず、新しいユーザー名の記録が表示されます。今の記録は消えず、元のユーザー名に戻せばまた見られます。",
+      color = Color(0xFF666666),
+      fontSize = 14.sp,
+    )
   }
-  // DL-03
-  confirming?.let { name ->
+  // DL-03: worded by whether the new name has records (the mock's two states).
+  confirming?.let { peeked ->
+    val name = peeked.userName
     AlertDialog(
       onDismissRequest = { confirming = null },
-      title = { Text("「$name」に変えますか？") },
-      text = { Text("今の記録は引き継ぎません。元の名前に戻せば、また見られます。同じ名前の記録が既にあれば、その記録に切り替わります。") },
-      confirmButton = { TextButton(onClick = { confirming = null; input = ""; onChange(name) }) { Text("変える") } },
+      title = { Text(if (peeked.exists) "既にあるユーザー名です" else "ユーザー名を変えますか？") },
+      text = {
+        Text(
+          if (peeked.exists) {
+            "「$name」の記録が既にあります。このユーザー名に切り替えると、その記録が表示されます。今の「$userName」の記録は引き継がれません。元のユーザー名に戻せば、また見られます。"
+          } else {
+            "「$name」は新しいユーザー名です。今の「$userName」の記録は引き継がれず、記録が空の状態から始まります。元のユーザー名に戻せば、今の記録はまた見られます。"
+          },
+          modifier = Modifier.testTag("userDialogText"),
+        )
+      },
+      confirmButton = {
+        TextButton(onClick = { confirming = null; input = ""; onChange(peeked) }, Modifier.testTag("confirmUser")) {
+          Text(if (peeked.exists) "切り替える" else "変更する")
+        }
+      },
       dismissButton = { TextButton(onClick = { confirming = null }) { Text("やめる") } },
     )
   }
