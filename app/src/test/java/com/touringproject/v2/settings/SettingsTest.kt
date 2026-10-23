@@ -183,3 +183,28 @@ class ApiKeyStoreTest {
     assertEquals("old-key", ApiKeyStore(store, cipher).load())
   }
 }
+
+class LastSavedTest {
+  @Test
+  fun the_last_save_is_kept_beside_the_settings() = runTest {
+    val store = FakeStore()
+    LastSaved(store).mark(1_700_000_000_000)
+    val again = LastSaved(store)
+    assertEquals(null, again.at.value)
+    again.load()
+    assertEquals(1_700_000_000_000, again.at.value)
+  }
+
+  @Test
+  fun a_store_that_cannot_be_read_leaves_it_unknown() = runTest {
+    val broken = object : KeyValueStore {
+      override suspend fun get(key: String): String? = throw java.io.IOException("corrupt")
+      override suspend fun set(key: String, value: String?) = throw java.io.IOException("read-only")
+    }
+    val saved = LastSaved(broken) { _, _ -> }
+    saved.load()
+    assertEquals(null, saved.at.value)
+    saved.mark(5)
+    assertEquals(5L, saved.at.value)
+  }
+}

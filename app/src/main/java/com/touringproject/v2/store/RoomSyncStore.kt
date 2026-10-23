@@ -9,7 +9,12 @@ import com.touringproject.v2.sync.UnsentAskMemo
 import com.touringproject.v2.sync.UnsentNote
 import com.touringproject.v2.sync.UnsentUnreached
 
-class RoomSyncStore(private val dao: RideDao, private val asks: AskDao, private val notes: NoteDao) : SyncStore {
+class RoomSyncStore(
+  private val dao: RideDao,
+  private val asks: AskDao,
+  private val notes: NoteDao,
+  private val now: () -> Long = System::currentTimeMillis,
+) : SyncStore {
   override suspend fun unsent(): List<Unsent> = dao.unsentSnapshot().map {
     Unsent(it.ride.toRide(it.segments), it.ride.sentUpdatedAt, it.ride.rejectedUpdatedAt, it.sentPoints, it.totalPoints)
   }
@@ -55,4 +60,6 @@ class RoomSyncStore(private val dao: RideDao, private val asks: AskDao, private 
     asks.markUnreachedSent(askId, updatedAt, address, headingDegrees)
 
   override suspend fun unreachedRefused(askId: String, updatedAt: Long) = asks.markUnreachedRefused(askId, updatedAt)
+
+  override suspend fun retryPlaces() = dao.retryPlaces(now())
 }

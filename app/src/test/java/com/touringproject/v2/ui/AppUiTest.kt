@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.touringproject.v2.MainActivity
@@ -35,12 +36,22 @@ class AppUiTest {
   @Test
   fun back_goes_back_within_settings_then_to_home() {
     rule.onNodeWithTag("tab-SETTINGS").performClick()
-    rule.onNodeWithText("回答の音量").performClick()
+    rule.onNodeWithText("回答の音量").performScrollTo().performClick()
     rule.onNodeWithText("回答の音声を上げる量").assertExists()
     back()
     rule.onNodeWithText("走行の記録").assertExists()
     back()
     rule.onNodeWithTag("tapToTalk").assertExists()
+  }
+
+  // Slice 4 spec §7.1: SC-14 opens from the settings, and with nothing kept all is saved.
+  @Test
+  fun the_data_screen_opens_from_the_settings() {
+    rule.onNodeWithTag("tab-SETTINGS").performClick()
+    rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasText("保存済み")).fetchSemanticsNodes().isNotEmpty() }
+    rule.onNodeWithText("☁️ データの保存").performClick()
+    rule.onNodeWithTag("saveState").assertExists()
+    rule.onNodeWithText("クラウドから読み直す").assertExists()
   }
 
   @Test

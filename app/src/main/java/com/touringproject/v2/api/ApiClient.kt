@@ -14,6 +14,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resumeWithException
 
@@ -162,7 +163,7 @@ class ApiClient(
   private val maxAttempts: Int = 3,
   timeoutMs: Long = 15_000,
   private val retryDelay: suspend (Long) -> Unit = { delay(it) },
-) : AskApi, RideApi, TranscriptionApi {
+) : AskApi, RideApi, TranscriptionApi, RecordsApi {
   private val baseUrl = baseUrl.trimEnd('/')
   // callTimeout bounds the whole exchange, so a stalled connection cannot hang the ask.
   private val http = http.newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS).build()
@@ -214,6 +215,12 @@ class ApiClient(
 
   override suspend fun deleteNote(rideId: String, noteId: String) {
     request("DELETE", "/rides/$rideId/notes/$noteId", null, TRANSIENT)
+  }
+
+  override suspend fun records(cursor: String?): CloudPage {
+    val query = cursor?.let { "?cursor=" + URLEncoder.encode(it, "UTF-8") } ?: ""
+    val page = json.decodeFromString(RecordsPageBody.serializer(), request("GET", "/records$query", null, TRANSIENT))
+    return CloudPage(page.items.mapNotNull { cloudRecord(json, it) }, page.cursor)
   }
 
   suspend fun checkKey() {

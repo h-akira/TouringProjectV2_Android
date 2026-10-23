@@ -13,9 +13,12 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.touringproject.v2.api.CloudDeleted
+import com.touringproject.v2.api.CloudPage
 import com.touringproject.v2.ask.FlowState
 import com.touringproject.v2.ask.Phase
 import com.touringproject.v2.ask.RecordingMeta
@@ -24,10 +27,13 @@ import com.touringproject.v2.audio.MediaVolume
 import com.touringproject.v2.recordings.TRIAL_IDLE
 import com.touringproject.v2.recordings.TrialPhase
 import com.touringproject.v2.recordings.TrialState
+import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.Settings
+import com.touringproject.v2.sync.Peek
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -202,18 +208,125 @@ class SettingsScreensTest {
   @get:Rule val rule = createComposeRule()
   private val maps = LaunchableApp("com.google.android.apps.maps", "マップ")
 
+  private fun peeked(name: String, exists: Boolean) =
+    Peek(name, CloudPage(if (exists) listOf(CloudDeleted("note", "n1", "r1", "2026-10-22T03:00:00Z")) else emptyList(), null))
+
   @Test
-  fun an_invalid_user_name_is_refused_and_a_valid_one_is_confirmed() {
-    val changed = mutableListOf<String>()
-    rule.setContent { UserScreen("rider01", { changed += it }) }
+  fun an_unusable_user_name_is_refused_before_anything_is_read() {
+    val peeks = mutableListOf<String>()
+    rule.setContent { UserScreen("rider01", null, false, null, { peeks += it; null }, {}, {}) }
     rule.onNodeWithTag("userInput").performTextInput("No!")
     rule.onNodeWithTag("changeUser").performClick()
-    rule.onNodeWithTag("userError").assertIsDisplayed()
+    rule.onNodeWithTag("userError").assertTextEquals("英小文字と数字の3〜20文字にしてください")
     rule.onNodeWithTag("userInput").performTextClearance()
-    rule.onNodeWithTag("userInput").performTextInput("rider02")
+    rule.onNodeWithTag("userInput").performTextInput("rider01")
     rule.onNodeWithTag("changeUser").performClick()
-    rule.onNodeWithText("変える").performClick()
-    assertEquals(listOf("rider02"), changed)
+    rule.onNodeWithTag("userError").assertTextEquals("今のユーザー名と同じです")
+    assertEquals(emptyList<String>(), peeks)
+  }
+
+  // Slice 4 spec §6.4: DL-03 is worded by whether the new name has records, and the change starts once confirmed.
+  @Test
+  fun dl03_tells_a_new_name_from_one_with_records() {
+    val changed = mutableListOf<Peek>()
+    rule.setContent { UserScreen("rider01", null, false, null, { peeked(it, exists = it == "taro01") }, { changed += it }, {}) }
+    rule.onNodeWithTag("userInput").performTextInput("hanako2")
+    rule.onNodeWithTag("changeUser").performClick()
+    rule.onNodeWithText("ユーザー名を変えますか？").assertExists()
+    rule.onNodeWithTag("userDialogText").assertTextEquals(
+      "「hanako2」は新しいユーザー名です。今の「rider01」の記録は引き継がれず、記録が空の状態から始まります。元のユーザー名に戻せば、今の記録はまた見られます。",
+    )
+    rule.onNodeWithText("やめる").performClick()
+    rule.onNodeWithTag("userInput").performTextClearance()
+    rule.onNodeWithTag("userInput").performTextInput("taro01")
+    rule.onNodeWithTag("changeUser").performClick()
+    rule.onNodeWithText("既にあるユーザー名です").assertExists()
+    rule.onNodeWithTag("confirmUser").assertTextEquals("切り替える")
+    rule.onNodeWithTag("confirmUser").performClick()
+    assertEquals(listOf("taro01"), changed.map { it.userName })
+  }
+
+  @Test
+  fun a_name_that_cannot_be_read_is_not_changed_to() {
+    rule.setContent { UserScreen("rider01", null, false, null, { null }, {}, {}) }
+    rule.onNodeWithTag("userInput").performTextInput("taro01")
+    rule.onNodeWithTag("changeUser").performClick()
+    rule.onNodeWithTag("userError").assertTextEquals("読み込めませんでした")
+    rule.onNodeWithText("既にあるユーザー名です").assertDoesNotExist()
+  }
+
+  // US-E-06.008: not while a ride records or something is left to send, nor during a read; SC-14 is a tap away.
+  @Test
+  fun the_name_cannot_change_while_blocked_or_reading() {
+    var block by mutableStateOf<UserBlock?>(UserBlock.UNSENT)
+    var reading by mutableStateOf(false)
+    var toData = 0
+    rule.setContent { UserScreen("rider01", block, reading, "ユーザー名を変えました", { null }, {}, { toData += 1 }) }
+    rule.onNodeWithTag("changeUser").assertIsNotEnabled()
+    rule.onNodeWithTag("userBlock").assertTextEquals("未送信の記録があります。先に「データの保存」で送ってください")
+    rule.onNodeWithTag("toData").performClick()
+    assertEquals(1, toData)
+    block = UserBlock.RIDE
+    rule.onNodeWithTag("userBlock").assertTextEquals("走行を終えてから変えられます")
+    rule.onNodeWithTag("toData").assertDoesNotExist()
+    block = null
+    reading = true
+    rule.onNodeWithTag("changeUser").assertIsNotEnabled()
+    rule.onNodeWithText("読み込んでいます…").assertExists()
+    rule.onNodeWithTag("userMessage").assertTextEquals("ユーザー名を変えました")
+  }
+
+  private val data = DataUi(SaveSummary(rides = 3, asks = 19), "最終保存 10:22", false, false, false, false, "rider01", null, 10)
+
+  // Slice 4 spec §7.1: saved, with the last save, and the counts.
+  @Test
+  fun sc14_tells_all_is_saved_and_what_is_kept() {
+    rule.setContent { DataScreen(data, {}, {}, {}) }
+    rule.onNodeWithTag("saveState").assertTextEquals("● すべてクラウドに保存済み")
+    rule.onNodeWithText("最終保存 10:22").assertExists()
+    rule.onNodeWithTag("saveNow").assertDoesNotExist()
+    rule.onNodeWithText("19").assertExists()
+    rule.onNodeWithText("10 / 10").performScrollTo().assertExists()
+  }
+
+  @Test
+  fun sc14_tells_what_is_left_and_sends_it_now() {
+    var saves = 0
+    var sending by mutableStateOf(false)
+    rule.setContent { DataScreen(data.copy(summary = SaveSummary(unreached = 1, unsentRides = 2), sending = sending), { saves += 1 }, {}, {}) }
+    rule.onNodeWithTag("saveState").assertTextEquals("● 未送信の記録があります")
+    rule.onNodeWithTag("unsentBreakdown").assertTextEquals("質問できなかった地点 1件・走行 2本。通信できるようになると自動で送ります。")
+    rule.onNodeWithTag("saveNow").performClick()
+    assertEquals(1, saves)
+    sending = true
+    rule.onNodeWithTag("saveNow").assertIsNotEnabled()
+    rule.onNodeWithText("送っています…").assertExists()
+  }
+
+  // Reading again waits for the ride's end (decided in plan 3), and for a read under way.
+  @Test
+  fun sc14_reads_the_cloud_again_unless_a_ride_records_or_a_read_runs() {
+    var rereads = 0
+    var ui by mutableStateOf(data)
+    rule.setContent { DataScreen(ui, {}, {}, { rereads += 1 }) }
+    rule.onNodeWithTag("reread").performClick()
+    assertEquals(1, rereads)
+    ui = data.copy(reading = true)
+    rule.onNodeWithTag("reread").assertIsNotEnabled()
+    rule.onNodeWithText("読み込んでいます…").assertExists()
+    ui = data.copy(active = true, recording = true, message = "12件の記録を読み込みました")
+    rule.onNodeWithTag("reread").assertIsNotEnabled()
+    rule.onNodeWithText("走行を終えてから読み直せます").assertExists()
+    rule.onNodeWithTag("recordingNote").assertExists()
+    rule.onNodeWithTag("dataMessage").assertTextEquals("12件の記録を読み込みました")
+  }
+
+  @Test
+  fun the_settings_list_leads_to_the_data_screen() {
+    var opened = false
+    rule.setContent { SettingsScreen(Settings("rider01"), null, {}, {}, {}, {}, {}, {}, "0.2.0", saved = "未送信あり", onData = { opened = true }) }
+    rule.onNodeWithText("未送信あり").performClick()
+    assertTrue(opened)
   }
 
   @Test
@@ -235,7 +348,7 @@ class SettingsScreensTest {
     }
     rule.onNodeWithText("最長 12時間").performClick()
     rule.onNodeWithText("+3dB").performClick()
-    rule.onNodeWithText("録音の確認").performClick()
+    rule.onNodeWithText("録音の確認").performScrollTo().performClick()
     assertEquals(listOf("ride", "volume", "recordings"), opened)
   }
 

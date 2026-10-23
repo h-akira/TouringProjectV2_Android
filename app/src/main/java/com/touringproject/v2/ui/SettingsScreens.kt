@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -37,6 +39,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.touringproject.v2.api.ApiError
 import com.touringproject.v2.api.ApiErrorKind
+import com.touringproject.v2.records.SaveSummary
+import com.touringproject.v2.recordings.KEEP_RECORDINGS
 import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.MAX_RECORDING_HOURS_CHOICES
 import com.touringproject.v2.settings.ReturnTiming
@@ -45,6 +49,7 @@ import com.touringproject.v2.settings.USER_NAME_RE
 import com.touringproject.v2.settings.VOLUME_DB_CHOICES
 import com.touringproject.v2.settings.maskKey
 import com.touringproject.v2.settings.withRecentApp
+import com.touringproject.v2.sync.Peek
 import kotlinx.coroutines.launch
 
 private val Blue = Color(0xFF1F4FD1)
@@ -79,16 +84,91 @@ fun SettingsScreen(
   /** The app's version, raised by hand for every new build put on the phones. */
   version: String,
   modifier: Modifier = Modifier,
+  /** SC-14's row: 保存済み or 未送信あり (slice 4 spec §7.1). */
+  saved: String = "",
+  onData: () -> Unit = {},
 ) {
   val returnValue = if (!settings.returnEnabled) "戻らない" else settings.returnApp?.label ?: "未設定"
-  Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+  // Scrolls: the list outgrows a small screen.
+  Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
     SettingsRow("接続の設定", apiKey?.let(::maskKey) ?: "未設定", onConnection)
     SettingsRow("ユーザー名", settings.userName, onUser)
+    SettingsRow("☁️ データの保存", saved, onData)
     SettingsRow("走行の記録", "最長 ${settings.maxRecordingHours}時間", onRideRecording)
     SettingsRow("応答後に戻るアプリ", returnValue, onReturnApp)
     SettingsRow("回答の音量", "+${settings.answerVolumeDb}dB", onVolume)
     SettingsRow("録音の確認", "", onRecordings)
     SettingsRow("バージョン", version, null, Modifier.testTag("versionRow"))
+  }
+}
+
+/**
+ * SC-14 (slice 4 spec §7.1). recording: a ride records now, and its last points go at its pause or end. active: a ride
+ * records or is paused, so reading the cloud again waits for its end. reading: a read of the cloud is under way.
+ */
+data class DataUi(
+  val summary: SaveSummary,
+  val lastSaved: String,
+  val sending: Boolean,
+  val recording: Boolean,
+  val active: Boolean,
+  val reading: Boolean,
+  val userName: String,
+  /** What the last クラウドから読み直す came to; null before one. */
+  val message: String?,
+  /** The recordings kept on the device for SC-12. */
+  val recordings: Int,
+)
+
+@Composable
+private fun DataRow(title: String, value: String) {
+  Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+    Text(title, Modifier.weight(1f), fontSize = 16.sp)
+    Text(value, color = Color(0xFF666666), fontSize = 16.sp)
+  }
+}
+
+// SC-14
+@Composable
+fun DataScreen(ui: DataUi, onSave: () -> Unit, onUser: () -> Unit, onReread: () -> Unit, modifier: Modifier = Modifier) {
+  val muted = Color(0xFF666666)
+  Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(0xFFCCCCCC))) {
+      Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (ui.summary.unsent == 0) {
+          Text("● すべてクラウドに保存済み", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("saveState"))
+          Text(ui.lastSaved, color = muted, fontSize = 14.sp)
+        } else {
+          Text("● 未送信の記録があります", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("saveState"))
+          Text("${unsentBreakdown(ui.summary)}。通信できるようになると自動で送ります。", color = muted, fontSize = 14.sp, modifier = Modifier.testTag("unsentBreakdown"))
+          Button(onClick = onSave, enabled = !ui.sending, modifier = Modifier.fillMaxWidth().testTag("saveNow")) {
+            Text(if (ui.sending) "送っています…" else "今すぐ保存", fontSize = 16.sp)
+          }
+        }
+        if (ui.recording) Text("記録中の走行は、一時停止か終了で残りを送ります。", color = muted, fontSize = 14.sp, modifier = Modifier.testTag("recordingNote"))
+      }
+    }
+    SettingsRow("ユーザー名", ui.userName, onUser)
+    Button(
+      onClick = onReread,
+      enabled = !ui.active && !ui.reading,
+      modifier = Modifier.fillMaxWidth().testTag("reread"),
+      colors = ButtonDefaults.buttonColors(containerColor = Blue),
+    ) { Text(if (ui.reading) "読み込んでいます…" else "クラウドから読み直す", fontSize = 16.sp) }
+    if (ui.active) Text("走行を終えてから読み直せます", color = muted, fontSize = 14.sp)
+    ui.message?.let { Text(it, modifier = Modifier.testTag("dataMessage")) }
+    Text("保存している内容", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+    DataRow("会話の文字・ルート・メモ・地点メモ", "端末＋クラウド · すべて")
+    DataRow("録音の音声", "端末のみ · 直近${KEEP_RECORDINGS}件")
+    Text(
+      "録音の音声は 設定 > 録音の確認 でだけ聞けます。機種を変えても、同じユーザー名を設定すれば記録が戻ります。音声はクラウドに残さないため戻りません。",
+      color = muted,
+      fontSize = 14.sp,
+    )
+    Text("件数", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+    DataRow("走行", ui.summary.rides.toString())
+    DataRow("質問", ui.summary.asks.toString())
+    DataRow("端末の音声", "${ui.recordings} / $KEEP_RECORDINGS")
   }
 }
 
@@ -226,36 +306,90 @@ fun ConnectionScreen(
   }
 }
 
-// SC-18
+/** Why the user name cannot change now (slice 4 spec §6.4, US-E-06.008). */
+enum class UserBlock(val message: String) {
+  RIDE("走行を終えてから変えられます"),
+  UNSENT("未送信の記録があります。先に「データの保存」で送ってください"),
+}
+
+/**
+ * SC-18. peek reads the new name's first page (null when it cannot), and DL-03 tells from it whether the name has
+ * records (slice 4 spec §6.4). onChange starts the change after DL-03; reading is true while a read of the cloud is under
+ * way, and message is what the last change came to.
+ */
 @Composable
-fun UserScreen(userName: String, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
+fun UserScreen(
+  userName: String,
+  block: UserBlock?,
+  reading: Boolean,
+  message: String?,
+  peek: suspend (String) -> Peek?,
+  onChange: (Peek) -> Unit,
+  onData: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val scope = rememberCoroutineScope()
   // Saveable, so a name being typed survives a trip to another tab (Android #34).
   var input by rememberSaveable { mutableStateOf("") }
-  var error by remember { mutableStateOf(false) }
-  var confirming by remember { mutableStateOf<String?>(null) }
-  Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+  var error by remember { mutableStateOf<String?>(null) }
+  var checking by remember { mutableStateOf(false) }
+  var confirming by remember { mutableStateOf<Peek?>(null) }
+  Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
     Text("今のユーザー名", color = Color(0xFF666666), fontSize = 16.sp)
     Text(userName, fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-    Text("別の端末に記録を引き継ぐときに使います。控えておいてください。", color = Color(0xFF666666), fontSize = 14.sp)
+    Text("記録はユーザー名ごとに分かれます。別の端末で同じユーザー名を設定すると、記録を引き継げます。控えておいてください。", color = Color(0xFF666666), fontSize = 14.sp)
     OutlinedTextField(input, { input = it }, Modifier.fillMaxWidth().testTag("userInput"), placeholder = { Text("新しいユーザー名") }, singleLine = true)
-    if (error) Text("英小文字と数字の3〜20文字にしてください", color = Red, modifier = Modifier.testTag("userError"))
+    error?.let { Text(it, color = Red, modifier = Modifier.testTag("userError")) }
     Button(
       onClick = {
         val name = input.trim()
-        error = !USER_NAME_RE.matches(name)
-        if (!error) confirming = name
+        error = when {
+          !USER_NAME_RE.matches(name) -> "英小文字と数字の3〜20文字にしてください"
+          name == userName -> "今のユーザー名と同じです"
+          else -> null
+        }
+        if (error != null) return@Button
+        checking = true
+        scope.launch {
+          val peeked = peek(name)
+          checking = false
+          if (peeked == null) error = "読み込めませんでした" else confirming = peeked
+        }
       },
+      enabled = block == null && !reading && !checking,
       modifier = Modifier.fillMaxWidth().testTag("changeUser"),
       colors = ButtonDefaults.buttonColors(containerColor = Blue),
-    ) { Text("変更する", fontSize = 18.sp) }
+    ) { Text(if (reading || checking) "読み込んでいます…" else "変更する", fontSize = 18.sp) }
+    block?.let { Text(it.message, modifier = Modifier.testTag("userBlock")) }
+    if (block == UserBlock.UNSENT) TextButton(onClick = onData, modifier = Modifier.testTag("toData")) { Text("データの保存へ") }
+    message?.let { Text(it, modifier = Modifier.testTag("userMessage")) }
+    Text(
+      "変えると、今の記録は引き継がれず、新しいユーザー名の記録が表示されます。今の記録は消えず、元のユーザー名に戻せばまた見られます。",
+      color = Color(0xFF666666),
+      fontSize = 14.sp,
+    )
   }
-  // DL-03
-  confirming?.let { name ->
+  // DL-03: worded by whether the new name has records (the mock's two states).
+  confirming?.let { peeked ->
+    val name = peeked.userName
     AlertDialog(
       onDismissRequest = { confirming = null },
-      title = { Text("「$name」に変えますか？") },
-      text = { Text("今の記録は引き継ぎません。元の名前に戻せば、また見られます。同じ名前の記録が既にあれば、その記録に切り替わります。") },
-      confirmButton = { TextButton(onClick = { confirming = null; input = ""; onChange(name) }) { Text("変える") } },
+      title = { Text(if (peeked.exists) "既にあるユーザー名です" else "ユーザー名を変えますか？") },
+      text = {
+        Text(
+          if (peeked.exists) {
+            "「$name」の記録が既にあります。このユーザー名に切り替えると、その記録が表示されます。今の「$userName」の記録は引き継がれません。元のユーザー名に戻せば、また見られます。"
+          } else {
+            "「$name」は新しいユーザー名です。今の「$userName」の記録は引き継がれず、記録が空の状態から始まります。元のユーザー名に戻せば、今の記録はまた見られます。"
+          },
+          modifier = Modifier.testTag("userDialogText"),
+        )
+      },
+      confirmButton = {
+        TextButton(onClick = { confirming = null; input = ""; onChange(peeked) }, Modifier.testTag("confirmUser")) {
+          Text(if (peeked.exists) "切り替える" else "変更する")
+        }
+      },
       dismissButton = { TextButton(onClick = { confirming = null }) { Text("やめる") } },
     )
   }

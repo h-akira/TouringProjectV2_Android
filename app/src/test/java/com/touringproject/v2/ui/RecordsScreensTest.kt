@@ -265,6 +265,15 @@ class RecordsScreensTest {
     rule.onNodeWithText("09:41 · 箱根町仙石原 · 📝").assertExists()
   }
 
+  // Android #65: as the mock draws it, an unreached ask's row is marked after its memo's mark.
+  @Test
+  fun the_timeline_marks_an_unreached_ask() {
+    val row = TimelineRow.Ask("u1", 1, "10:05", "住所は送信後", UNREACHED_TEXT, true, memo = true, unreached = true)
+    rule.setContent { RideDetailScreen(detail().copy(timeline = listOf(row)), fakeMap, true, {}, {}, {}, { true }, {}) }
+    rule.onNodeWithTag("timeline").performScrollToNode(hasTestTag("ask-u1"))
+    rule.onNodeWithText("10:05 · 住所は送信後 · 📝 · 📵").assertExists()
+  }
+
   // US-D-06.002, US-D-06.003: an ended ride is deleted after DL-01 says what goes.
   @Test
   fun an_ended_ride_is_deleted_after_the_confirmation() {

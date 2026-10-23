@@ -38,7 +38,10 @@ import com.touringproject.v2.BuildConfig
 import com.touringproject.v2.api.ApiClient
 import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.records.NoteDraft
+import com.touringproject.v2.records.SaveSummary
+import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.settings.LaunchableApp
+import com.touringproject.v2.sync.TakeOp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.ZoneId
@@ -52,6 +55,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object VolumeKey : NavKey
 @Serializable data object RecordingsKey : NavKey
 @Serializable data object RideRecordingKey : NavKey
+@Serializable data object DataKey : NavKey
 @Serializable data object RecordsKey : NavKey
 @Serializable data class RideKey(val rideId: String) : NavKey
 @Serializable data class AskKey(val rideId: String, val askId: String) : NavKey
@@ -215,6 +219,7 @@ fun AppUi(graph: AppGraph) {
                 NoteRoute(graph.records, graph.notes, key.rideId, key.noteId, onClose = { tabs.back() }, modifier = Modifier.safeDrawingPadding(), voice = noteVoice)
               }
               entry<SettingsKey> {
+                val summary by graph.saveSummary.collectAsStateWithLifecycle()
                 SettingsScreen(
                   current, apiKey,
                   onConnection = { tabs.push(ConnectionKey) },
@@ -224,6 +229,33 @@ fun AppUi(graph: AppGraph) {
                   onVolume = { tabs.push(VolumeKey) },
                   onRecordings = { tabs.push(RecordingsKey) },
                   version = BuildConfig.VERSION_NAME,
+                  modifier = Modifier.safeDrawingPadding(),
+                  saved = saveRowValue(summary ?: SaveSummary()),
+                  onData = { tabs.push(DataKey) },
+                )
+              }
+              entry<DataKey> {
+                val summary by graph.saveSummary.collectAsStateWithLifecycle()
+                val lastSaved by graph.lastSaved.at.collectAsStateWithLifecycle()
+                val sending by graph.sync.sending.collectAsStateWithLifecycle()
+                val take by graph.takeover.state.collectAsStateWithLifecycle()
+                val recordings by graph.recordingCheck.items.collectAsStateWithLifecycle()
+                DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
+                DataScreen(
+                  DataUi(
+                    summary = summary ?: SaveSummary(),
+                    lastSaved = lastSavedLabel(lastSaved, System.currentTimeMillis(), ZoneId.systemDefault()),
+                    sending = sending,
+                    recording = ride?.status == RideStatus.RECORDING,
+                    active = ride != null,
+                    reading = take.running != null,
+                    userName = current.userName,
+                    message = take.result?.takeIf { take.last == TakeOp.REREAD }?.let(::rereadMessage),
+                    recordings = recordings.size,
+                  ),
+                  onSave = graph.sync::request,
+                  onUser = { tabs.push(UserKey) },
+                  onReread = { graph.takeover.reread(current.userName) },
                   modifier = Modifier.safeDrawingPadding(),
                 )
               }
@@ -261,7 +293,24 @@ fun AppUi(graph: AppGraph) {
                 )
               }
               entry<UserKey> {
-                UserScreen(current.userName, { name -> scope.launch { graph.settings.update(current.copy(userName = name)) } }, Modifier.safeDrawingPadding())
+                val summary by graph.saveSummary.collectAsStateWithLifecycle()
+                val take by graph.takeover.state.collectAsStateWithLifecycle()
+                DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
+                // The write checks again in its own transaction (US-E-06.008); a change still waiting to be written counts.
+                val block = when {
+                  ride != null -> UserBlock.RIDE
+                  (summary?.unsent ?: 0) > 0 || storeFailed -> UserBlock.UNSENT
+                  else -> null
+                }
+                UserScreen(
+                  current.userName, block,
+                  reading = take.running != null,
+                  message = take.result?.takeIf { take.last == TakeOp.SWITCH }?.let(::switchMessage),
+                  peek = graph.takeover::peek,
+                  onChange = { peek -> graph.takeover.switchTo(peek, graph::switchedTo) },
+                  onData = { tabs.push(DataKey) },
+                  modifier = Modifier.safeDrawingPadding(),
+                )
               }
               entry<ReturnAppKey> {
                 var apps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }

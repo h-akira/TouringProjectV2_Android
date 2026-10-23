@@ -49,6 +49,21 @@ class RoomAskLogTest {
     db.close()
   }
 
+  // Android #64: an unreached ask written asks for a pass at once, since the network may still be there.
+  @Test
+  fun an_unreached_ask_written_asks_for_a_pass() = runBlocking {
+    keepRide()
+    var kicks = 0
+    val kicking = RoomAskLog(db.asks(), kotlinx.coroutines.MainScope(), unreachedKept = { kicks += 1 }) { message, _ -> errors += message }
+    kicking.save(record)
+    assertEquals(0, kicks)
+    kicking.save(unreachedAsk("u1", 2_000, null, null, "r1"))
+    assertEquals(1, kicks)
+    kicking.save(unreachedAsk("u2", 2_000, null, null, "r9"))
+    assertEquals(1, kicks)
+    db.close()
+  }
+
   @Test
   fun the_count_of_a_ride_follows_the_asks_kept_for_it() = runBlocking {
     keepRide()

@@ -221,7 +221,7 @@ class RideController(private val deps: RideDeps) {
    * SC-08 (and SC-02's 走行メモ): sets or, for null, removes any kept ride's memo. Returns false when the memo is too
    * long, the ride is not kept, or the memo could not be written now. The same memo again changes nothing. A memo
    * that could not be written is not kept to be written later: SC-08 has said it was not saved, and the rider may
-   * discard it (Android #53).
+   * discard it (Android #53). With it, the home band goes unless a change is still waiting to be written (Android #66).
    */
   suspend fun memo(rideId: String, memo: String?): Boolean = locked {
     if (!memoFits(memo)) return@locked false
@@ -232,7 +232,7 @@ class RideController(private val deps: RideDeps) {
       if (active.memo == memo) return@locked true
       val changed = active.withMemo(memo, now)
       if (!save(changed)) {
-        unsaved = waiting
+        dropUnsavedMemo(waiting)
         return@locked false
       }
       activeRide.value = changed
@@ -241,8 +241,14 @@ class RideController(private val deps: RideDeps) {
     val ride = keptRide(rideId) ?: return@locked false
     if (ride.memo == memo) return@locked true
     if (save(ride.withMemo(memo, now))) return@locked true
-    unsaved = waiting
+    dropUnsavedMemo(waiting)
     false
+  }
+
+  // The memo that failed is not kept to be written; what waited before it still is.
+  private fun dropUnsavedMemo(waiting: Ride?) {
+    unsaved = waiting
+    storeFailing.value = unsaved != null
   }
 
   /**
