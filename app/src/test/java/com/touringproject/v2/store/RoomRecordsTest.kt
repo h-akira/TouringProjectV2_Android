@@ -6,7 +6,9 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.touringproject.v2.ask.AskOutcome
 import com.touringproject.v2.ask.AskRecord
+import com.touringproject.v2.ask.unreachedAsk
 import com.touringproject.v2.records.SaveState
+import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.ride.EndReason
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.RoutePoint
@@ -15,6 +17,7 @@ import com.touringproject.v2.ride.newRide
 import com.touringproject.v2.ride.pause
 import com.touringproject.v2.ride.resume
 import com.touringproject.v2.sync.ChunkRange
+import com.touringproject.v2.sync.PendingDeletion
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -121,7 +124,7 @@ class RoomRecordsTest {
     val ended = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS).end(4_000, EndReason.MANUAL, 4_000)
     rides.save(ended)
     sync.rideSent("r1", ended.updatedAt)
-    log.save(com.touringproject.v2.ask.unreachedAsk("u1", 1_500, null, null, "r1"))
+    log.save(unreachedAsk("u1", 1_500, null, null, "r1"))
     assertEquals(SaveState.UNSENT, records.list.first().single().saveState)
     val kept = records.asks("r1").first().single()
     assertEquals(AskOutcome.OFFLINE, kept.outcome)
@@ -129,5 +132,34 @@ class RoomRecordsTest {
     db.openHelper.writableDatabase.execSQL("UPDATE asks SET sentUpdatedAt = 1500 WHERE askId = 'u1'")
     assertEquals(SaveState.SAVED, records.list.first().single().saveState)
     assertEquals(true, records.asks("r1").first().single().sent)
+  }
+
+  // Slice 4 spec §7.1: SC-14 counts what the next pass would send, leaving out refused versions and the ride recording.
+  @Test
+  fun the_summary_counts_what_is_left_to_send() = runBlocking {
+    val ended = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS).end(4_000, EndReason.MANUAL, 4_000)
+    rides.save(ended)
+    rides.addPoint("r1", RoutePoint(0, 1_500, 35.0, 139.0, 5.0), 0.0, 1_500)
+    val refused = newRide("r3", "伊豆", 1_000, 7, 24 * HOUR_MS).end(2_000, EndReason.MANUAL, 2_000)
+    rides.save(refused)
+    sync.rideRefused("r3", refused.updatedAt)
+    rides.save(newRide("r2", "御殿場", 5_000, 7, 24 * HOUR_MS))
+    rides.addPoint("r2", RoutePoint(0, 5_500, 35.0, 139.0, 5.0), 0.0, 5_500)
+    log.save(ask("a1", 1_200, "r1"))
+    db.asks().writeMemo("a1", "景色", 3_000)
+    log.save(unreachedAsk("u1", 5_600, null, null, "r2"))
+    db.notes().insert(NoteEntity("n1", "r2", 5_700, null, null, null, null, null, "展望", 5_700, null, null, null, null))
+    db.rides().markDeleted(DeletionEntity("ride", "r9", null, 6_000))
+    assertEquals(
+      SaveSummary(unreached = 1, unsentRides = 1, notes = 1, memos = 1, deletions = 1, rides = 3, asks = 2),
+      records.summary.first(),
+    )
+    sync.rideSent("r1", ended.updatedAt)
+    sync.chunkSent("r1", ChunkRange(0, 0, 1), refused = false)
+    sync.unreachedSent("u1", 5_600, null, null)
+    sync.noteSent("n1", 5_700, null, null)
+    sync.askMemoRefused("a1", db.asks().ask("a1")!!.memoUpdatedAt!!)
+    sync.deletionSent(PendingDeletion("ride", "r9", null))
+    assertEquals(0, records.summary.first().unsent)
   }
 }

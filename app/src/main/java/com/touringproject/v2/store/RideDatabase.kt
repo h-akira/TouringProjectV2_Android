@@ -19,6 +19,7 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.records.memoTime
 import kotlinx.coroutines.flow.Flow
 
@@ -383,6 +384,20 @@ interface RideDao {
   @Transaction
   @Query("SELECT * FROM rides WHERE id = :id")
   fun watch(id: String): Flow<RideWithSegments?>
+
+  @Query(
+    "SELECT (SELECT COUNT(*) FROM asks WHERE status = 'offline' AND (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
+      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt)) AS unreached, " +
+      "(SELECT COUNT(*) FROM rides WHERE status != 'recording' AND ((sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
+      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt) OR " +
+      "EXISTS (SELECT 1 FROM route_points WHERE chunk IS NULL AND route_points.rideId = rides.id))) AS unsentRides, " +
+      "(SELECT COUNT(*) FROM notes WHERE (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
+      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt)) AS notes, " +
+      "(SELECT COUNT(*) FROM asks WHERE memoUpdatedAt IS NOT NULL AND (memoSentUpdatedAt IS NULL OR memoSentUpdatedAt < memoUpdatedAt) AND " +
+      "(memoRejectedUpdatedAt IS NULL OR memoRejectedUpdatedAt != memoUpdatedAt)) AS memos, " +
+      "(SELECT COUNT(*) FROM deletions) AS deletions, (SELECT COUNT(*) FROM rides) AS rides, (SELECT COUNT(*) FROM asks) AS asks",
+  )
+  fun summary(): Flow<SaveSummary>
 
   @Upsert
   suspend fun upsertRide(ride: RideEntity)

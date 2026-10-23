@@ -5,6 +5,7 @@ import com.touringproject.v2.ask.AskRecord
 import com.touringproject.v2.api.HeadingSample
 import com.touringproject.v2.records.NoteRecord
 import com.touringproject.v2.records.RideListItem
+import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.records.orderRides
 import com.touringproject.v2.records.saveState
 import com.touringproject.v2.ride.Ride
@@ -51,6 +52,9 @@ class RoomRecords(private val rides: RideDao, private val asks: AskDao, private 
       },
     )
   }
+
+  /** SC-14 and SC-18: what is left to send and how much is kept. Room reads it again for every route point. */
+  val summary: Flow<SaveSummary> = rides.summary()
 
   fun ride(id: String): Flow<Ride?> = rides.watch(id).map { it?.ride?.toRide(it.segments.sortedBy { s -> s.seq }) }
 
