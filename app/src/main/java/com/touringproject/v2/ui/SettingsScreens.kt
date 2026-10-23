@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -37,6 +39,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.touringproject.v2.api.ApiError
 import com.touringproject.v2.api.ApiErrorKind
+import com.touringproject.v2.records.SaveSummary
+import com.touringproject.v2.recordings.KEEP_RECORDINGS
 import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.MAX_RECORDING_HOURS_CHOICES
 import com.touringproject.v2.settings.ReturnTiming
@@ -79,16 +83,91 @@ fun SettingsScreen(
   /** The app's version, raised by hand for every new build put on the phones. */
   version: String,
   modifier: Modifier = Modifier,
+  /** SC-14's row: 保存済み or 未送信あり (slice 4 spec §7.1). */
+  saved: String = "",
+  onData: () -> Unit = {},
 ) {
   val returnValue = if (!settings.returnEnabled) "戻らない" else settings.returnApp?.label ?: "未設定"
-  Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+  // Scrolls: the list outgrows a small screen.
+  Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
     SettingsRow("接続の設定", apiKey?.let(::maskKey) ?: "未設定", onConnection)
     SettingsRow("ユーザー名", settings.userName, onUser)
+    SettingsRow("☁️ データの保存", saved, onData)
     SettingsRow("走行の記録", "最長 ${settings.maxRecordingHours}時間", onRideRecording)
     SettingsRow("応答後に戻るアプリ", returnValue, onReturnApp)
     SettingsRow("回答の音量", "+${settings.answerVolumeDb}dB", onVolume)
     SettingsRow("録音の確認", "", onRecordings)
     SettingsRow("バージョン", version, null, Modifier.testTag("versionRow"))
+  }
+}
+
+/**
+ * SC-14 (slice 4 spec §7.1). recording: a ride records now, and its last points go at its pause or end. active: a ride
+ * records or is paused, so reading the cloud again waits for its end. reading: a read of the cloud is under way.
+ */
+data class DataUi(
+  val summary: SaveSummary,
+  val lastSaved: String,
+  val sending: Boolean,
+  val recording: Boolean,
+  val active: Boolean,
+  val reading: Boolean,
+  val userName: String,
+  /** What the last クラウドから読み直す came to; null before one. */
+  val message: String?,
+  /** The recordings kept on the device for SC-12. */
+  val recordings: Int,
+)
+
+@Composable
+private fun DataRow(title: String, value: String) {
+  Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+    Text(title, Modifier.weight(1f), fontSize = 16.sp)
+    Text(value, color = Color(0xFF666666), fontSize = 16.sp)
+  }
+}
+
+// SC-14
+@Composable
+fun DataScreen(ui: DataUi, onSave: () -> Unit, onUser: () -> Unit, onReread: () -> Unit, modifier: Modifier = Modifier) {
+  val muted = Color(0xFF666666)
+  Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(0xFFCCCCCC))) {
+      Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (ui.summary.unsent == 0) {
+          Text("● すべてクラウドに保存済み", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("saveState"))
+          Text(ui.lastSaved, color = muted, fontSize = 14.sp)
+        } else {
+          Text("● 未送信の記録があります", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("saveState"))
+          Text("${unsentBreakdown(ui.summary)}。通信できるようになると自動で送ります。", color = muted, fontSize = 14.sp, modifier = Modifier.testTag("unsentBreakdown"))
+          Button(onClick = onSave, enabled = !ui.sending, modifier = Modifier.fillMaxWidth().testTag("saveNow")) {
+            Text(if (ui.sending) "送っています…" else "今すぐ保存", fontSize = 16.sp)
+          }
+        }
+        if (ui.recording) Text("記録中の走行は、一時停止か終了で残りを送ります。", color = muted, fontSize = 14.sp, modifier = Modifier.testTag("recordingNote"))
+      }
+    }
+    SettingsRow("ユーザー名", ui.userName, onUser)
+    Button(
+      onClick = onReread,
+      enabled = !ui.active && !ui.reading,
+      modifier = Modifier.fillMaxWidth().testTag("reread"),
+      colors = ButtonDefaults.buttonColors(containerColor = Blue),
+    ) { Text(if (ui.reading) "読み込んでいます…" else "クラウドから読み直す", fontSize = 16.sp) }
+    if (ui.active) Text("走行を終えてから読み直せます", color = muted, fontSize = 14.sp)
+    ui.message?.let { Text(it, modifier = Modifier.testTag("dataMessage")) }
+    Text("保存している内容", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+    DataRow("会話の文字・ルート・メモ・地点メモ", "端末＋クラウド · すべて")
+    DataRow("録音の音声", "端末のみ · 直近${KEEP_RECORDINGS}件")
+    Text(
+      "録音の音声は 設定 > 録音の確認 でだけ聞けます。機種を変えても、同じユーザー名を設定すれば記録が戻ります。音声はクラウドに残さないため戻りません。",
+      color = muted,
+      fontSize = 14.sp,
+    )
+    Text("件数", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+    DataRow("走行", ui.summary.rides.toString())
+    DataRow("質問", ui.summary.asks.toString())
+    DataRow("端末の音声", "${ui.recordings} / $KEEP_RECORDINGS")
   }
 }
 

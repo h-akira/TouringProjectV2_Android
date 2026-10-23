@@ -13,6 +13,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -24,10 +25,12 @@ import com.touringproject.v2.audio.MediaVolume
 import com.touringproject.v2.recordings.TRIAL_IDLE
 import com.touringproject.v2.recordings.TrialPhase
 import com.touringproject.v2.recordings.TrialState
+import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.Settings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -216,6 +219,59 @@ class SettingsScreensTest {
     assertEquals(listOf("rider02"), changed)
   }
 
+  private val data = DataUi(SaveSummary(rides = 3, asks = 19), "最終保存 10:22", false, false, false, false, "rider01", null, 10)
+
+  // Slice 4 spec §7.1: saved, with the last save, and the counts.
+  @Test
+  fun sc14_tells_all_is_saved_and_what_is_kept() {
+    rule.setContent { DataScreen(data, {}, {}, {}) }
+    rule.onNodeWithTag("saveState").assertTextEquals("● すべてクラウドに保存済み")
+    rule.onNodeWithText("最終保存 10:22").assertExists()
+    rule.onNodeWithTag("saveNow").assertDoesNotExist()
+    rule.onNodeWithText("19").assertExists()
+    rule.onNodeWithText("10 / 10").performScrollTo().assertExists()
+  }
+
+  @Test
+  fun sc14_tells_what_is_left_and_sends_it_now() {
+    var saves = 0
+    var sending by mutableStateOf(false)
+    rule.setContent { DataScreen(data.copy(summary = SaveSummary(unreached = 1, unsentRides = 2), sending = sending), { saves += 1 }, {}, {}) }
+    rule.onNodeWithTag("saveState").assertTextEquals("● 未送信の記録があります")
+    rule.onNodeWithTag("unsentBreakdown").assertTextEquals("質問できなかった地点 1件・走行 2本。通信できるようになると自動で送ります。")
+    rule.onNodeWithTag("saveNow").performClick()
+    assertEquals(1, saves)
+    sending = true
+    rule.onNodeWithTag("saveNow").assertIsNotEnabled()
+    rule.onNodeWithText("送っています…").assertExists()
+  }
+
+  // Reading again waits for the ride's end (decided in plan 3), and for a read under way.
+  @Test
+  fun sc14_reads_the_cloud_again_unless_a_ride_records_or_a_read_runs() {
+    var rereads = 0
+    var ui by mutableStateOf(data)
+    rule.setContent { DataScreen(ui, {}, {}, { rereads += 1 }) }
+    rule.onNodeWithTag("reread").performClick()
+    assertEquals(1, rereads)
+    ui = data.copy(reading = true)
+    rule.onNodeWithTag("reread").assertIsNotEnabled()
+    rule.onNodeWithText("読み込んでいます…").assertExists()
+    ui = data.copy(active = true, recording = true, message = "12件の記録を読み込みました")
+    rule.onNodeWithTag("reread").assertIsNotEnabled()
+    rule.onNodeWithText("走行を終えてから読み直せます").assertExists()
+    rule.onNodeWithTag("recordingNote").assertExists()
+    rule.onNodeWithTag("dataMessage").assertTextEquals("12件の記録を読み込みました")
+  }
+
+  @Test
+  fun the_settings_list_leads_to_the_data_screen() {
+    var opened = false
+    rule.setContent { SettingsScreen(Settings("rider01"), null, {}, {}, {}, {}, {}, {}, "0.2.0", saved = "未送信あり", onData = { opened = true }) }
+    rule.onNodeWithText("未送信あり").performClick()
+    assertTrue(opened)
+  }
+
   @Test
   fun choosing_a_return_app_also_remembers_it() {
     var updated: Settings? = null
@@ -235,7 +291,7 @@ class SettingsScreensTest {
     }
     rule.onNodeWithText("最長 12時間").performClick()
     rule.onNodeWithText("+3dB").performClick()
-    rule.onNodeWithText("録音の確認").performClick()
+    rule.onNodeWithText("録音の確認").performScrollTo().performClick()
     assertEquals(listOf("ride", "volume", "recordings"), opened)
   }
 

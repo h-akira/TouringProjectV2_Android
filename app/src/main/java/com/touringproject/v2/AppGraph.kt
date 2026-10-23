@@ -37,6 +37,7 @@ import com.touringproject.v2.recordings.TrialController
 import com.touringproject.v2.recordings.TrialDeps
 import com.touringproject.v2.recordings.TrialState
 import com.touringproject.v2.records.RideListItem
+import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.records.activeAskCount
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.RideController
@@ -50,6 +51,7 @@ import com.touringproject.v2.settings.ApiKeyStore
 import com.touringproject.v2.settings.DEFAULT_MAX_RECORDING_HOURS
 import com.touringproject.v2.settings.DataStoreKeyValueStore
 import com.touringproject.v2.settings.KeystoreCipher
+import com.touringproject.v2.settings.LastSaved
 import com.touringproject.v2.settings.SettingsRepository
 import com.touringproject.v2.settings.maxRecordingChanges
 import com.touringproject.v2.store.RideDatabase
@@ -59,7 +61,9 @@ import com.touringproject.v2.store.RoomNotes
 import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.store.RoomRideStore
 import com.touringproject.v2.store.RoomSyncStore
+import com.touringproject.v2.store.RoomTakeover
 import com.touringproject.v2.sync.RideSync
+import com.touringproject.v2.sync.Takeover
 import com.touringproject.v2.sync.credentialChanges
 import com.touringproject.v2.sync.reconnections
 import com.touringproject.v2.voice.VOICE_IDLE
@@ -113,6 +117,9 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   /** Whether the device has a network now: SC-19's voice input, the ask loop and the sync follow it. */
   val connectivity = Connectivity(context)
 
+  /** When a pass of the sync last ran to its end (SC-14). */
+  val lastSaved = LastSaved(store)
+
   /** Sends rides, routes, memos, point memos, unreached asks and deletions; a pass runs on each trigger (slice 2 spec §5.3). */
   val sync = RideSync(
     RoomSyncStore(database.rides(), database.asks(), database.notes()),
@@ -121,8 +128,25 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       val user = settings.settings.value?.userName
       if (apiBaseUrl.isEmpty() || key == null || user == null) null else ApiClient(apiBaseUrl, key, user, http)
     },
-    log = { event, data -> Log.i("trv2.sync", "$event $data") },
     online = { connectivity.online.value },
+    saved = { lastSaved.mark(System.currentTimeMillis()) },
+    log = { event, data -> Log.i("trv2.sync", "$event $data") },
+  )
+
+  /** SC-14 and SC-18: what is left to send, and how much is kept (slice 4 spec §7.1). */
+  val saveSummary: StateFlow<SaveSummary?> = records.summary.stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
+
+  /** Reads the user's records in from the cloud: SC-18's change of user name and SC-14's read again (slice 4 spec §6). */
+  val takeover = Takeover(
+    api = { user ->
+      val key = apiKeys.current()
+      if (apiBaseUrl.isEmpty() || key == null) null else ApiClient(apiBaseUrl, key, user, http)
+    },
+    store = RoomTakeover(database),
+    sync = sync,
+    now = System::currentTimeMillis,
+    scope = scope,
+    log = { event, data -> Log.i("trv2.sync", "$event $data") },
   )
 
   /** SC-07 and SC-08 change kept asks through here; each change is something new to send (slice 3 spec §5.1). */
@@ -287,6 +311,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     scope.launch {
       settings.load()
       apiKeys.load()
+      lastSaved.load()
       readiness.settingsLoaded()
       // The start of the app is a trigger; before this the key and the user name are not known.
       sync.request()
