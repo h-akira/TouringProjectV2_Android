@@ -28,6 +28,17 @@ class FlowTest {
     assertEquals(IDLE, reduce(s, FlowEvent.Spoken(5)))
   }
 
+  // Slice 5 spec §5.3: a text ask has nothing to record; it starts at sending, from the screen.
+  @Test
+  fun a_text_ask_starts_at_sending() {
+    val s = run(FlowEvent.StartText(1))
+    assertEquals(Phase.SENDING, s.phase)
+    assertEquals(Source.SCREEN, s.source)
+    assertEquals(Phase.WAITING, reduce(s, FlowEvent.Sent("a1", 2)).phase)
+    assertSame(s, reduce(s, FlowEvent.StartText(2)))
+    assertEquals(Phase.SENDING, reduce(run(FlowEvent.Start(Source.SCREEN, 1), FlowEvent.Fail(FailureReason.MIC, 2)), FlowEvent.StartText(3)).phase)
+  }
+
   @Test
   fun out_of_order_events_are_ignored() {
     assertSame(IDLE, reduce(IDLE, FlowEvent.Sent("a1", 1)))

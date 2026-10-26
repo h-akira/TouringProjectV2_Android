@@ -1,5 +1,6 @@
 package com.touringproject.v2.location
 
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -72,5 +73,26 @@ class PositionTrackerTest {
     source.onFix!!(fix(99_000))
     source.onFix!!(fix(98_000))
     assertEquals(fix(99_000), tracker.end())
+  }
+
+  // Slice 5 spec §4.1: a text ask is where the device last was, within 30 s; none without a fresh fix.
+  @Test
+  fun a_text_ask_takes_the_last_known_fix_when_it_is_fresh() = runTest {
+    val tracker = PositionTracker(FakeSource().apply { last = fix(90_000) })
+    assertEquals(fix(90_000), tracker.latest())
+    assertNull(PositionTracker(FakeSource().apply { last = fix(100_000 - MAX_CURRENT_AGE_MS - 1) }).latest())
+  }
+
+  @Test
+  fun no_last_known_fix_gives_none_after_a_short_wait() = runTest {
+    // Fused answers a success without a fix by never calling back.
+    assertNull(PositionTracker(FakeSource()).latest())
+    assertEquals(LATEST_WAIT_MS, testScheduler.currentTime)
+    val refused = object : PositionSource {
+      override fun now() = 100_000L
+      override fun lastKnown(onFix: (Fix) -> Unit) = throw SecurityException("no permission")
+      override fun watch(onFix: (Fix) -> Unit) = Subscription {}
+    }
+    assertNull(PositionTracker(refused).latest())
   }
 }

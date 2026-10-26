@@ -67,7 +67,11 @@ private class Harness(
   var online: Boolean = true,
   /** What the ride's route gives as the heading (slice 5 spec §4). */
   var heading: Double? = 12.5,
+  /** The device's last known fix, where a text ask is (slice 5 spec §4.1). */
+  var latest: Fix? = HERE,
 ) {
+  /** What each text ask told the sheet. */
+  val outcomes = mutableListOf<TextAskOutcome>()
   /** Where and when the heading was asked for. */
   val headingAsked = mutableListOf<Pair<Fix?, Long>>()
   /** How long each start cue was asked to sound. */
@@ -131,6 +135,7 @@ private class Harness(
     location = object : Positions {
       override fun begin() { log += "loc:begin" }
       override fun end() = HERE
+      override suspend fun latest(): Fix? { log += "loc:latest"; return latest }
     },
     heading = { here, at -> headingAsked += here to at; heading },
     service = object : KeepAlive {
@@ -163,6 +168,8 @@ private class Harness(
   }
 
   val phase get() = controller.state.phase
+
+  suspend fun askText(text: String) = controller.runText(text) { outcomes += it }
 
   /** Advances virtual time in small steps until the condition holds. */
   fun until(condition: () -> Boolean) {
@@ -752,6 +759,130 @@ class AskControllerTest {
   }
 }
 
+// Slice 5 spec §5: asking by text from Home.
+class TextAskTest {
+  // §5.3: no recording; it starts as it is sent, waits for the answer, reads it out, and never goes back to the nav app.
+  @Test
+  fun a_text_ask_starts_at_sending_and_is_read_out_without_returning() = runTest {
+    val h = Harness(this, answers = listOf(done(transcript = null)))
+    h.askText("右手に見える山は何？")
+    assertEquals(listOf("svc:start", "loc:latest", "post", "cue:sent", "get", "play:https://audio/1.mp3", "svc:stop"), h.log)
+    assertEquals(
+      AskBody(volumeDb = 6, text = "右手に見える山は何？", location = Point(35.6812, 139.7671), headingDegrees = 12.5, conversationId = null, rideId = "r1"),
+      h.bodies.single(),
+    )
+    assertEquals(listOf<Pair<Fix?, Long>>(HERE to 0L), h.headingAsked)
+    assertEquals(listOf(Phase.SENDING, Phase.WAITING, Phase.SPEAKING, Phase.IDLE), h.states.map { it.phase })
+    assertEquals(Source.SCREEN, h.states.first().source)
+    assertEquals(listOf(TextAskOutcome.SENT), h.outcomes)
+    // §5.4: kept as a text ask, with what was typed as its question.
+    val kept = h.kept.single()
+    assertEquals(ASK_INPUT_TEXT, kept.input)
+    assertEquals("右手に見える山は何？", kept.transcript)
+    assertEquals(AskOutcome.ANSWERED, kept.outcome)
+    assertTrue(h.metas.isEmpty())
+  }
+
+  // The conversation goes on across voice and text asks alike.
+  @Test
+  fun a_text_ask_carries_the_conversation_on() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000)
+    h.controller.run(Source.HANDSFREE)
+    h.askText("その山の高さは？")
+    assertEquals(listOf(null, "c1"), h.bodies.map { it.conversationId })
+  }
+
+  // §5.3: without a network nothing is sent, nothing is kept (no unreached ask) and SC-03 shows no failure.
+  @Test
+  fun without_a_network_a_text_ask_keeps_nothing_and_tells_the_sheet() = runTest {
+    val h = Harness(this, online = false)
+    h.askText("右手に見える山は何？")
+    assertEquals(listOf(TextAskOutcome.OFFLINE), h.outcomes)
+    assertFalse("post" in h.log)
+    assertTrue(h.kept.isEmpty())
+    assertTrue(h.states.none { it.phase == Phase.FAILED })
+    assertFalse(h.log.any { it.startsWith("say:") || it == "cue:failure" })
+    assertEquals(Phase.IDLE, h.phase)
+  }
+
+  // A network failure on the way is the same: the Backend never took it.
+  @Test
+  fun a_network_failure_on_send_keeps_nothing_and_tells_the_sheet() = runTest {
+    val h = Harness(this, post = { throw ApiError(ApiErrorKind.SERVER, "HTTP 503") })
+    h.askText("右手に見える山は何？")
+    assertEquals(listOf(TextAskOutcome.OFFLINE), h.outcomes)
+    assertTrue(h.kept.isEmpty())
+    assertTrue(h.states.none { it.phase == Phase.FAILED })
+    assertEquals(listOf("svc:start", "loc:latest", "post", "svc:stop"), h.log)
+  }
+
+  // Refusals show why on SC-03 (US-B-06.004), and the sheet keeps the text.
+  @Test
+  fun a_refused_text_ask_says_why_on_screen_and_the_sheet_keeps_the_text() = runTest {
+    val cases = listOf(
+      Harness(this, ride = RideNow.NotRecording) to FailureReason.NOT_RECORDING,
+      Harness(this, ride = RideNow.Paused) to FailureReason.PAUSED,
+      Harness(this, apiKey = null) to FailureReason.NO_KEY,
+      Harness(this, post = { throw ApiError(ApiErrorKind.INVALID_KEY) }) to FailureReason.INVALID_KEY,
+      Harness(this, post = { throw ApiError(ApiErrorKind.BAD_REQUEST) }) to FailureReason.AGENT_FAILED,
+      Harness(this, serviceError = IllegalStateException("background")) to FailureReason.SERVICE,
+    )
+    for ((h, reason) in cases) {
+      h.askText("右手に見える山は何？")
+      assertEquals(listOf(TextAskOutcome.NOT_TAKEN), h.outcomes)
+      assertTrue("$reason", h.states.any { it.phase == Phase.FAILED && it.failure == reason })
+      assertFalse(h.log.any { it.startsWith("return:") })
+      assertTrue(h.kept.isEmpty())
+    }
+  }
+
+  // §5.3: cancelled while waiting for the answer, it is kept nowhere, as a voice ask.
+  @Test
+  fun a_text_ask_cancelled_while_waiting_is_not_kept() = runTest {
+    val h = Harness(this, answers = listOf(PROCESSING, PROCESSING, PROCESSING))
+    val running = launch { h.askText("右手に見える山は何？") }
+    h.until { h.phase == Phase.WAITING }
+    h.controller.cancel()
+    running.join()
+    advanceUntilIdle()
+    assertEquals(listOf(TextAskOutcome.SENT), h.outcomes)
+    assertTrue(h.kept.isEmpty())
+  }
+
+  // §4.1: without a fresh position, the text ask goes without a place, and the heading is asked without one.
+  @Test
+  fun without_a_position_a_text_ask_goes_without_a_place() = runTest {
+    val h = Harness(this, latest = null, heading = null)
+    h.askText("右手に見える山は何？")
+    assertEquals(null, h.bodies.single().location)
+    assertEquals(null, h.bodies.single().headingDegrees)
+    assertEquals(listOf<Pair<Fix?, Long>>(null to 0L), h.headingAsked)
+  }
+
+  @Test
+  fun nothing_starts_while_an_ask_runs() = runTest {
+    val h = Harness(this, stopAfterMs = null)
+    launch { h.controller.run(Source.HANDSFREE) }
+    h.until { h.phase == Phase.RECORDING }
+    h.controller.askText("右手に見える山は何？") { h.outcomes += it }
+    assertEquals(listOf(TextAskOutcome.NOT_TAKEN), h.outcomes)
+    h.controller.cancel()
+    advanceUntilIdle()
+    assertTrue(h.bodies.isEmpty())
+  }
+
+  @Test
+  fun the_sheet_takes_500_characters_and_no_blank_question() {
+    assertEquals(500, TEXT_ASK_MAX)
+    assertEquals(500, cutTextAsk("あ".repeat(600)).length)
+    val emoji = "😀".repeat(501)
+    assertEquals(500, cutTextAsk(emoji).codePointCount(0, cutTextAsk(emoji).length))
+    assertEquals(497, textAskLeft("山は何"))
+    assertEquals(null, textQuestion(" \n "))
+    assertEquals("山は何？", textQuestion("  山は何？ \n"))
+  }
+}
+
 class AskRecordTest {
   private val sent = SentAsk("a1", "c1", true, 5_000, Fix(35.0, 139.0, 4_000, 5.0), "r1")
 
@@ -771,6 +902,14 @@ class AskRecordTest {
     val failed = askRecord(sent, AskResult("a1", "failed", "Q", null), 9_000)
     assertEquals(AskOutcome.FAILED, failed.outcome)
     assertEquals("agent_failed", failed.failure)
+  }
+
+  // Slice 5 spec §5.4: a text ask keeps what was typed, also when it timed out without a result.
+  @Test
+  fun a_text_ask_is_kept_as_text_with_what_was_typed() {
+    val text = sent.copy(input = ASK_INPUT_TEXT, question = "山は何？")
+    assertEquals(ASK_INPUT_TEXT to "山は何？", askRecord(text, null, 9_000).let { it.input to it.transcript })
+    assertEquals(ASK_INPUT_VOICE, askRecord(sent, null, 9_000).input)
   }
 }
 

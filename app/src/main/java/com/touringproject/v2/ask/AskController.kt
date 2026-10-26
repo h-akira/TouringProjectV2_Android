@@ -79,6 +79,15 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     if (!isBusy(state)) scope.launch { run(Source.SCREEN) }
   }
 
+  /** Home's text sheet (slice 5 spec §5.3). taken is told once what became of it; nothing starts while an ask runs. */
+  fun askText(text: String, taken: (TextAskOutcome) -> Unit) {
+    if (isBusy(state)) {
+      taken(TextAskOutcome.NOT_TAKEN)
+      return
+    }
+    scope.launch { runText(text, taken) }
+  }
+
   fun stopRecording() {
     if (state.phase == Phase.RECORDING) dispatch(FlowEvent.StopRecording(deps.now()))
   }
@@ -154,6 +163,111 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
         stopService()
       }
     }
+  }
+
+  /**
+   * A text ask (slice 5 spec §5.3): from the screen, so it never returns to the nav app. It starts as it is sent (SC-03's
+   * 送っています…) and goes on like a voice ask once the Backend has taken it. Without a network it keeps nothing and
+   * shows no failure: the sheet says so and keeps the text, as the rider has stopped and can send it again.
+   */
+  suspend fun runText(text: String, taken: (TextAskOutcome) -> Unit) {
+    val d = deps
+    if (state.phase == Phase.FAILED) d.speech.stop()
+    val run = Run(++runId, Source.SCREEN)
+    current = run
+    runsStarted += 1
+    var told = false
+    val tell = { outcome: TextAskOutcome ->
+      if (!told) {
+        told = true
+        taken(outcome)
+      }
+    }
+    dispatch(FlowEvent.StartText(d.now()))
+    try {
+      val ride = d.ride()
+      refusal(ride)?.let {
+        tell(TextAskOutcome.NOT_TAKEN)
+        fail(it, run)
+        return
+      }
+      val rideId = (ride as RideNow.Recording).rideId
+      val apiKey = d.apiKey()
+      if (apiKey == null) {
+        tell(TextAskOutcome.NOT_TAKEN)
+        fail(FailureReason.NO_KEY, run)
+        return
+      }
+      if (!d.online()) {
+        tell(TextAskOutcome.OFFLINE)
+        return
+      }
+      val settings = d.settings()
+      val api = d.api(apiKey, settings.userName)
+      try {
+        d.service.start()
+      } catch (e: Exception) {
+        d.log("service_failed", mapOf("error" to e.toString()))
+        tell(TextAskOutcome.NOT_TAKEN)
+        fail(FailureReason.SERVICE, run)
+        return
+      }
+      serviceRunning = true
+      val here = d.location.latest()
+      if (!isCurrent(run)) return
+      val sent = sendText(text, here, d.heading(here, d.now()), rideId, api, run, tell) ?: return
+      val result = waitForAnswer(sent, null, api, run) ?: return
+      speak(result, settings, run)
+    } finally {
+      // Cancelled before the Backend took it: the rider let it go, and the sheet keeps the text.
+      tell(TextAskOutcome.NOT_TAKEN)
+      if (isCurrent(run)) {
+        current = null
+        dispatch(FlowEvent.Dismiss(d.now()))
+        stopService()
+      }
+    }
+  }
+
+  private suspend fun sendText(
+    text: String,
+    here: Fix?,
+    heading: Double?,
+    rideId: String,
+    api: AskApi,
+    run: Run,
+    tell: (TextAskOutcome) -> Unit,
+  ): SentAsk? {
+    val d = deps
+    val body = AskBody(
+      volumeDb = d.settings().answerVolumeDb,
+      text = text,
+      location = here?.let { Point(it.latitude, it.longitude) },
+      headingDegrees = heading,
+      conversationId = d.conversation.current(d.now()),
+      rideId = rideId,
+    )
+    val accepted = try {
+      api.postAsk(body)
+    } catch (e: Exception) {
+      d.log("post_failed", mapOf("kind" to ((e as? ApiError)?.kind?.name ?: "unknown")))
+      when (val reason = reasonFor(e)) {
+        FailureReason.NETWORK -> tell(TextAskOutcome.OFFLINE)
+        else -> {
+          tell(TextAskOutcome.NOT_TAKEN)
+          // A refused text is no speech not heard: say that it could not be answered.
+          fail(if (reason == FailureReason.NO_SPEECH) FailureReason.AGENT_FAILED else reason, run)
+        }
+      }
+      return null
+    }
+    // The Backend has it either way: the sheet's text has gone, and the conversation goes on.
+    tell(TextAskOutcome.SENT)
+    d.conversation.update(accepted.conversationId, accepted.conversationExpiresAt)
+    if (!isCurrent(run)) return null
+    dispatch(FlowEvent.Sent(accepted.askId, d.now()))
+    d.cues.sent()
+    return SentAsk(accepted.askId, accepted.conversationId, body.conversationId == null, d.now(), here, rideId, ASK_INPUT_TEXT, text)
   }
 
   private fun stopService() {
@@ -300,7 +414,8 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     fail(FailureReason.NETWORK, run)
   }
 
-  private suspend fun waitForAnswer(sent: SentAsk, recordingName: String, api: AskApi, run: Run): AskResult? {
+  /** recordingName is the kept recording to add what was heard to; a text ask has none. */
+  private suspend fun waitForAnswer(sent: SentAsk, recordingName: String?, api: AskApi, run: Run): AskResult? {
     val d = deps
     var sinceCue = 0L
     val sleep: suspend (Long) -> Unit = { ms ->
@@ -317,8 +432,9 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       fail(reasonFor(e), run)
       return null
     }
-    if (outcome is PollOutcome.Done) outcome.result.transcript?.let { d.recordings.transcribed(recordingName, it) }
-    // Kept even when the rider has cancelled meanwhile: the Backend has the ask either way.
+    if (outcome is PollOutcome.Done && recordingName != null) outcome.result.transcript?.let { d.recordings.transcribed(recordingName, it) }
+    // A result that has already arrived is kept even if the rider cancels at the same moment; a cancel while waiting
+    // stops the poll (Cancelled) and keeps nothing (Android #30).
     when (outcome) {
       is PollOutcome.Done -> d.asks.keep(askRecord(sent, outcome.result, d.now()))
       PollOutcome.Timeout -> d.asks.keep(askRecord(sent, null, d.now()))
