@@ -41,6 +41,7 @@ import com.touringproject.v2.records.NoteDraft
 import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.settings.LaunchableApp
+import com.touringproject.v2.settings.withRecordingDefaults
 import com.touringproject.v2.sync.TakeOp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -54,6 +55,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object ReturnAppKey : NavKey
 @Serializable data object VolumeKey : NavKey
 @Serializable data object RecordingsKey : NavKey
+@Serializable data object RecordingSettingsKey : NavKey
 @Serializable data object RideRecordingKey : NavKey
 @Serializable data object DataKey : NavKey
 @Serializable data object RecordsKey : NavKey
@@ -232,6 +234,18 @@ fun AppUi(graph: AppGraph) {
                   modifier = Modifier.safeDrawingPadding(),
                   saved = saveRowValue(summary ?: SaveSummary()),
                   onData = { tabs.push(DataKey) },
+                  onRecordingSettings = { tabs.push(RecordingSettingsKey) },
+                )
+              }
+              entry<RecordingSettingsKey> {
+                RecordingSettingsScreen(
+                  current,
+                  { next -> scope.launch { graph.settings.update(next) } },
+                  onReset = {
+                    scope.launch { graph.settings.update(current.withRecordingDefaults()) }
+                    Toast.makeText(context, "既定値に戻しました", Toast.LENGTH_SHORT).show()
+                  },
+                  modifier = Modifier.safeDrawingPadding(),
                 )
               }
               entry<DataKey> {

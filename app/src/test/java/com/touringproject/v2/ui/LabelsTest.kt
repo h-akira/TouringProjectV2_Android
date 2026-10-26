@@ -12,6 +12,7 @@ import com.touringproject.v2.recordings.TRIAL_IDLE
 import com.touringproject.v2.recordings.TrialPhase
 import com.touringproject.v2.recordings.TrialState
 import com.touringproject.v2.settings.LaunchableApp
+import com.touringproject.v2.settings.Settings
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -111,6 +112,13 @@ class LabelsTest {
     assertEquals("止めて聞く", trialText(TrialState(phase = TrialPhase.RECORDING)).button)
     assertEquals("再生中: インカム（M1-S PRO）", trialText(TrialState(phase = TrialPhase.PLAYING, device = InputDevice(InputDevice.Type.BLUETOOTH, "M1-S PRO"))).status)
     assertEquals("録ったマイク: 本体のマイク", trialText(TrialState(phoneMic = true)).status)
+  }
+
+  @Test
+  fun the_recording_row_says_the_limit_and_the_cue() {
+    assertEquals(listOf("なし", "0.5秒", "1秒", "1.5秒", "2秒", "3秒"), listOf(0, 500, 1_000, 1_500, 2_000, 3_000).map(::cueLabel))
+    assertEquals("上限 20秒 · 合図 1.5秒", recordingRowValue(Settings("rider01")))
+    assertEquals("上限 60秒 · 合図 なし", recordingRowValue(Settings("rider01", recordLimitSeconds = 60, startCueMs = 0)))
   }
 
   @Test

@@ -346,10 +346,45 @@ class SettingsScreensTest {
         Settings("rider01", answerVolumeDb = 3, maxRecordingHours = 12), null, {}, {}, { opened += "ride" }, {}, { opened += "volume" }, { opened += "recordings" }, "0.2.0",
       )
     }
-    rule.onNodeWithText("最長 12時間").performClick()
-    rule.onNodeWithText("+3dB").performClick()
+    rule.onNodeWithText("最長 12時間").performScrollTo().performClick()
+    rule.onNodeWithText("+3dB").performScrollTo().performClick()
     rule.onNodeWithText("録音の確認").performScrollTo().performClick()
     assertEquals(listOf("ride", "volume", "recordings"), opened)
+  }
+
+  // Slice 5 spec §6: SC-09's row says SC-11's values and opens it.
+  @Test
+  fun the_settings_list_leads_to_the_recording_settings() {
+    var opened = false
+    rule.setContent {
+      SettingsScreen(Settings("rider01", recordLimitSeconds = 45, startCueMs = 0), null, {}, {}, {}, {}, {}, {}, "0.2.0", onRecordingSettings = { opened = true })
+    }
+    rule.onNodeWithText("録音の設定").assertExists()
+    rule.onNodeWithText("上限 45秒 · 合図 なし").performScrollTo().performClick()
+    assertTrue(opened)
+  }
+
+  // SC-11: the limit goes in 5 s steps from 10 to 60 s, and the cue is one of six lengths.
+  @Test
+  fun the_recording_limit_steps_by_5_seconds_within_10_to_60_and_the_cue_is_chosen() {
+    var settings by mutableStateOf(Settings("rider01"))
+    var resets = 0
+    rule.setContent { RecordingSettingsScreen(settings, { settings = it }, { resets++ }) }
+    rule.onNodeWithTag("limitValue").assertTextEquals("20秒")
+    rule.onNodeWithTag("limitUp").performClick()
+    rule.onNodeWithTag("limitValue").assertTextEquals("25秒")
+    settings = settings.copy(recordLimitSeconds = 60)
+    rule.onNodeWithTag("limitUp").assertIsNotEnabled()
+    settings = settings.copy(recordLimitSeconds = 10)
+    rule.onNodeWithTag("limitDown").assertIsNotEnabled()
+    rule.onNodeWithTag("limitUp").assertIsEnabled()
+    for ((ms, label) in listOf(0 to "なし", 500 to "0.5秒", 1_000 to "1秒", 1_500 to "1.5秒", 2_000 to "2秒", 3_000 to "3秒")) {
+      rule.onNodeWithTag("cue-$ms").assertTextEquals(label)
+    }
+    rule.onNodeWithTag("cue-3000").performClick()
+    assertEquals(3_000, settings.startCueMs)
+    rule.onNodeWithTag("recordingDefaults").performClick()
+    assertEquals(1, resets)
   }
 
   @Test

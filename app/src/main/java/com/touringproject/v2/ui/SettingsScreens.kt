@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.touringproject.v2.api.ApiError
@@ -43,7 +44,9 @@ import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.recordings.KEEP_RECORDINGS
 import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.MAX_RECORDING_HOURS_CHOICES
+import com.touringproject.v2.settings.RECORD_LIMIT_SECONDS_CHOICES
 import com.touringproject.v2.settings.ReturnTiming
+import com.touringproject.v2.settings.START_CUE_MS_CHOICES
 import com.touringproject.v2.settings.Settings
 import com.touringproject.v2.settings.USER_NAME_RE
 import com.touringproject.v2.settings.VOLUME_DB_CHOICES
@@ -87,6 +90,7 @@ fun SettingsScreen(
   /** SC-14's row: 保存済み or 未送信あり (slice 4 spec §7.1). */
   saved: String = "",
   onData: () -> Unit = {},
+  onRecordingSettings: () -> Unit = {},
 ) {
   val returnValue = if (!settings.returnEnabled) "戻らない" else settings.returnApp?.label ?: "未設定"
   // Scrolls: the list outgrows a small screen.
@@ -96,6 +100,8 @@ fun SettingsScreen(
     SettingsRow("☁️ データの保存", saved, onData)
     SettingsRow("走行の記録", "最長 ${settings.maxRecordingHours}時間", onRideRecording)
     SettingsRow("応答後に戻るアプリ", returnValue, onReturnApp)
+    // Next to the other settings of an ask, as the mock puts it (slice 5 spec §14).
+    SettingsRow("録音の設定", recordingRowValue(settings), onRecordingSettings)
     SettingsRow("回答の音量", "+${settings.answerVolumeDb}dB", onVolume)
     SettingsRow("録音の確認", "", onRecordings)
     SettingsRow("バージョン", version, null, Modifier.testTag("versionRow"))
@@ -217,6 +223,47 @@ fun RideRecordingScreen(settings: Settings, onUpdate: (Settings) -> Unit, modifi
       color = Color(0xFF666666),
       fontSize = 14.sp,
     )
+  }
+}
+
+/**
+ * SC-11 (slice 5 spec §6): how long a question may be recorded, and the start cue. Each change is saved at once and
+ * takes effect from the next question and trial. onReset puts both back (SC-11's 「既定値に戻す」, told by a toast).
+ */
+@Composable
+fun RecordingSettingsScreen(settings: Settings, onUpdate: (Settings) -> Unit, onReset: () -> Unit, modifier: Modifier = Modifier) {
+  val muted = Color(0xFF666666)
+  val limit = settings.recordLimitSeconds
+  val choices = RECORD_LIMIT_SECONDS_CHOICES
+  Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Text("録音の上限", fontSize = 18.sp)
+    Text("インカムのボタンを再度押さなくても、この時間で自動的に送ります", color = muted, fontSize = 14.sp)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+      Button(
+        onClick = { onUpdate(settings.copy(recordLimitSeconds = choices[choices.indexOf(limit) - 1])) },
+        enabled = limit > choices.first(),
+        modifier = Modifier.testTag("limitDown"),
+      ) { Text("−", fontSize = 20.sp) }
+      Text("${limit}秒", Modifier.weight(1f).testTag("limitValue"), fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+      Button(
+        onClick = { onUpdate(settings.copy(recordLimitSeconds = choices[choices.indexOf(limit) + 1])) },
+        enabled = limit < choices.last(),
+        modifier = Modifier.testTag("limitUp"),
+      ) { Text("＋", fontSize = 20.sp) }
+    }
+    Text("開始の合図", fontSize = 18.sp)
+    Text("録音が始まったことを知らせる音の長さ。インカムは音の出だしを落とすので、短いと聞こえにくいことがあります", color = muted, fontSize = 14.sp)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+      START_CUE_MS_CHOICES.forEach { ms ->
+        FilterChip(
+          selected = settings.startCueMs == ms,
+          onClick = { onUpdate(settings.copy(startCueMs = ms)) },
+          label = { Text(cueLabel(ms), fontSize = 13.sp) },
+          modifier = Modifier.weight(1f).testTag("cue-$ms"),
+        )
+      }
+    }
+    Button(onClick = onReset, modifier = Modifier.fillMaxWidth().testTag("recordingDefaults")) { Text("既定値に戻す", fontSize = 16.sp) }
   }
 }
 

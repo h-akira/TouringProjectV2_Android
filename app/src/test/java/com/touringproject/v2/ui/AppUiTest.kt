@@ -15,11 +15,13 @@ import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.end
 import com.touringproject.v2.ride.newRide
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.shadows.ShadowToast
 
 @RunWith(AndroidJUnit4::class)
 class AppUiTest {
@@ -52,6 +54,22 @@ class AppUiTest {
     rule.onNodeWithText("☁️ データの保存").performClick()
     rule.onNodeWithTag("saveState").assertExists()
     rule.onNodeWithText("クラウドから読み直す").assertExists()
+  }
+
+  // Slice 5 spec §6: SC-11 opens from the settings, saves each change at once, and puts both values back with a toast.
+  @Test
+  fun the_recording_settings_save_at_once_and_go_back_to_their_defaults() {
+    val graph = (rule.activity.application as TouringApp).graph
+    rule.onNodeWithTag("tab-SETTINGS").performClick()
+    rule.onNodeWithText("上限 20秒 · 合図 1.5秒").performScrollTo().performClick()
+    rule.onNodeWithTag("limitUp").performClick()
+    rule.onNodeWithTag("cue-0").performClick()
+    rule.waitUntil(5_000) { graph.settings.current().let { it.recordLimitSeconds == 25 && it.startCueMs == 0 } }
+    rule.onNodeWithTag("recordingDefaults").performClick()
+    rule.waitUntil(5_000) { graph.settings.current().let { it.recordLimitSeconds == 20 && it.startCueMs == 1_500 } }
+    assertEquals("既定値に戻しました", ShadowToast.getTextOfLatestToast())
+    back()
+    rule.onNodeWithText("上限 20秒 · 合図 1.5秒").assertExists()
   }
 
   @Test

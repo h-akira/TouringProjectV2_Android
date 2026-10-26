@@ -97,6 +97,13 @@ class SettingsTest {
     assertEquals(Settings("rider01"), decodeSettings(odd).first)
   }
 
+  // SC-11's 「既定値に戻す」 puts back its two values only.
+  @Test
+  fun the_recording_defaults_leave_the_other_settings_as_they_are() {
+    val s = Settings("rider01", answerVolumeDb = 3, recordLimitSeconds = 45, startCueMs = 0, headingHoldMinutes = 2)
+    assertEquals(s.copy(recordLimitSeconds = 20, startCueMs = 1_500), s.withRecordingDefaults())
+  }
+
   @Test
   fun not_json_falls_back_to_defaults() {
     val (s, needsSave) = decodeSettings("{not json", Random(3))

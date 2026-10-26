@@ -69,6 +69,9 @@ data class Settings(
 /** The longest a question is recorded (SC-11). */
 val Settings.recordLimitMs: Long get() = recordLimitSeconds * 1_000L
 
+/** SC-11's 「既定値に戻す」: both of its values, and nothing else. */
+fun Settings.withRecordingDefaults(): Settings = copy(recordLimitSeconds = DEFAULT_RECORD_LIMIT_SECONDS, startCueMs = DEFAULT_START_CUE_MS)
+
 val Settings.headingParams: HeadingParams get() = HeadingParams(headingReferenceMeters, headingAccuracyMeters, headingHoldMinutes)
 
 /**
