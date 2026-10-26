@@ -52,7 +52,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   // Per-ask state: an older ask that is still unwinding must not read or change the newer one's.
   private class Run(val id: Int, val source: Source, var returned: Boolean = false)
 
-  // meta and pcm go to SC-12 once the ask has reached the Backend, or failed there; an unreached ask's recording goes.
+  // meta and pcm go to SC-12 as the ask is sent; an unreached ask's recording goes again (Android #68).
   // heading is worked out once, where the recording ended, for the ask sent and the unreached one alike.
   private class Recording(
     val audio: String,
@@ -377,6 +377,9 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       conversationId = d.conversation.current(d.now()),
       rideId = rideId,
     )
+    // Kept for SC-12 before the POST, which may take retries: the process may die meanwhile, and an ask the Backend took
+    // should keep its recording (Android #68). One that never reaches the Backend loses it again (US-C-09.001).
+    d.recordings.saved(recording.meta, recording.pcm)
     val accepted = try {
       api.postAsk(body)
     } catch (e: Exception) {
@@ -384,14 +387,13 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       val reason = reasonFor(e)
       // The Backend did not take the ask in (slice 4 spec §4.1); a refusal (the key, the request) is no unreached ask.
       if (reason == FailureReason.NETWORK) {
+        d.recordings.discarded(recording.name)
         keepUnreached(recording, rideId, run)
         return null
       }
-      d.recordings.saved(recording.meta, recording.pcm)
       fail(reason, run)
       return null
     }
-    d.recordings.saved(recording.meta, recording.pcm)
     // The ask exists on the Backend either way, so keep the conversation going even if it was cancelled.
     d.conversation.update(accepted.conversationId, accepted.conversationExpiresAt)
     if (!isCurrent(run)) return null

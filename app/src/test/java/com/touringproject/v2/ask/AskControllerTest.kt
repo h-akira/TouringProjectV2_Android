@@ -79,8 +79,10 @@ private class Harness(
   val log = mutableListOf<String>()
   val states = mutableListOf<FlowState>()
   val bodies = mutableListOf<AskBody>()
+  /** The recordings SC-12 keeps now: saved and not discarded again. */
   val metas = mutableListOf<RecordingMeta>()
   val keptPcm = mutableListOf<ByteArray>()
+  val discarded = mutableListOf<String>()
   val transcripts = mutableListOf<Pair<String, String>>()
   val kept = mutableListOf<AskRecord>()
   private val results = answers.toMutableList()
@@ -126,6 +128,11 @@ private class Harness(
     },
     recordings = object : RecordingSink {
       override fun saved(meta: RecordingMeta, pcm: ByteArray) { metas += meta; keptPcm += pcm }
+      override fun discarded(name: String) {
+        discarded += name
+        val at = metas.indexOfFirst { it.name == name }
+        if (at >= 0) { metas.removeAt(at); keptPcm.removeAt(at) }
+      }
       override fun transcribed(name: String, transcript: String) { transcripts += name to transcript }
     },
     asks = { kept += it },
@@ -681,6 +688,25 @@ class AskControllerTest {
     h.controller.run(Source.HANDSFREE)
     assertTrue(h.kept.isEmpty())
     assertEquals(1, h.metas.size)
+  }
+
+  // Android #68: the recording is kept before the POST and its retries, so a process that dies meanwhile does not lose
+  // the recording of an ask the Backend took; one whose send failed on the network goes again.
+  @Test
+  fun the_recording_is_kept_before_the_post_and_goes_again_when_the_network_fails() = runTest {
+    var keptAtPost = -1
+    lateinit var h: Harness
+    h = Harness(this, stopAfterMs = 1_000, post = { keptAtPost = h.metas.size; ACCEPTED })
+    h.controller.run(Source.HANDSFREE)
+    assertEquals(1, keptAtPost)
+    assertEquals(1, h.metas.size)
+    assertTrue(h.discarded.isEmpty())
+    val failed = Harness(this, stopAfterMs = 1_000)
+    failed.post = { keptAtPost = failed.metas.size; throw ApiError(ApiErrorKind.NETWORK) }
+    failed.controller.run(Source.HANDSFREE)
+    assertEquals(1, keptAtPost)
+    assertEquals(listOf("rec-0.pcm"), failed.discarded)
+    assertTrue(failed.metas.isEmpty())
   }
 
   // The rider cancelled while the ask was being sent: they let it go, so it is not kept even when the send fails.

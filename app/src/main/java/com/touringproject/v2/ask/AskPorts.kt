@@ -38,10 +38,12 @@ data class RecordingMeta(
   val transcript: String?,
 )
 
-/** Fire and forget: a failure here must not end the ask. */
+/** Fire and forget: a failure here must not end the ask. Each call is carried out after the ones before it. */
 interface RecordingSink {
   fun saved(meta: RecordingMeta, pcm: ByteArray)
   fun transcribed(name: String, transcript: String)
+  /** The recording saved goes again: its ask never reached the Backend (US-C-09.001). */
+  fun discarded(name: String)
 }
 
 /** Fire and forget: a failure to keep an ask must not end it. */
