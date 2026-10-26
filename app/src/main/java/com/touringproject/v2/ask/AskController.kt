@@ -109,17 +109,12 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     try {
       // Slice 2 spec §4.7: only a recording ride takes asks. Read once, so pausing meanwhile neither stops the ask nor
       // takes it out of the ride.
-      val rideId = when (val ride = d.ride()) {
-        is RideNow.Recording -> ride.rideId
-        RideNow.Paused -> {
-          fail(FailureReason.PAUSED, run)
-          return
-        }
-        RideNow.NotRecording -> {
-          fail(FailureReason.NOT_RECORDING, run)
-          return
-        }
+      val ride = d.ride()
+      refusal(ride)?.let {
+        fail(it, run)
+        return
       }
+      val rideId = (ride as RideNow.Recording).rideId
       val apiKey = d.apiKey()
       if (apiKey == null) {
         fail(FailureReason.NO_KEY, run)

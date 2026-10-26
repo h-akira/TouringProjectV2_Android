@@ -737,6 +737,19 @@ class AskControllerTest {
     assertEquals(listOf("vol:read", "cue:failure", "say:一時停止中は質問できません。再開すると質問できます。", "return:maps"), h.log)
     assertTrue(h.states.any { it.phase == Phase.FAILED && it.failure == FailureReason.PAUSED })
   }
+
+  // Android #48: from the screen (normally its button cannot be pressed then), a refused ask shows why on SC-03 and stays
+  // in this app.
+  @Test
+  fun a_screen_ask_without_a_recording_ride_is_refused_on_screen_and_stays_here() = runTest {
+    for ((ride, reason) in listOf(RideNow.NotRecording to FailureReason.NOT_RECORDING, RideNow.Paused to FailureReason.PAUSED)) {
+      val h = Harness(this, ride = ride)
+      h.controller.run(Source.SCREEN)
+      assertTrue(h.states.any { it.phase == Phase.FAILED && it.failure == reason && it.source == Source.SCREEN })
+      assertFalse(h.log.any { it.startsWith("return:") || it == "svc:start" || it == "rec:start" })
+      assertTrue(h.kept.isEmpty())
+    }
+  }
 }
 
 class AskRecordTest {
@@ -769,5 +782,12 @@ class RideNowTest {
     assertEquals(RideNow.Recording("r1"), rideNow(ride))
     assertEquals(RideNow.Paused, rideNow(ride.pause(5_000)))
     assertEquals(RideNow.NotRecording, rideNow(null))
+  }
+
+  @Test
+  fun only_a_recording_ride_has_no_refusal() {
+    assertEquals(null, refusal(RideNow.Recording("r1")))
+    assertEquals(FailureReason.PAUSED, refusal(RideNow.Paused))
+    assertEquals(FailureReason.NOT_RECORDING, refusal(RideNow.NotRecording))
   }
 }

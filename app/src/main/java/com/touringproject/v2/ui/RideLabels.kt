@@ -1,5 +1,8 @@
 package com.touringproject.v2.ui
 
+import com.touringproject.v2.ask.FailureReason
+import com.touringproject.v2.ask.RideNow
+import com.touringproject.v2.ask.refusal
 import com.touringproject.v2.ride.Pauses
 import com.touringproject.v2.ride.Ride
 import com.touringproject.v2.ride.RideStatus
@@ -35,12 +38,12 @@ fun pausesLabel(pauses: Pauses): String? =
   if (pauses.count == 0) null else "一時停止 ${pauses.count}回（${pauses.totalMs / 60_000}分）は走行時間に含めません"
 
 /**
- * What Home says under the intercom line when no ask can start (slice 2 spec §4.7, §7.2): null while a ride records,
- * so the line says the intercom is ready.
+ * What Home says under the intercom line when no ask can start (slice 2 spec §4.7, §7.2): null while asks are taken,
+ * so the line says the intercom is ready. It follows the ask loop's own refusal (Android #48).
  */
-fun askHint(ride: Ride?): String? = when (ride?.status) {
-  RideStatus.RECORDING -> null
-  RideStatus.PAUSED -> "再開すると、インカムのボタンで話せます"
+fun askHint(ride: RideNow): String? = when (refusal(ride)) {
+  null -> null
+  FailureReason.PAUSED -> "再開すると、インカムのボタンで話せます"
   else -> "走行を開始すると、インカムのボタンで話せます"
 }
 

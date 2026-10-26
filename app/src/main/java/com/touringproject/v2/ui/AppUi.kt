@@ -37,6 +37,7 @@ import com.touringproject.v2.AppGraph
 import com.touringproject.v2.BuildConfig
 import com.touringproject.v2.api.ApiClient
 import com.touringproject.v2.ask.isBusy
+import com.touringproject.v2.ask.rideNow
 import com.touringproject.v2.records.NoteDraft
 import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.ride.RideStatus
@@ -139,7 +140,7 @@ fun AppUi(graph: AppGraph) {
                     askStoreFailed = askStoreFailed,
                   ),
                   conversation = conversationLabel(expiresAt, System.currentTimeMillis()),
-                  askHint = askHint(ride),
+                  askHint = askHint(rideNow(ride)),
                 )
                 HomeScreen(
                   ui = ui,

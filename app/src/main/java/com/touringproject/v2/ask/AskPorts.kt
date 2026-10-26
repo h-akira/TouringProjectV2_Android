@@ -98,6 +98,16 @@ fun rideNow(active: Ride?): RideNow = when {
   else -> RideNow.Recording(active.id)
 }
 
+/**
+ * Why an ask is not taken now, or null when it is (slice 2 spec §4.7). The ask loop and Home's buttons both decide by
+ * this, so the two never part (Android #48).
+ */
+fun refusal(ride: RideNow): FailureReason? = when (ride) {
+  is RideNow.Recording -> null
+  RideNow.Paused -> FailureReason.PAUSED
+  RideNow.NotRecording -> FailureReason.NOT_RECORDING
+}
+
 class AskDeps(
   val now: () -> Long,
   val sleep: suspend (Long) -> Unit,
