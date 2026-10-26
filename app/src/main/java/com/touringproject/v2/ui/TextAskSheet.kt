@@ -13,7 +13,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -30,7 +29,8 @@ const val TEXT_ASK_OFFLINE_MESSAGE = "通信できません"
 
 /**
  * Home's text sheet (slice 5 spec §5.2): whether it is open, what is typed, what it says, and whether a send is under
- * way. It lives above the sheet, so the text stays while SC-03 covers the screen and the sheet comes back with it.
+ * way. AppGraph holds it for the process, so the text stays while SC-03 covers the screen and the sheet comes back with
+ * it, and an outcome after the activity was recreated still reaches it.
  */
 data class TextSheet(val open: Boolean = false, val text: String = "", val message: String? = null, val sending: Boolean = false)
 
@@ -40,12 +40,6 @@ fun TextSheet.after(outcome: TextAskOutcome): TextSheet = when (outcome) {
   TextAskOutcome.OFFLINE -> copy(sending = false, message = TEXT_ASK_OFFLINE_MESSAGE)
   TextAskOutcome.NOT_TAKEN -> copy(sending = false, message = null)
 }
-
-/** Keeps the sheet when the activity is recreated, like SC-17's name. */
-val TextSheetSaver = listSaver<TextSheet, Any?>(
-  save = { listOf(it.open, it.text, it.message) },
-  restore = { TextSheet(it[0] as Boolean, it[1] as String, it[2] as String?) },
-)
 
 /**
  * SC-02's 「⌨ 文字で質問」 sheet (slice 5 spec §5.2): up to 500 characters with what is left, 「質問する」 only for a

@@ -46,6 +46,7 @@ import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.withRecordingDefaults
 import com.touringproject.v2.sync.TakeOp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 import kotlinx.serialization.Serializable
@@ -102,8 +103,9 @@ fun AppUi(graph: AppGraph) {
   var mapFull by remember { mutableStateOf(false) }
   // Saveable: SC-17 and SC-04 stay open when the activity is recreated, e.g. on rotation (Android #20).
   var sheet by rememberSaveable { mutableStateOf<RideSheet?>(null) }
-  // Home's text sheet (slice 5 spec §5.2); kept while SC-03 covers the screen, so a text not taken comes back.
-  var textSheet by rememberSaveable(stateSaver = TextSheetSaver) { mutableStateOf(TextSheet()) }
+  // Home's text sheet (slice 5 spec §5.2); kept by AppGraph while SC-03 covers the screen, so a text not taken comes
+  // back, and an outcome that comes after the activity was recreated still reaches it.
+  val textSheet by graph.textSheet.collectAsStateWithLifecycle()
   val now = rememberNow(ride != null)
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
@@ -179,7 +181,7 @@ fun AppUi(graph: AppGraph) {
                       }
                     }
                   },
-                  onTextAsk = { textSheet = textSheet.copy(open = true, message = null) },
+                  onTextAsk = { graph.textSheet.update { it.copy(open = true, message = null) } },
                 )
               }
               entry<RecordsKey> {
@@ -380,14 +382,14 @@ fun AppUi(graph: AppGraph) {
         if (textSheet.open && state.phase == Phase.IDLE) {
           TextAskSheet(
             textSheet,
-            onText = { textSheet = textSheet.copy(text = it) },
+            onText = { text -> graph.textSheet.update { it.copy(text = text) } },
             onSend = { question ->
-              if (!textSheet.sending) {
-                textSheet = textSheet.copy(sending = true, message = null)
-                graph.controller.askText(question) { outcome -> textSheet = textSheet.after(outcome) }
+              if (!graph.textSheet.value.sending) {
+                graph.textSheet.update { it.copy(sending = true, message = null) }
+                graph.controller.askText(question) { outcome -> graph.textSheet.update { it.after(outcome) } }
               }
             },
-            onDismiss = { textSheet = TextSheet() },
+            onDismiss = { graph.textSheet.value = TextSheet() },
           )
         }
         Column(Modifier.fillMaxSize()) {

@@ -71,6 +71,7 @@ import com.touringproject.v2.store.RoomSyncStore
 import com.touringproject.v2.store.RoomTakeover
 import com.touringproject.v2.store.toPoint
 import com.touringproject.v2.sync.RideSync
+import com.touringproject.v2.ui.TextSheet
 import com.touringproject.v2.sync.Takeover
 import com.touringproject.v2.sync.credentialChanges
 import com.touringproject.v2.sync.reconnections
@@ -198,6 +199,12 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
 
   /** The media volume for Home's band and SC-03's (slice 1 spec §5.6). */
   val mediaVolume = MediaVolumeWatch { audioRoute.mediaVolume() }
+
+  /**
+   * Home's text sheet (slice 5 spec §5.2). Held for the process, not the activity: a text ask's outcome may come after the
+   * activity was recreated (rotated while SC-03 shows), and it must close the sheet that is shown then.
+   */
+  val textSheet = MutableStateFlow(TextSheet())
 
   private val flowState = MutableStateFlow(IDLE)
   val state: StateFlow<FlowState> = flowState.asStateFlow()

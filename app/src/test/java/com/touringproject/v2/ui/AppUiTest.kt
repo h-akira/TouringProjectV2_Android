@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.touringproject.v2.MainActivity
 import com.touringproject.v2.TouringApp
+import com.touringproject.v2.ask.TextAskOutcome
 import com.touringproject.v2.ride.EndReason
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.end
@@ -142,6 +143,22 @@ class AppUiTest {
     rule.waitUntil(5_000) { rule.onAllNodesWithTagExists("textAskInput") }
     rule.onNodeWithTag("textAskInput").assertTextContains("右手の山は？")
     rule.onNodeWithText("やめる").performClick()
+    rule.waitUntil(5_000) { !rule.onAllNodesWithTagExists("textAskInput") }
+  }
+
+  // A text ask's outcome comes after the activity was recreated (rotated while SC-03 shows): it still reaches the sheet,
+  // so a question that was sent does not come back to be sent again.
+  @Test
+  fun a_text_asks_outcome_reaches_the_sheet_after_the_activity_is_recreated() {
+    val graph = (rule.activity.application as TouringApp).graph
+    runBlocking { graph.rides.start("箱根") }
+    rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasTestTag("textAsk").and(androidx.compose.ui.test.isEnabled())).fetchSemanticsNodes().isNotEmpty() }
+    rule.onNodeWithTag("textAsk").performClick()
+    rule.onNodeWithTag("textAskInput").performTextInput("右手の山は？")
+    rule.runOnUiThread { graph.textSheet.value = graph.textSheet.value.copy(sending = true) }
+    rule.activityRule.scenario.recreate()
+    rule.waitUntil(5_000) { rule.onAllNodesWithTagExists("textAskInput") }
+    rule.runOnUiThread { graph.textSheet.value = graph.textSheet.value.after(TextAskOutcome.SENT) }
     rule.waitUntil(5_000) { !rule.onAllNodesWithTagExists("textAskInput") }
   }
 
