@@ -98,13 +98,22 @@ fun HomeScreen(
   ride: @Composable () -> Unit = {},
   onDismissAskFailure: () -> Unit = {},
   onNote: (() -> Unit)? = null,
+  onTextAsk: () -> Unit = {},
 ) {
   var confirming by remember { mutableStateOf(false) }
   Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
       Text(ui.userName, Modifier.clickable(onClick = onUser), fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-      // Settings is a tab now (slice 2 spec §7.1).
-      OutlinedButton(onClick = onTapToTalk, Modifier.testTag("tapToTalk"), enabled = ui.askHint == null) { Text("🎤 押して話す") }
+      // Settings is a tab now (slice 2 spec §7.1). Both asks from the screen are quiet buttons for tests and stops
+      // (US-B-05.006), taken only while a ride records (slice 5 spec §5.1).
+      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedButton(onClick = onTapToTalk, Modifier.testTag("tapToTalk"), enabled = ui.askHint == null, contentPadding = PaddingValues(horizontal = 10.dp)) {
+          Text("🎤 押して話す")
+        }
+        OutlinedButton(onClick = onTextAsk, Modifier.testTag("textAsk"), enabled = ui.askHint == null, contentPadding = PaddingValues(horizontal = 10.dp)) {
+          Text("⌨ 文字で質問")
+        }
+      }
     }
     ui.banner?.let { banner ->
       val close = when (banner) {

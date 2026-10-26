@@ -1,5 +1,6 @@
 package com.touringproject.v2.ui
 
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -126,6 +127,22 @@ class AppUiTest {
     val graph = (rule.activity.application as TouringApp).graph
     rule.runOnUiThread { graph.controller.press() }
     rule.waitUntil(5_000) { !rule.onAllNodesWithTagExists("tab-HOME") }
+  }
+
+  // Slice 5 spec §5.1: while a ride records, 「⌨ 文字で質問」 opens the sheet, which keeps the text over a recreation.
+  @Test
+  fun the_text_sheet_opens_while_a_ride_records_and_keeps_its_text() {
+    val graph = (rule.activity.application as TouringApp).graph
+    rule.onNodeWithTag("textAsk").assertIsNotEnabled()
+    runBlocking { graph.rides.start("箱根") }
+    rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasTestTag("textAsk").and(androidx.compose.ui.test.isEnabled())).fetchSemanticsNodes().isNotEmpty() }
+    rule.onNodeWithTag("textAsk").performClick()
+    rule.onNodeWithTag("textAskInput").performTextInput("右手の山は？")
+    rule.activityRule.scenario.recreate()
+    rule.waitUntil(5_000) { rule.onAllNodesWithTagExists("textAskInput") }
+    rule.onNodeWithTag("textAskInput").assertTextContains("右手の山は？")
+    rule.onNodeWithText("やめる").performClick()
+    rule.waitUntil(5_000) { !rule.onAllNodesWithTagExists("textAskInput") }
   }
 
   @Test

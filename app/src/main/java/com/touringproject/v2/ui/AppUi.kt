@@ -36,6 +36,7 @@ import androidx.navigation3.ui.NavDisplay
 import com.touringproject.v2.AppGraph
 import com.touringproject.v2.BuildConfig
 import com.touringproject.v2.api.ApiClient
+import com.touringproject.v2.ask.Phase
 import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.ask.rideNow
 import com.touringproject.v2.records.NoteDraft
@@ -101,6 +102,8 @@ fun AppUi(graph: AppGraph) {
   var mapFull by remember { mutableStateOf(false) }
   // Saveable: SC-17 and SC-04 stay open when the activity is recreated, e.g. on rotation (Android #20).
   var sheet by rememberSaveable { mutableStateOf<RideSheet?>(null) }
+  // Home's text sheet (slice 5 spec §5.2); kept while SC-03 covers the screen, so a text not taken comes back.
+  var textSheet by rememberSaveable(stateSaver = TextSheetSaver) { mutableStateOf(TextSheet()) }
   val now = rememberNow(ride != null)
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
@@ -176,6 +179,7 @@ fun AppUi(graph: AppGraph) {
                       }
                     }
                   },
+                  onTextAsk = { textSheet = textSheet.copy(open = true, message = null) },
                 )
               }
               entry<RecordsKey> {
@@ -372,6 +376,20 @@ fun AppUi(graph: AppGraph) {
         }
         // The ride may end elsewhere (deadline, shutdown) while SC-04 is open.
         LaunchedEffect(ride == null) { if (ride == null && sheet == RideSheet.END) sheet = null }
+        // The sheet is a window above everything, so it steps aside while SC-03 shows the ask (slice 5 spec §5.3).
+        if (textSheet.open && state.phase == Phase.IDLE) {
+          TextAskSheet(
+            textSheet,
+            onText = { textSheet = textSheet.copy(text = it) },
+            onSend = { question ->
+              if (!textSheet.sending) {
+                textSheet = textSheet.copy(sending = true, message = null)
+                graph.controller.askText(question) { outcome -> textSheet = textSheet.after(outcome) }
+              }
+            },
+            onDismiss = { textSheet = TextSheet() },
+          )
+        }
         Column(Modifier.fillMaxSize()) {
           AskOverlay(
             state, System::currentTimeMillis, graph.controller::stopRecording, graph.controller::cancel,

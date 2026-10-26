@@ -52,6 +52,19 @@ class HomeScreenTest {
     assertEquals(1, taps)
   }
 
+  // Slice 5 spec §5.1: 「⌨ 文字で質問」 stands next to 「🎤 押して話す」 and, like it, only while asks are taken.
+  @Test
+  fun the_text_ask_button_opens_the_sheet_only_while_asks_are_taken() {
+    var hint by mutableStateOf<String?>(null)
+    var opened = 0
+    rule.setContent { HomeScreen(HomeUi("rider01", null, "新しい会話です", askHint = hint), {}, {}, {}, {}, onTextAsk = { opened++ }) }
+    rule.onNodeWithText("⌨ 文字で質問").performClick()
+    assertEquals(1, opened)
+    hint = "再開すると、インカムのボタンで話せます"
+    rule.onNodeWithTag("textAsk").assertIsNotEnabled().performClick()
+    assertEquals(1, opened)
+  }
+
   // Slice 2 spec §4.7: without a recording ride the button stays where it is but cannot be pressed, and says why.
   @Test
   fun without_a_recording_ride_tap_to_talk_cannot_be_pressed_and_the_hint_says_why() {
