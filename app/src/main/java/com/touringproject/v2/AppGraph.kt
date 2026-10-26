@@ -17,6 +17,7 @@ import com.touringproject.v2.ask.rideNow
 import com.touringproject.v2.audio.AudioRoute
 import com.touringproject.v2.audio.AudioRouteControl
 import com.touringproject.v2.audio.ExoAnswerPlayer
+import com.touringproject.v2.audio.MediaVolumeWatch
 import com.touringproject.v2.audio.PcmPlayer
 import com.touringproject.v2.audio.PcmRecorder
 import com.touringproject.v2.audio.ToneCues
@@ -195,6 +196,9 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val activeAskCount: StateFlow<Int> =
     activeAskCount(rides.active.map { it?.id }, database.asks()::countForRide).stateIn(scope, SharingStarted.Eagerly, 0)
 
+  /** The media volume for Home's band and SC-03's (slice 1 spec §5.6). */
+  val mediaVolume = MediaVolumeWatch { audioRoute.mediaVolume() }
+
   private val flowState = MutableStateFlow(IDLE)
   val state: StateFlow<FlowState> = flowState.asStateFlow()
 
@@ -207,7 +211,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       settings = settings::current,
       apiKey = { if (apiBaseUrl.isEmpty()) null else apiKeys.current() },
       micAllowed = micAllowed,
-      mediaVolume = { runCatching { audioRoute.mediaVolume() }.getOrNull() },
+      // Read before the intercom route takes the music stream over; a withheld reading keeps the last good one (Android #9).
+      mediaVolume = mediaVolume::refresh,
       api = { key, user -> ApiClient(apiBaseUrl, key, user, http) },
       conversation = conversation,
       route = AudioRouteControl(audioRoute),
@@ -284,13 +289,6 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     scope,
   )
 
-  // The media volume at which the rider closed the low-volume band; kept until the process ends (slice 1 spec §5.6).
-  private val volumeDismissed = MutableStateFlow<Int?>(null)
-  val volumeDismissedAt: StateFlow<Int?> = volumeDismissed.asStateFlow()
-
-  fun dismissVolumeWarning(level: Int) {
-    volumeDismissed.value = level
-  }
 
   private val router = PressRouter(
     trialActive = { trial.active },

@@ -24,6 +24,7 @@ import com.touringproject.v2.ask.Phase
 import com.touringproject.v2.ask.RecordingMeta
 import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.audio.MediaVolume
+import com.touringproject.v2.audio.MediaVolumeWatch
 import com.touringproject.v2.recordings.TRIAL_IDLE
 import com.touringproject.v2.recordings.TrialPhase
 import com.touringproject.v2.recordings.TrialState
@@ -131,8 +132,9 @@ class HomeScreenTest {
   fun the_media_volume_is_read_while_home_is_shown_and_a_withheld_reading_keeps_the_last() {
     // 4b #2, and the carried-over rule: null (media on the call route) must not clear a low reading.
     val readings = ArrayDeque(listOf<MediaVolume?>(MediaVolume(2, 15), null))
+    val watch = MediaVolumeWatch { readings.removeFirstOrNull() }
     rule.setContent {
-      val volume = rememberMediaVolume(readable = true) { readings.removeFirstOrNull() }
+      val volume = rememberMediaVolume(readable = true, watch)
       Text(if (volumeWarning(volume, null)) "low" else "ok")
     }
     rule.onNodeWithText("low").assertIsDisplayed()
@@ -140,10 +142,29 @@ class HomeScreenTest {
     rule.onNodeWithText("low").assertIsDisplayed()
   }
 
+  // Android #9: a Home made anew (back from Settings) starts from the last good reading, though the next is withheld.
+  @Test
+  fun a_new_home_starts_from_the_last_good_reading() {
+    val readings = ArrayDeque(listOf<MediaVolume?>(MediaVolume(2, 15)))
+    val watch = MediaVolumeWatch { readings.removeFirstOrNull() }
+    watch.refresh()
+    var shown by mutableStateOf(true)
+    rule.setContent {
+      if (shown) {
+        val volume = rememberMediaVolume(readable = true, watch)
+        Text(if (volumeWarning(volume, null)) "low" else "ok")
+      }
+    }
+    shown = false
+    rule.waitForIdle()
+    shown = true
+    rule.onNodeWithText("low").assertIsDisplayed()
+  }
+
   @Test
   fun no_reading_is_taken_while_an_ask_holds_the_route() {
     var reads = 0
-    rule.setContent { rememberMediaVolume(readable = false) { reads++; MediaVolume(2, 15) } }
+    rule.setContent { rememberMediaVolume(readable = false, MediaVolumeWatch { reads++; MediaVolume(2, 15) }) }
     rule.mainClock.advanceTimeBy(VOLUME_CHECK_MS * 2)
     assertEquals(0, reads)
   }

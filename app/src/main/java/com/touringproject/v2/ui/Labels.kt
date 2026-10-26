@@ -61,9 +61,6 @@ fun mediaVolumeLow(volume: MediaVolume?): Boolean = volume != null && volume.max
 /** While an ask holds the intercom route, the music stream reports the call device's volume, not the media one. */
 fun volumeReadable(phase: Phase): Boolean = phase == Phase.IDLE || phase == Phase.FAILED
 
-/** A null reading (media still on the intercom's call link, which lingers after an ask) keeps the last good one. */
-fun nextVolume(previous: MediaVolume?, reading: MediaVolume?): MediaVolume? = reading ?: previous
-
 /** Low, and not dismissed at this very level: a dismissal lasts until the volume changes. */
 fun volumeWarning(volume: MediaVolume?, dismissedAt: Int?): Boolean = mediaVolumeLow(volume) && volume?.current != dismissedAt
 

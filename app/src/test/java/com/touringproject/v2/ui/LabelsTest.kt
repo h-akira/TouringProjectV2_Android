@@ -82,13 +82,6 @@ class LabelsTest {
   }
 
   @Test
-  fun a_withheld_reading_keeps_the_last_good_one() {
-    // AudioRoute.mediaVolume() is null while media still routes to the intercom's call link.
-    assertEquals(MediaVolume(10, 15), nextVolume(MediaVolume(10, 15), null))
-    assertEquals(MediaVolume(3, 15), nextVolume(MediaVolume(10, 15), MediaVolume(3, 15)))
-  }
-
-  @Test
   fun a_dismissed_warning_stays_closed_until_the_volume_changes() {
     assertTrue(volumeWarning(MediaVolume(3, 15), null))
     assertFalse(volumeWarning(MediaVolume(3, 15), 3))

@@ -93,7 +93,7 @@ fun AppUi(graph: AppGraph) {
   val state by graph.state.collectAsStateWithLifecycle()
   val settings by graph.settings.settings.collectAsStateWithLifecycle()
   val apiKey by graph.apiKeys.apiKey.collectAsStateWithLifecycle()
-  val volumeDismissedAt by graph.volumeDismissedAt.collectAsStateWithLifecycle()
+  val volumeDismissedAt by graph.mediaVolume.dismissedAt.collectAsStateWithLifecycle()
   val ride by graph.rides.active.collectAsStateWithLifecycle()
   val storeFailed by graph.rides.storeFailed.collectAsStateWithLifecycle()
   val askStoreFailed by graph.askLog.failed.collectAsStateWithLifecycle()
@@ -132,7 +132,7 @@ fun AppUi(graph: AppGraph) {
         ) { inner ->
           val screens = entryProvider<NavKey> {
               entry<HomeKey> {
-                val volume = rememberMediaVolume(volumeReadable(state.phase)) { graph.audioRoute.mediaVolume() }
+                val volume = rememberMediaVolume(volumeReadable(state.phase), graph.mediaVolume)
                 val ui = HomeUi(
                   userName = current.userName,
                   banner = homeBanner(
@@ -152,7 +152,7 @@ fun AppUi(graph: AppGraph) {
                   onBanner = { tabs.open(Tab.SETTINGS, if (it == Banner.NO_KEY) ConnectionKey else ReturnAppKey) },
                   onNewConversation = graph.controller::resetConversation,
                   modifier = Modifier.safeDrawingPadding(),
-                  onDismissVolume = { volume?.let { graph.dismissVolumeWarning(it.current) } },
+                  onDismissVolume = { volume?.let { graph.mediaVolume.dismiss(it.current) } },
                   onDismissAskFailure = graph.askLog::dismiss,
                   ride = {
                     RideCard(
@@ -393,7 +393,7 @@ fun AppUi(graph: AppGraph) {
         Column(Modifier.fillMaxSize()) {
           AskOverlay(
             state, System::currentTimeMillis, graph.controller::stopRecording, graph.controller::cancel,
-            volumeDismissedAt = volumeDismissedAt, onDismissVolume = graph::dismissVolumeWarning,
+            volumeDismissedAt = volumeDismissedAt, onDismissVolume = graph.mediaVolume::dismiss,
           )
         }
       }
