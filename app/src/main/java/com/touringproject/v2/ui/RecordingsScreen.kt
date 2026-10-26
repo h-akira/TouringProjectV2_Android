@@ -18,6 +18,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,8 @@ fun RecordingsScreen(
   modifier: Modifier = Modifier,
 ) {
   var confirming by remember { mutableStateOf(false) }
+  // A question started meanwhile would make 「消す」 do nothing; DL-01 goes with it (Android #11).
+  LaunchedEffect(ui.askBusy) { if (ui.askBusy) confirming = false }
   val trialActive = ui.trial.phase != TrialPhase.IDLE
   val text = trialText(ui.trial)
   Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

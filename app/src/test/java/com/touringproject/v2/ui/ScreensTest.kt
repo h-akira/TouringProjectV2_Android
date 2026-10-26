@@ -547,6 +547,23 @@ class RecordingsScreenTest {
     assertEquals(2, taps)
   }
 
+  // Android #11: a question that starts while DL-01 is open closes it, so 「消す」 cannot be pressed for nothing.
+  @Test
+  fun a_question_starting_closes_the_delete_all_confirmation() {
+    var busy by mutableStateOf(false)
+    var deleted = 0
+    rule.setContent { RecordingsScreen(ui(askBusy = busy), {}, {}, {}, { deleted++ }) }
+    rule.onNodeWithTag("deleteAll").performClick()
+    rule.onNodeWithText("録音をすべて消しますか？").assertExists()
+    busy = true
+    rule.waitForIdle()
+    rule.onNodeWithText("録音をすべて消しますか？").assertDoesNotExist()
+    busy = false
+    rule.waitForIdle()
+    rule.onNodeWithText("録音をすべて消しますか？").assertDoesNotExist()
+    assertEquals(0, deleted)
+  }
+
   @Test
   fun nothing_can_be_started_while_a_question_runs() {
     rule.setContent { RecordingsScreen(ui(askBusy = true), {}, {}, {}, {}) }

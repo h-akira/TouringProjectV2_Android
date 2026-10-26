@@ -16,6 +16,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
 
 // The newest recordings stay on the device for SC-12 (slice 1 spec §5.4): rec-<time>.pcm with rec-<time>.json beside it.
 const val KEEP_RECORDINGS = 10
@@ -81,7 +82,8 @@ class RecordingStore(private val dir: File, private val io: CoroutineDispatcher 
     File(dir, metaName(name)).delete()
   }
 
-  suspend fun deleteAll() = change { dir.deleteRecursively() }
+  /** Throws when a file could not be deleted, so SC-12 can say so (Android #10); deleteRecursively only returns false. */
+  suspend fun deleteAll() = change { if (!dir.deleteRecursively()) throw IOException("recordings not all deleted") }
 
   private suspend fun change(block: () -> Unit) {
     try {

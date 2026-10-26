@@ -131,6 +131,24 @@ class RecordingCheckTest {
     assertEquals(emptyList<RecordingMeta>(), w.check.items.value)
   }
 
+  // Android #10: files that cannot be deleted are told, and the list still shows them.
+  @Test
+  fun delete_all_that_cannot_delete_says_so() = runTest {
+    val w = World(this, folder.root)
+    w.store.save(meta(1), byteArrayOf(1))
+    testScheduler.advanceUntilIdle()
+    val dir = folder.root
+    dir.setWritable(false)
+    try {
+      w.check.deleteAll()
+      testScheduler.advanceUntilIdle()
+    } finally {
+      dir.setWritable(true)
+    }
+    assertEquals(DELETE_FAILED_MESSAGE, w.check.message.value)
+    assertEquals(1, w.check.items.value.size)
+  }
+
   @Test
   fun nothing_starts_while_a_question_runs() = runTest {
     val w = World(this, folder.root, askBusy = true)
