@@ -119,6 +119,8 @@ class LabelsTest {
     assertEquals("17", recording.big)
     assertEquals("送らずにやめる", recording.button)
     assertEquals("0", overlayText(FlowState(phase = Phase.RECORDING), seconds = 25).big)
+    // SC-11: the countdown starts from the ask's own limit.
+    assertEquals("42", overlayText(FlowState(phase = Phase.RECORDING, recordLimitMs = 45_000), seconds = 3).big)
     assertEquals("12", overlayText(FlowState(phase = Phase.WAITING), seconds = 12).big)
     assertEquals("愛鷹山です。", overlayText(FlowState(phase = Phase.SPEAKING, answer = "愛鷹山です。"), 0).detail)
     assertEquals("時間切れです。もう一度お話しください。", overlayText(FlowState(phase = Phase.FAILED, failure = FailureReason.TIMEOUT), 0).title)

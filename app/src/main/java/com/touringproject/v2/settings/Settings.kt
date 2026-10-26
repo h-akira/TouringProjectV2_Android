@@ -38,6 +38,7 @@ const val DEFAULT_MAX_RECORDING_HOURS = 24
 // on SC-12 takes the same values; SC-19's voice input does not.
 val RECORD_LIMIT_SECONDS_CHOICES = (10..60 step 5).toList()
 const val DEFAULT_RECORD_LIMIT_SECONDS = 20
+const val DEFAULT_RECORD_LIMIT_MS = DEFAULT_RECORD_LIMIT_SECONDS * 1_000L
 val START_CUE_MS_CHOICES = listOf(0, 500, 1_000, 1_500, 2_000, 3_000)
 const val DEFAULT_START_CUE_MS = 1_500
 

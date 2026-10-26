@@ -25,7 +25,8 @@ private fun meta(time: Long) = RecordingMeta("rec-$time.pcm", time, 1_000, false
 class RecordingCheckTest {
   @get:Rule val folder = TemporaryFolder()
 
-  private class World(scope: TestScope, dir: File, var askBusy: Boolean = false, val playError: Exception? = null) {
+  /** routeMs: how long setting up the route takes (SCO takes up to 3 s on the phone). */
+  private class World(scope: TestScope, dir: File, var askBusy: Boolean = false, val playError: Exception? = null, val routeMs: Long = 0) {
     val log = mutableListOf<String>()
     var playGate: CompletableDeferred<Unit>? = null
     val store = RecordingStore(dir, io = StandardTestDispatcher(scope.testScheduler))
@@ -46,12 +47,15 @@ class RecordingCheckTest {
         sleep = { delay(it) },
         micAllowed = { true },
         route = object : RouteControl {
-          override suspend fun start(source: Source) = true
-          override suspend fun stop() = Unit
+          override suspend fun start(source: Source): Boolean {
+            if (routeMs > 0) delay(routeMs)
+            return true
+          }
+          override suspend fun stop() { log += "route:stop" }
           override fun inputDevice() = null
         },
         recorder = object : Recorder {
-          override suspend fun start() = Unit
+          override suspend fun start() { log += "rec:start" }
           override suspend fun stop() = Recorded(byteArrayOf(9), "trial.pcm")
           override suspend fun cancel() = Unit
         },
@@ -162,7 +166,19 @@ class RecordingCheckTest {
     assertTrue(w.trial.active)
     w.check.toggleTrial()
     testScheduler.advanceUntilIdle()
-    assertEquals(listOf("cue:start", "trial:play"), w.log)
+    assertEquals(listOf("rec:start", "cue:start", "route:stop", "trial:play"), w.log)
+    assertEquals(TrialPhase.IDLE, w.trial.state.phase)
+  }
+
+  // Android #7: SC-12 left right after 試し録り, before the trial got going: no cue, no microphone, after the screen.
+  @Test
+  fun leaving_right_after_the_trial_button_starts_nothing_later() = runTest {
+    val w = World(this, folder.root, routeMs = 3_000)
+    w.check.toggleTrial()
+    w.check.leave()
+    testScheduler.advanceUntilIdle()
+    // The cancel stops the trial's player, and the route set up meanwhile is given back.
+    assertEquals(listOf("trial:stop", "route:stop"), w.log)
     assertEquals(TrialPhase.IDLE, w.trial.state.phase)
   }
 }

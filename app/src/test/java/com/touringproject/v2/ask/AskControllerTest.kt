@@ -14,6 +14,7 @@ import com.touringproject.v2.location.Fix
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.newRide
 import com.touringproject.v2.ride.pause
+import com.touringproject.v2.settings.DEFAULT_RECORD_LIMIT_MS
 import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.ReturnTiming
 import com.touringproject.v2.settings.Settings
@@ -47,6 +48,8 @@ private class Harness(
   val scope: TestScope,
   var apiKey: String? = "key",
   val settings: Settings = SETTINGS,
+  /** Read at every use, so a test can change the settings between asks. */
+  val settingsOf: () -> Settings = { settings },
   var post: suspend () -> AskAccepted = { ACCEPTED },
   answers: List<Any> = listOf(done()),
   val routeOk: Boolean = true,
@@ -67,6 +70,8 @@ private class Harness(
 ) {
   /** Where and when the heading was asked for. */
   val headingAsked = mutableListOf<Pair<Fix?, Long>>()
+  /** How long each start cue was asked to sound. */
+  val startCues = mutableListOf<Int>()
   val log = mutableListOf<String>()
   val states = mutableListOf<FlowState>()
   val bodies = mutableListOf<AskBody>()
@@ -99,7 +104,7 @@ private class Harness(
       delay(ms)
       if (stopAfterMs != null && controller.state.phase == Phase.RECORDING && now() >= stopAfterMs) controller.stopRecording()
     },
-    settings = { settings },
+    settings = settingsOf,
     apiKey = { apiKey },
     micAllowed = { micAllowed },
     mediaVolume = { log += "vol:read"; MediaVolume(2, 25) },
@@ -136,7 +141,7 @@ private class Harness(
       override suspend fun returnTo(packageName: String): Boolean { log += "return:$packageName"; return true }
     },
     cues = object : Cues {
-      override fun start() { log += "cue:start" }
+      override fun start(durationMs: Int) { log += "cue:start"; startCues += durationMs }
       override fun sent() { log += "cue:sent" }
       override fun waiting() { log += "cue:waiting" }
       override fun failure() { log += "cue:failure" }
@@ -219,7 +224,28 @@ class AskControllerTest {
     val h = Harness(this, stopAfterMs = null)
     h.controller.run(Source.HANDSFREE)
     assertTrue("post" in h.log)
-    assertTrue(h.now() >= RECORD_LIMIT_MS)
+    assertTrue(h.now() >= DEFAULT_RECORD_LIMIT_MS)
+    assertEquals(listOf(1_500), h.startCues)
+    assertEquals(DEFAULT_RECORD_LIMIT_MS, h.states.first().recordLimitMs)
+  }
+
+  // Slice 5 spec §6: SC-11's limit and start cue as they are when the ask starts; SC-03 counts down from that limit.
+  @Test
+  fun the_recording_limit_and_start_cue_come_from_sc_11() = runTest {
+    var settings = SETTINGS.copy(recordLimitSeconds = 10, startCueMs = 0)
+    val h = Harness(this, stopAfterMs = null, settingsOf = { settings })
+    // How long each ask recorded: from its start to its SENDING.
+    fun recorded() = h.states.filter { it.phase == Phase.RECORDING || it.phase == Phase.SENDING }
+      .zipWithNext { a, b -> if (a.phase == Phase.RECORDING && b.phase == Phase.SENDING) b.phaseStartedAt - a.phaseStartedAt else null }
+      .filterNotNull()
+    h.controller.run(Source.HANDSFREE)
+    assertEquals(listOf(10_000L), recorded())
+    assertEquals(listOf(0), h.startCues)
+    assertEquals(10_000L, h.states.first().recordLimitMs)
+    settings = SETTINGS.copy(recordLimitSeconds = 45, startCueMs = 3_000)
+    h.controller.run(Source.HANDSFREE)
+    assertEquals(listOf(10_000L, 45_000L), recorded())
+    assertEquals(listOf(0, 3_000), h.startCues)
   }
 
   @Test
@@ -305,7 +331,7 @@ class AskControllerTest {
     h.until { "rec:start" in h.log }
     h.controller.press()
     running.join()
-    assertTrue(h.now() < RECORD_LIMIT_MS)
+    assertTrue(h.now() < DEFAULT_RECORD_LIMIT_MS)
   }
 
   @Test

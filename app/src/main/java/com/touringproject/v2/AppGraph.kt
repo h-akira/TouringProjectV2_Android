@@ -52,11 +52,13 @@ import com.touringproject.v2.service.RideNotices
 import com.touringproject.v2.service.ServiceCoordinator
 import com.touringproject.v2.settings.ApiKeyStore
 import com.touringproject.v2.settings.DEFAULT_MAX_RECORDING_HOURS
+import com.touringproject.v2.settings.DEFAULT_START_CUE_MS
 import com.touringproject.v2.settings.DataStoreKeyValueStore
 import com.touringproject.v2.settings.KeystoreCipher
 import com.touringproject.v2.settings.LastSaved
 import com.touringproject.v2.settings.SettingsRepository
 import com.touringproject.v2.settings.headingParams
+import com.touringproject.v2.settings.recordLimitMs
 import com.touringproject.v2.settings.maxRecordingChanges
 import com.touringproject.v2.store.RideDatabase
 import com.touringproject.v2.store.RoomAskEdits
@@ -245,6 +247,9 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       cueStart = cues::start,
       player = PcmPlayer(),
       onState = { trialFlow.value = it },
+      // SC-11's values, as a question takes them (US-E-03.001).
+      recordLimitMs = { settings.current().recordLimitMs },
+      startCueMs = { settings.current().startCueMs },
     ),
   )
 
@@ -270,7 +275,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       },
       route = AudioRouteControl(audioRoute),
       recorder = PcmRecorder(),
-      cueStart = cues::start,
+      // Not a question: SC-11 does not change SC-19's voice input (slice 5 spec §6).
+      cueStart = { cues.start(DEFAULT_START_CUE_MS) },
       cueFailure = cues::failure,
       onState = { voiceFlow.value = it },
       log = { event, data -> Log.i("trv2.note", "$event $data") },

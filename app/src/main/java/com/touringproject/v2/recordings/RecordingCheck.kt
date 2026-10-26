@@ -3,6 +3,7 @@ package com.touringproject.v2.recordings
 import com.touringproject.v2.ask.RecordingMeta
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,7 +51,8 @@ class RecordingCheck(
     }
     if (askBusy() || playingState.value != null) return
     messageState.value = null
-    scope.launch { trial.start() }
+    // Undispatched: the trial is RECORDING before this returns, so leaving SC-12 at once cancels it (Android #7).
+    scope.launch(start = CoroutineStart.UNDISPATCHED) { trial.start() }
   }
 
   fun play(name: String) {

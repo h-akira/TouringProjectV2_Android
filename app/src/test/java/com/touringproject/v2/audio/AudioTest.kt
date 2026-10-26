@@ -62,6 +62,21 @@ class CueTest {
   }
 }
 
+// SC-11: the start cue sounds as long as chosen, and not at all for 「なし」.
+@RunWith(AndroidJUnit4::class)
+class ToneCuesTest {
+  @Test
+  fun the_start_cue_takes_the_chosen_length_and_none_sounds_nothing() {
+    val streams = mutableListOf<Int>()
+    // The generator is made per cue; failing here keeps the test off the real ToneGenerator.
+    val cues = ToneCues { stream -> streams += stream; throw RuntimeException("no tone in tests") }
+    cues.start(0)
+    assertEquals(emptyList<Int>(), streams)
+    cues.start(500)
+    assertEquals(listOf(AudioManager.STREAM_VOICE_CALL), streams)
+  }
+}
+
 @RunWith(AndroidJUnit4::class)
 class AudioRouteTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()

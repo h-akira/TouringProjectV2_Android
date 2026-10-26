@@ -9,6 +9,7 @@ import com.touringproject.v2.api.Point
 import com.touringproject.v2.location.Fix
 import com.touringproject.v2.settings.ReturnTiming
 import com.touringproject.v2.settings.Settings
+import com.touringproject.v2.settings.recordLimitMs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -16,7 +17,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.util.Base64
 
-const val RECORD_LIMIT_MS = 20_000L
 const val TICK_MS = 250L
 const val WAITING_CUE_MS = 5_000L
 const val FAILED_SCREEN_MS = 5_000L
@@ -103,7 +103,9 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     val run = Run(++runId, source)
     current = run
     runsStarted += 1
-    dispatch(FlowEvent.Start(source, d.now(), d.mediaVolume()))
+    // SC-11's values as they are when the ask starts; a change takes effect from the next ask.
+    val atStart = d.settings()
+    dispatch(FlowEvent.Start(source, d.now(), d.mediaVolume(), atStart.recordLimitMs))
     try {
       // Slice 2 spec §4.7: only a recording ride takes asks. Read once, so pausing meanwhile neither stops the ask nor
       // takes it out of the ride.
@@ -139,7 +141,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
         return
       }
       serviceRunning = true
-      val recording = record(run) ?: return
+      val recording = record(run, atStart) ?: return
       // US-C-09: without a network the ask cannot be asked; when and where it was is kept instead (slice 4 spec §4.1).
       if (!d.online()) {
         keepUnreached(recording, rideId, run)
@@ -190,7 +192,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     }
   }
 
-  private suspend fun record(run: Run): Recording? {
+  private suspend fun record(run: Run, settings: Settings): Recording? {
     val d = deps
     d.location.begin()
     val routed = try {
@@ -218,9 +220,9 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       return null
     }
     // After the recorder is running: the rider starts talking on this cue, so nothing said after it is lost.
-    d.cues.start()
+    d.cues.start(settings.startCueMs)
     val startedAt = d.now()
-    while (state.phase == Phase.RECORDING && isCurrent(run) && d.now() - startedAt < RECORD_LIMIT_MS) {
+    while (state.phase == Phase.RECORDING && isCurrent(run) && d.now() - startedAt < settings.recordLimitMs) {
       d.sleep(TICK_MS)
     }
     if (!isCurrent(run)) {

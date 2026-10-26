@@ -66,7 +66,8 @@ interface NavReturn {
 }
 
 interface Cues {
-  fun start()
+  /** The start cue, durationMs long (SC-11); 0 sounds none. */
+  fun start(durationMs: Int)
   fun sent()
   fun waiting()
   fun failure()
