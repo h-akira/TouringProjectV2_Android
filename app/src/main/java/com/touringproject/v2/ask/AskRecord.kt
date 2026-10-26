@@ -1,7 +1,6 @@
 package com.touringproject.v2.ask
 
 import com.touringproject.v2.api.AskResult
-import com.touringproject.v2.api.HeadingSample
 import com.touringproject.v2.location.Fix
 import java.time.OffsetDateTime
 
@@ -39,8 +38,6 @@ data class AskRecord(
   val rideId: String?,
   /** The conversation's memo (US-D-04.001). The ask loop never sets it; only SC-08 does, through AskEdits. */
   val memo: String? = null,
-  /** The older point the Backend takes an unreached ask's heading from (slice 4 spec §4.2); null for the other asks. */
-  val sample: HeadingSample? = null,
   /** When an unreached ask last changed: the version the Backend compares. null for the asks the Backend made. */
   val updatedAt: Long? = null,
   /** False until an unreached ask has reached the Backend; the asks the Backend made are there from the start. */
@@ -48,10 +45,10 @@ data class AskRecord(
 )
 
 /**
- * An ask that never reached the Backend (slice 4 spec §4): when the recording ended, where, and the sample for the
- * heading. Its id is the device's; nothing it said is kept, and it joins no conversation.
+ * An ask that never reached the Backend (slice 4 spec §4): when the recording ended, where, and the heading the device
+ * worked out there (slice 5 spec §4.4). Its id is the device's; nothing it said is kept, and it joins no conversation.
  */
-fun unreachedAsk(askId: String, at: Long, here: Fix?, sample: HeadingSample?, rideId: String) = AskRecord(
+fun unreachedAsk(askId: String, at: Long, here: Fix?, headingDegrees: Double?, rideId: String) = AskRecord(
   askId = askId,
   askedAt = at,
   answeredAt = null,
@@ -60,14 +57,13 @@ fun unreachedAsk(askId: String, at: Long, here: Fix?, sample: HeadingSample?, ri
   latitude = here?.latitude,
   longitude = here?.longitude,
   address = null,
-  headingDegrees = null,
+  headingDegrees = headingDegrees,
   input = ASK_INPUT_VOICE,
   conversationId = null,
   newConversation = false,
   outcome = AskOutcome.OFFLINE,
   failure = null,
   rideId = rideId,
-  sample = sample,
   updatedAt = at,
   sent = false,
 )

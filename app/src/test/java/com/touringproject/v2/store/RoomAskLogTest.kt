@@ -8,7 +8,6 @@ import com.touringproject.v2.ask.ASK_INPUT_VOICE
 import com.touringproject.v2.ask.AskOutcome
 import com.touringproject.v2.ask.AskRecord
 import com.touringproject.v2.ask.unreachedAsk
-import com.touringproject.v2.api.HeadingSample
 import com.touringproject.v2.location.Fix
 import com.touringproject.v2.ride.EndReason
 import com.touringproject.v2.ride.HOUR_MS
@@ -148,21 +147,22 @@ class RoomAskLogTest {
     db.close()
   }
 
-  // Slice 4 spec §4.2: an ask that never reached the Backend keeps when and where it was, and the heading's sample.
+  // Slice 4 spec §4.2: an ask that never reached the Backend keeps when and where it was, and (slice 5 spec §4.4) the
+  // heading the device worked out; no sample any more.
   @Test
-  fun an_unreached_ask_is_kept_without_a_conversation_and_with_its_sample() = runBlocking {
+  fun an_unreached_ask_is_kept_without_a_conversation_and_with_its_heading() = runBlocking {
     keepRide()
-    val sample = HeadingSample(35.0, 138.999, "1970-01-01T00:00:00.500Z")
-    log.save(unreachedAsk("u1", 1_000, Fix(35.001, 139.0, 1_000, 5.0), sample, "r1"))
+    log.save(unreachedAsk("u1", 1_000, Fix(35.001, 139.0, 1_000, 5.0), 271.5, "r1"))
     val stored = db.asks().ask("u1")!!
     assertEquals("offline", stored.status)
     assertNull(stored.conversationId)
     assertEquals(1_000L, stored.updatedAt)
     assertNull(stored.sentUpdatedAt)
-    assertEquals(500L, stored.sampleAt)
+    assertEquals(271.5, stored.headingDegrees!!, 0.0)
+    assertEquals(listOf(null, null, null), listOf(stored.sampleLatitude, stored.sampleLongitude, stored.sampleAt))
     val record = stored.toRecord()
     assertEquals(AskOutcome.OFFLINE, record.outcome)
-    assertEquals(sample, record.sample)
+    assertEquals(271.5, record.headingDegrees!!, 0.0)
     assertFalse(record.sent)
     assertEquals(1, db.asks().countForRide("r1").first())
     db.close()

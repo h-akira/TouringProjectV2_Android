@@ -427,6 +427,10 @@ interface RideDao {
   @Query("SELECT * FROM route_points WHERE rideId = :rideId ORDER BY id DESC LIMIT :count")
   suspend fun lastPoints(rideId: String, count: Int): List<RoutePointEntity>
 
+  /** The segment's last count points, newest first: what the heading is worked out from (slice 5 spec §4.1). */
+  @Query("SELECT * FROM route_points WHERE rideId = :rideId AND segment = :segment ORDER BY id DESC LIMIT :count")
+  suspend fun segmentTail(rideId: String, segment: Int, count: Int): List<RoutePointEntity>
+
   @Query("UPDATE rides SET distanceMeters = :distanceMeters, lastAliveAt = :aliveAt WHERE id = :rideId")
   suspend fun updateDistance(rideId: String, distanceMeters: Double, aliveAt: Long)
 

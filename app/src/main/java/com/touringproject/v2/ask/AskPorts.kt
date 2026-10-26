@@ -51,7 +51,8 @@ fun interface AskLog {
 
 interface Positions {
   fun begin()
-  fun end(): Pair<Fix?, List<Fix>>
+  /** Where the ask is: the newest fix since begin(), unless it is older than 30 s. */
+  fun end(): Fix?
 }
 
 interface KeepAlive {
@@ -117,6 +118,8 @@ class AskDeps(
   /** Whether a ride is recording now: an ask starts only then (slice 2 spec §4.7). */
   val ride: () -> RideNow,
   val location: Positions,
+  /** The heading at here, as of now, from the recording ride's route (slice 5 spec §4); null when there is none. */
+  val heading: suspend (here: Fix?, now: Long) -> Double?,
   val service: KeepAlive,
   val nav: NavReturn,
   val cues: Cues,

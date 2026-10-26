@@ -67,9 +67,12 @@ fun UnsentNote.toBody(): NoteBody {
   return NoteBody(iso(at), location, sample, text, iso(updatedAt))
 }
 
-/** An unreached ask goes with its place and sample as a point memo does: each only when it is whole. */
+/**
+ * An unreached ask goes with its place and heading; a sample (kept before slice 5) goes too while it is whole, and the
+ * Backend takes the heading first (slice 5 spec §4.4).
+ */
 fun UnsentUnreached.toBody(): OfflineAskBody {
   val location = if (latitude != null && longitude != null) Point(latitude, longitude) else null
   val sample = if (sampleLatitude != null && sampleLongitude != null && sampleAt != null) HeadingSample(sampleLatitude, sampleLongitude, iso(sampleAt)) else null
-  return OfflineAskBody(iso(askedAt), location, sample, rideId, iso(updatedAt))
+  return OfflineAskBody(iso(askedAt), location, sample, rideId, iso(updatedAt), headingDegrees)
 }

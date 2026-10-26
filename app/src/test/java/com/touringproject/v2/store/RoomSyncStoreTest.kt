@@ -16,7 +16,6 @@ import com.touringproject.v2.sync.PendingDeletion
 import com.touringproject.v2.sync.UnsentAskMemo
 import com.touringproject.v2.sync.UnsentNote
 import com.touringproject.v2.sync.UnsentUnreached
-import com.touringproject.v2.api.HeadingSample
 import com.touringproject.v2.ask.unreachedAsk
 import com.touringproject.v2.location.Fix
 import kotlinx.coroutines.MainScope
@@ -206,10 +205,13 @@ class RoomSyncStoreTest {
   fun an_unreached_ask_is_unsent_until_its_version_is_taken_and_keeps_its_address() = runBlocking {
     rides.save(ride)
     val log = RoomAskLog(db.asks(), MainScope()) { _, _ -> }
-    log.save(unreachedAsk("u1", 1_400, Fix(35.0, 139.0, 1_400, 5.0), HeadingSample(34.99, 139.0, "1970-01-01T00:00:01.300Z"), "r1"))
+    log.save(unreachedAsk("u1", 1_400, Fix(35.0, 139.0, 1_400, 5.0), 33.0, "r1"))
     log.save(unreachedAsk("u2", 1_600, null, null, "r1"))
     assertEquals(
-      listOf(UnsentUnreached("u1", "r1", 1_400, 35.0, 139.0, 34.99, 139.0, 1_300, 1_400), UnsentUnreached("u2", "r1", 1_600, null, null, null, null, null, 1_600)),
+      listOf(
+        UnsentUnreached("u1", "r1", 1_400, 35.0, 139.0, null, null, null, 1_400, 33.0),
+        UnsentUnreached("u2", "r1", 1_600, null, null, null, null, null, 1_600, null),
+      ),
       store.unsentUnreached(),
     )
     store.unreachedSent("u1", 1_400, "神奈川県箱根町仙石原", 12.5)
@@ -222,6 +224,19 @@ class RoomSyncStoreTest {
     // The other asks are never unreached ones to send.
     db.asks().upsert(db.asks().ask("u1")!!.copy(askId = "a1", status = "answered", updatedAt = null, sentUpdatedAt = null))
     assertEquals(emptyList<UnsentUnreached>(), store.unsentUnreached())
+  }
+
+  // Slice 5 spec §4.4: an unreached ask kept before slice 5 has a sample and no heading yet; it still goes with its sample.
+  @Test
+  fun an_unreached_ask_kept_before_slice_5_still_goes_with_its_sample() = runBlocking {
+    rides.save(ride)
+    db.asks().upsert(
+      AskEntity(
+        "u0", 1_400, null, null, null, 35.0, 139.0, null, null, "voice", null, false, "offline", null, "r1",
+        updatedAt = 1_400, sampleLatitude = 34.99, sampleLongitude = 139.0, sampleAt = 1_300,
+      ),
+    )
+    assertEquals(listOf(UnsentUnreached("u0", "r1", 1_400, 35.0, 139.0, 34.99, 139.0, 1_300, 1_400, null)), store.unsentUnreached())
   }
 
   // Android #67: what the Backend took without a place gets a newer version and goes again; the others stay as they are.

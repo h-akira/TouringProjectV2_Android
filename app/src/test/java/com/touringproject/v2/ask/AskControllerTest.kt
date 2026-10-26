@@ -7,7 +7,6 @@ import com.touringproject.v2.api.AskApi
 import com.touringproject.v2.api.AskBody
 import com.touringproject.v2.api.AskResult
 import com.touringproject.v2.api.AudioClip
-import com.touringproject.v2.api.HeadingSample
 import com.touringproject.v2.api.Point
 import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.audio.MediaVolume
@@ -42,7 +41,6 @@ private fun done(
 ) = AskResult("a1", status, transcript, answer, audio, error)
 private val PROCESSING = done(status = "processing")
 private val HERE = Fix(35.6812, 139.7671, 100_000, 5.0)
-private val BEHIND = Fix(35.6806, 139.7671, 90_000, 5.0)
 
 /** A fake world around the controller that records what it was asked to do, in order. */
 private class Harness(
@@ -64,7 +62,11 @@ private class Harness(
   var ride: RideNow = RideNow.Recording("r1"),
   /** Whether the device has a network when the recording ends (slice 4 spec §4.1). */
   var online: Boolean = true,
+  /** What the ride's route gives as the heading (slice 5 spec §4). */
+  var heading: Double? = 12.5,
 ) {
+  /** Where and when the heading was asked for. */
+  val headingAsked = mutableListOf<Pair<Fix?, Long>>()
   val log = mutableListOf<String>()
   val states = mutableListOf<FlowState>()
   val bodies = mutableListOf<AskBody>()
@@ -123,8 +125,9 @@ private class Harness(
     ride = { ride },
     location = object : Positions {
       override fun begin() { log += "loc:begin" }
-      override fun end() = HERE to listOf(BEHIND, HERE)
+      override fun end() = HERE
     },
+    heading = { here, at -> headingAsked += here to at; heading },
     service = object : KeepAlive {
       override fun start() { log += "svc:start"; serviceError?.let { throw it } }
       override fun stop() { log += "svc:stop" }
@@ -184,12 +187,14 @@ class AskControllerTest {
         volumeDb = 6,
         audio = "AQID",
         location = Point(35.6812, 139.7671),
-        headingSample = HeadingSample(35.6806, 139.7671, "1970-01-01T00:01:30Z"),
+        headingDegrees = 12.5,
         conversationId = null,
         rideId = "r1",
       ),
       h.bodies[0],
     )
+    // Slice 5 spec §4.1: the heading is taken where and when the recording ended.
+    assertEquals(listOf<Pair<Fix?, Long>>(HERE to 3_000L), h.headingAsked)
     assertEquals(Phase.IDLE, h.phase)
     assertEquals(listOf(Phase.RECORDING, Phase.SENDING, Phase.WAITING, Phase.SPEAKING, Phase.IDLE), h.states.map { it.phase })
   }
@@ -603,7 +608,7 @@ class AskControllerTest {
     assertEquals(1_000L, kept.askedAt)
     assertEquals(1_000L, kept.updatedAt)
     assertEquals(HERE.latitude, kept.latitude!!, 0.0)
-    assertEquals(HeadingSample(BEHIND.latitude, BEHIND.longitude, "1970-01-01T00:01:30Z"), kept.sample)
+    assertEquals(12.5, kept.headingDegrees!!, 0.0)
     assertEquals(null, kept.conversationId)
     assertFalse(kept.newConversation)
     assertFalse(kept.sent)

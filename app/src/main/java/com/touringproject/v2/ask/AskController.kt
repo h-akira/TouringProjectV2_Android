@@ -7,7 +7,6 @@ import com.touringproject.v2.api.AskBody
 import com.touringproject.v2.api.AskResult
 import com.touringproject.v2.api.Point
 import com.touringproject.v2.location.Fix
-import com.touringproject.v2.location.pickHeadingSample
 import com.touringproject.v2.settings.ReturnTiming
 import com.touringproject.v2.settings.Settings
 import kotlinx.coroutines.CancellationException
@@ -54,11 +53,12 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   private class Run(val id: Int, val source: Source, var returned: Boolean = false)
 
   // meta and pcm go to SC-12 once the ask has reached the Backend, or failed there; an unreached ask's recording goes.
+  // heading is worked out once, where the recording ended, for the ask sent and the unreached one alike.
   private class Recording(
     val audio: String,
     val name: String,
     val current: Fix?,
-    val fixes: List<Fix>,
+    val heading: Double?,
     val endedAt: Long,
     val meta: RecordingMeta,
     val pcm: ByteArray,
@@ -250,8 +250,9 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     }
     val endedAt = d.now()
     val meta = RecordingMeta(stopped.name, startedAt, pcmDurationMs(stopped.pcm.size), phoneMic, device, null)
-    val (currentFix, fixes) = d.location.end()
-    return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, currentFix, fixes, endedAt, meta, stopped.pcm)
+    val here = d.location.end()
+    val heading = d.heading(here, endedAt)
+    return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, here, heading, endedAt, meta, stopped.pcm)
   }
 
   private suspend fun send(recording: Recording, rideId: String, api: AskApi, run: Run): SentAsk? {
@@ -261,7 +262,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       volumeDb = d.settings().answerVolumeDb,
       audio = recording.audio,
       location = here?.let { Point(it.latitude, it.longitude) },
-      headingSample = here?.let { pickHeadingSample(recording.fixes, it) },
+      headingDegrees = recording.heading,
       conversationId = d.conversation.current(d.now()),
       rideId = rideId,
     )
@@ -289,15 +290,14 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   }
 
   /**
-   * US-C-09: the ask never reached the Backend. Its time, place and heading's sample are kept as an unreached ask, which
-   * is sent later; the recording is dropped (US-C-09.001) and the conversation is left as it was (US-C-09.006). An ask
-   * the rider cancelled meanwhile is not kept: they let it go.
+   * US-C-09: the ask never reached the Backend. Its time, place and heading are kept as an unreached ask, which is sent
+   * later; the recording is dropped (US-C-09.001) and the conversation is left as it was (US-C-09.006). An ask the
+   * rider cancelled meanwhile is not kept: they let it go.
    */
   private suspend fun keepUnreached(recording: Recording, rideId: String, run: Run) {
     val d = deps
     if (isCurrent(run)) {
-      val here = recording.current
-      d.asks.keep(unreachedAsk(d.newId(), recording.endedAt, here, here?.let { pickHeadingSample(recording.fixes, it) }, rideId))
+      d.asks.keep(unreachedAsk(d.newId(), recording.endedAt, recording.current, recording.heading, rideId))
       d.log("ask_unreached", mapOf("rideId" to rideId))
     }
     fail(FailureReason.NETWORK, run)

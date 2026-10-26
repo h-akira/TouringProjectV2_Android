@@ -53,7 +53,7 @@ class RoomSyncStore(
   override suspend fun unsentUnreached(): List<UnsentUnreached> = asks.unsentUnreached().mapNotNull {
     val rideId = it.rideId ?: return@mapNotNull null
     val updatedAt = it.updatedAt ?: return@mapNotNull null
-    UnsentUnreached(it.askId, rideId, it.askedAt, it.latitude, it.longitude, it.sampleLatitude, it.sampleLongitude, it.sampleAt, updatedAt)
+    UnsentUnreached(it.askId, rideId, it.askedAt, it.latitude, it.longitude, it.sampleLatitude, it.sampleLongitude, it.sampleAt, updatedAt, it.headingDegrees)
   }
 
   override suspend fun unreachedSent(askId: String, updatedAt: Long, address: String?, headingDegrees: Double?) =

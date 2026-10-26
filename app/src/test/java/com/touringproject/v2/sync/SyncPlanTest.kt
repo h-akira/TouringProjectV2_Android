@@ -80,4 +80,16 @@ class SyncPlanTest {
     assertNull(bare.location)
     assertNull(bare.headingSample)
   }
+
+  // Slice 5 spec §4.4: an unreached ask goes with the device's heading; one kept before slice 5 still has its sample.
+  @Test
+  fun an_unreached_ask_goes_with_its_heading_and_an_old_one_with_its_sample() {
+    val ask = UnsentUnreached("u1", "r1", 1_000, 35.3, 138.9, null, null, null, 2_000, 271.5)
+    val body = ask.toBody()
+    assertEquals(271.5, body.headingDegrees!!, 0.0)
+    assertNull(body.headingSample)
+    val old = UnsentUnreached("u0", "r1", 1_000, 35.3, 138.9, 35.29, 138.89, 500, 2_000).toBody()
+    assertNull(old.headingDegrees)
+    assertEquals(HeadingSample(35.29, 138.89, "1970-01-01T00:00:00.500Z"), old.headingSample)
+  }
 }

@@ -2,8 +2,9 @@ package com.touringproject.v2.location
 
 import com.touringproject.v2.ask.Positions
 
-// Collects position fixes while a question is recorded. A last-known point older than MAX_CURRENT_AGE_MS is not
-// sent as the current position, and callbacks that belong to an earlier begin() are ignored.
+// Collects position fixes while a question is recorded, only to tell where it was asked: the heading comes from the
+// ride's route (slice 5 spec §4.1). A last-known point older than MAX_CURRENT_AGE_MS is not sent as the current
+// position, and callbacks that belong to an earlier begin() are ignored.
 const val MAX_CURRENT_AGE_MS = 30_000L
 
 fun interface Subscription {
@@ -34,14 +35,12 @@ class PositionTracker(private val source: PositionSource) : Positions {
   }
 
   @Synchronized
-  override fun end(): Pair<Fix?, List<Fix>> {
+  override fun end(): Fix? {
     generation += 1
     subscription?.remove()
     subscription = null
-    val sorted = fixes.sortedBy { it.timestamp }
+    val latest = fixes.maxByOrNull { it.timestamp }
     fixes.clear()
-    val latest = sorted.lastOrNull()
-    val current = latest?.takeIf { source.now() - it.timestamp <= MAX_CURRENT_AGE_MS }
-    return current to sorted
+    return latest?.takeIf { source.now() - it.timestamp <= MAX_CURRENT_AGE_MS }
   }
 }

@@ -49,7 +49,10 @@ data class UnsentNote(
   val updatedAt: Long,
 )
 
-/** An unreached ask that has changed since the Backend last took it (slice 4 spec §5.1). */
+/**
+ * An unreached ask that has changed since the Backend last took it (slice 4 spec §5.1). headingDegrees is the device's
+ * heading, or what the Backend settled once it has taken it; the sample is left only on one kept before slice 5.
+ */
 data class UnsentUnreached(
   val askId: String,
   val rideId: String,
@@ -60,6 +63,7 @@ data class UnsentUnreached(
   val sampleLongitude: Double?,
   val sampleAt: Long?,
   val updatedAt: Long,
+  val headingDegrees: Double? = null,
 )
 
 interface SyncStore {

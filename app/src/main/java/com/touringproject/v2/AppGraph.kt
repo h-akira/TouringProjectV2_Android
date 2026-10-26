@@ -25,8 +25,10 @@ import com.touringproject.v2.handsfree.PressGate
 import com.touringproject.v2.handsfree.PressRouter
 import com.touringproject.v2.location.FusedPositionSource
 import com.touringproject.v2.location.FusedRouteSource
+import com.touringproject.v2.location.HeadingParams
 import com.touringproject.v2.location.PositionTracker
 import com.touringproject.v2.location.RouteSource
+import com.touringproject.v2.location.degrees
 import com.touringproject.v2.nav.AppLauncher
 import com.touringproject.v2.net.Connectivity
 import com.touringproject.v2.recordings.RecordingCheck
@@ -43,6 +45,7 @@ import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.RideController
 import com.touringproject.v2.ride.RideDeps
 import com.touringproject.v2.ride.RideStatus
+import com.touringproject.v2.ride.RouteHeading
 import com.touringproject.v2.service.AlarmDeadline
 import com.touringproject.v2.service.ContextServiceLauncher
 import com.touringproject.v2.service.RideNotices
@@ -53,6 +56,7 @@ import com.touringproject.v2.settings.DataStoreKeyValueStore
 import com.touringproject.v2.settings.KeystoreCipher
 import com.touringproject.v2.settings.LastSaved
 import com.touringproject.v2.settings.SettingsRepository
+import com.touringproject.v2.settings.headingParams
 import com.touringproject.v2.settings.maxRecordingChanges
 import com.touringproject.v2.store.RideDatabase
 import com.touringproject.v2.store.RoomAskEdits
@@ -62,6 +66,7 @@ import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.store.RoomRideStore
 import com.touringproject.v2.store.RoomSyncStore
 import com.touringproject.v2.store.RoomTakeover
+import com.touringproject.v2.store.toPoint
 import com.touringproject.v2.sync.RideSync
 import com.touringproject.v2.sync.Takeover
 import com.touringproject.v2.sync.credentialChanges
@@ -175,6 +180,14 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     ),
   )
 
+  /** The heading from the ride's route, with the parameters the rider chose (slice 5 spec §4). */
+  val routeHeading = RouteHeading(
+    ride = { rides.active.value },
+    points = { rideId, segment, count -> database.rides().segmentTail(rideId, segment, count).map { it.toPoint() } },
+    params = { settings.settings.value?.headingParams ?: HeadingParams() },
+    log = { message, e -> Log.w("trv2.ride", message, e) },
+  )
+
   /** How many asks the device keeps for the ride recording or paused (SC-02, SC-04; Android #35). */
   val activeAskCount: StateFlow<Int> =
     activeAskCount(rides.active.map { it?.id }, database.asks()::countForRide).stateIn(scope, SharingStarted.Eagerly, 0)
@@ -202,6 +215,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       newId = { UUID.randomUUID().toString() },
       ride = { rideNow(rides.active.value) },
       location = PositionTracker(FusedPositionSource(context)),
+      heading = { here, now -> routeHeading.find(here, now).degrees },
       service = serviceCoordinator.keepAlive,
       nav = launcher,
       cues = cues,
