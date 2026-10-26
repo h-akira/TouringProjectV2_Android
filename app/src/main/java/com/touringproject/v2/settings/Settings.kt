@@ -1,5 +1,9 @@
 package com.touringproject.v2.settings
 
+import com.touringproject.v2.location.DEFAULT_HEADING_ACCURACY_M
+import com.touringproject.v2.location.DEFAULT_HEADING_HOLD_MINUTES
+import com.touringproject.v2.location.DEFAULT_HEADING_REFERENCE_M
+import com.touringproject.v2.location.HeadingParams
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -30,6 +34,18 @@ const val DEFAULT_VOLUME_DB = 6
 val MAX_RECORDING_HOURS_CHOICES = listOf(6, 12, 24, 48)
 const val DEFAULT_MAX_RECORDING_HOURS = 24
 
+// SC-11 (slice 5 spec §6): how long a question may be recorded, and how long its start cue sounds (0: none). The trial
+// on SC-12 takes the same values; SC-19's voice input does not.
+val RECORD_LIMIT_SECONDS_CHOICES = (10..60 step 5).toList()
+const val DEFAULT_RECORD_LIMIT_SECONDS = 20
+val START_CUE_MS_CHOICES = listOf(0, 500, 1_000, 1_500, 2_000, 3_000)
+const val DEFAULT_START_CUE_MS = 1_500
+
+// SC-22 (slice 5 spec §4.3): how the heading is worked out from the route.
+val HEADING_REFERENCE_M_CHOICES = listOf(10, 15, 20, 30)
+val HEADING_ACCURACY_M_CHOICES = listOf(10, 20, 30, 50)
+val HEADING_HOLD_MINUTES_CHOICES = listOf(2, 5, 10, 30)
+
 data class Settings(
   val userName: String,
   val returnEnabled: Boolean = true,
@@ -42,7 +58,17 @@ data class Settings(
   val showAskPins: Boolean = true,
   /** SC-06: whether the map shows the point memos' pins, kept like showAskPins (slice 3 spec §7.6). */
   val showNotePins: Boolean = true,
+  val recordLimitSeconds: Int = DEFAULT_RECORD_LIMIT_SECONDS,
+  val startCueMs: Int = DEFAULT_START_CUE_MS,
+  val headingReferenceMeters: Int = DEFAULT_HEADING_REFERENCE_M,
+  val headingAccuracyMeters: Int = DEFAULT_HEADING_ACCURACY_M,
+  val headingHoldMinutes: Int = DEFAULT_HEADING_HOLD_MINUTES,
 )
+
+/** The longest a question is recorded (SC-11). */
+val Settings.recordLimitMs: Long get() = recordLimitSeconds * 1_000L
+
+val Settings.headingParams: HeadingParams get() = HeadingParams(headingReferenceMeters, headingAccuracyMeters, headingHoldMinutes)
 
 /**
  * The longest recording time each time the rider changes it, but not the value first loaded (US-C-08.005). AppGraph
@@ -62,6 +88,8 @@ fun randomUserName(random: Random = Random.Default): String =
 fun decodeSettings(raw: String?, random: Random = Random.Default): Pair<Settings, Boolean> {
   val obj: JsonObject = runCatching { json.parseToJsonElement(raw ?: "").jsonObject }.getOrElse { JsonObject(emptyMap()) }
   fun string(key: String) = runCatching { obj[key]?.jsonPrimitive?.contentOrNull }.getOrNull()
+  fun choice(key: String, choices: List<Int>, default: Int) =
+    runCatching { obj[key]?.jsonPrimitive?.intOrNull }.getOrNull()?.takeIf { it in choices } ?: default
   fun app(element: kotlinx.serialization.json.JsonElement?) =
     runCatching { element?.let { json.decodeFromJsonElement<LaunchableApp>(it) } }.getOrNull()
   val savedName = string("userName")?.takeIf { USER_NAME_RE.matches(it) }
@@ -77,6 +105,11 @@ fun decodeSettings(raw: String?, random: Random = Random.Default): Pair<Settings
       ?.takeIf { it in MAX_RECORDING_HOURS_CHOICES } ?: DEFAULT_MAX_RECORDING_HOURS,
     showAskPins = runCatching { obj["showAskPins"]?.jsonPrimitive?.booleanOrNull }.getOrNull() ?: true,
     showNotePins = runCatching { obj["showNotePins"]?.jsonPrimitive?.booleanOrNull }.getOrNull() ?: true,
+    recordLimitSeconds = choice("recordLimitSeconds", RECORD_LIMIT_SECONDS_CHOICES, DEFAULT_RECORD_LIMIT_SECONDS),
+    startCueMs = choice("startCueMs", START_CUE_MS_CHOICES, DEFAULT_START_CUE_MS),
+    headingReferenceMeters = choice("headingReferenceMeters", HEADING_REFERENCE_M_CHOICES, DEFAULT_HEADING_REFERENCE_M),
+    headingAccuracyMeters = choice("headingAccuracyMeters", HEADING_ACCURACY_M_CHOICES, DEFAULT_HEADING_ACCURACY_M),
+    headingHoldMinutes = choice("headingHoldMinutes", HEADING_HOLD_MINUTES_CHOICES, DEFAULT_HEADING_HOLD_MINUTES),
   )
   return settings to (savedName == null)
 }
@@ -93,6 +126,11 @@ fun encodeSettings(settings: Settings): String = json.encodeToString(
     maxRecordingHours = settings.maxRecordingHours,
     showAskPins = settings.showAskPins,
     showNotePins = settings.showNotePins,
+    recordLimitSeconds = settings.recordLimitSeconds,
+    startCueMs = settings.startCueMs,
+    headingReferenceMeters = settings.headingReferenceMeters,
+    headingAccuracyMeters = settings.headingAccuracyMeters,
+    headingHoldMinutes = settings.headingHoldMinutes,
   ),
 )
 
@@ -107,6 +145,11 @@ private data class SavedSettings(
   val maxRecordingHours: Int,
   val showAskPins: Boolean,
   val showNotePins: Boolean,
+  val recordLimitSeconds: Int,
+  val startCueMs: Int,
+  val headingReferenceMeters: Int,
+  val headingAccuracyMeters: Int,
+  val headingHoldMinutes: Int,
 )
 
 fun withRecentApp(recent: List<LaunchableApp>, app: LaunchableApp, max: Int = 5): List<LaunchableApp> =
