@@ -1,15 +1,17 @@
 package com.touringproject.v2.store
 
-import com.touringproject.v2.records.NOTE_RECENT_POINTS
+import com.touringproject.v2.location.Fix
 import com.touringproject.v2.records.NoteDraft
 import com.touringproject.v2.records.NoteEdits
 import com.touringproject.v2.records.memoFits
 import com.touringproject.v2.records.noteDraft
+import com.touringproject.v2.records.toFix
 import kotlinx.coroutines.CancellationException
 
 /**
  * Point memos in Room. Like RoomAskEdits, a change that was written is something new to send (changed), and a failed
- * write is logged and reported as false, so SC-19 can say so and keep what was typed (slice 3 spec §8).
+ * write is logged and reported as false, so SC-19 can say so and keep what was typed (slice 3 spec §8). heading is the
+ * ride's route's heading at the memo's place, as of when it was opened (slice 5 spec §4.1).
  */
 class RoomNotes(
   private val notes: NoteDao,
@@ -17,20 +19,21 @@ class RoomNotes(
   private val now: () -> Long,
   private val newId: () -> String,
   private val changed: () -> Unit,
+  private val heading: suspend (here: Fix?, now: Long) -> Double? = { _, _ -> null },
   private val log: (String, Throwable) -> Unit,
 ) : NoteEdits {
   override suspend fun draft(rideId: String): NoteDraft {
     val at = now()
     // A memo whose points cannot be read is still opened, without a place.
-    val recent = try {
-      rides.lastPoints(rideId, NOTE_RECENT_POINTS).map { it.toPoint() }
+    val newest = try {
+      rides.lastPoints(rideId, 1).firstOrNull()?.toPoint()
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
       log("note_points_failed rideId=$rideId", e)
-      emptyList()
+      null
     }
-    return noteDraft(newId(), rideId, at, recent)
+    return noteDraft(newId(), rideId, at, newest, heading(newest?.toFix(), at))
   }
 
   override suspend fun create(draft: NoteDraft, text: String): Boolean =
@@ -63,13 +66,14 @@ private fun NoteDraft.toEntity(text: String, at: Long) = NoteEntity(
   at = this.at,
   latitude = latitude,
   longitude = longitude,
-  sampleLatitude = sampleLatitude,
-  sampleLongitude = sampleLongitude,
-  sampleAt = sampleAt,
+  sampleLatitude = null,
+  sampleLongitude = null,
+  sampleAt = null,
   text = text,
   updatedAt = at,
   sentUpdatedAt = null,
   rejectedUpdatedAt = null,
   address = null,
-  headingDegrees = null,
+  // The device's heading until the Backend answers the one it settled (slice 5 spec §4.4).
+  headingDegrees = headingDegrees,
 )

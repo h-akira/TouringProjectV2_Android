@@ -1,10 +1,8 @@
 package com.touringproject.v2.records
 
 import com.touringproject.v2.location.Fix
-import com.touringproject.v2.location.pickHeadingSample
 import com.touringproject.v2.ride.RoutePoint
 import kotlinx.serialization.Serializable
-import java.time.Instant
 
 // Point memos (US-D-08, SC-19). One is written while a ride records or is paused, at the place the ride has reached,
 // and belongs to that ride. Its text follows the memos' rules (Memos.kt), but it cannot be empty.
@@ -26,8 +24,8 @@ data class NoteRecord(
 )
 
 /**
- * A point memo opened from Home and not yet saved: when it was opened and where the ride was then, with the older
- * point the Backend works the heading out from (slice 3 spec §4.3). Nothing is written until it is saved. Serializable:
+ * A point memo opened from Home and not yet saved: when it was opened, where the ride was then, and the heading the
+ * device worked out there (slice 3 spec §4.3, slice 5 spec §4). Nothing is written until it is saved. Serializable:
  * SC-19 keeps it in its key, so the memo stays where it was opened when the activity is recreated.
  */
 @Serializable
@@ -37,27 +35,18 @@ data class NoteDraft(
   val at: Long,
   val latitude: Double?,
   val longitude: Double?,
-  val sampleLatitude: Double?,
-  val sampleLongitude: Double?,
-  val sampleAt: Long?,
+  val headingDegrees: Double? = null,
 )
 
 /** The text a point memo keeps: trimmed, and none when it is blank (SC-19 does not save an empty one). */
 fun noteText(input: String): String? = memoText(input)
 
-/** How many of the ride's last points are read for a memo's place: 30 at the route's 5 s cover the sample's minute. */
-const val NOTE_RECENT_POINTS = 30
+/** The ride's newest point as the place a memo is written at (slice 3 spec §4.3). */
+fun RoutePoint.toFix() = Fix(lat, lon, t, accuracy)
 
-/**
- * A memo opened at at, given the ride's last points (oldest first): the newest point is its place, and its heading
- * sample is picked from the others as an ask's is (07 UC-5). Without a point it has no place.
- */
-fun noteDraft(id: String, rideId: String, at: Long, recent: List<RoutePoint>): NoteDraft {
-  val newest = recent.maxByOrNull { it.t } ?: return NoteDraft(id, rideId, at, null, null, null, null, null)
-  val fixes = recent.map { Fix(it.lat, it.lon, it.t, it.accuracy) }
-  val sample = pickHeadingSample(fixes, Fix(newest.lat, newest.lon, newest.t, newest.accuracy))
-  return NoteDraft(id, rideId, at, newest.lat, newest.lon, sample?.latitude, sample?.longitude, sample?.let { Instant.parse(it.at).toEpochMilli() })
-}
+/** A memo opened at at: the ride's newest point is its place. Without a point it has no place. */
+fun noteDraft(id: String, rideId: String, at: Long, newest: RoutePoint?, headingDegrees: Double?) =
+  NoteDraft(id, rideId, at, newest?.lat, newest?.lon, headingDegrees)
 
 /** SC-19's voice input: what was heard goes at the end of what is written, on a line of its own, within 2000 characters. */
 fun appendHeard(current: String, heard: String): String =

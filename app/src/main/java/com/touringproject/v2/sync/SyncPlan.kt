@@ -60,11 +60,14 @@ fun Ride.toBody() = RideBody(
 
 fun RoutePoint.toBody() = PointBody(iso(t), lat, lon, accuracy, segment)
 
-/** A memo opened before its ride had a point goes without a place; the sample goes only when it is whole. */
+/**
+ * A memo opened before its ride had a point goes without a place. Its heading goes as degrees; a sample (kept before
+ * slice 5) goes too while it is whole, and the Backend takes the heading first (slice 5 spec §4.4).
+ */
 fun UnsentNote.toBody(): NoteBody {
   val location = if (latitude != null && longitude != null) Point(latitude, longitude) else null
   val sample = if (sampleLatitude != null && sampleLongitude != null && sampleAt != null) HeadingSample(sampleLatitude, sampleLongitude, iso(sampleAt)) else null
-  return NoteBody(iso(at), location, sample, text, iso(updatedAt))
+  return NoteBody(iso(at), location, sample, text, iso(updatedAt), headingDegrees)
 }
 
 /**

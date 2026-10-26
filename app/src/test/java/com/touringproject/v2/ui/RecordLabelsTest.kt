@@ -228,7 +228,7 @@ class RecordLabelsTest {
   // SC-19: when, where and which ride; the address comes from the Backend once the memo has gone (slice 3 spec §7.3).
   @Test
   fun sc_19_says_when_where_and_for_which_ride() {
-    val draft = NoteDraft("n1", "r1", ms(22, 10, 24), 35.3, 138.9, null, null, null)
+    val draft = NoteDraft("n1", "r1", ms(22, 10, 24), 35.3, 138.9, null)
     assertEquals(
       NoteHeaderUi("10月22日（木） 10:24 · 今いる地点", "📍 住所は送ったあとに付きます", "走行「箱根」に入ります"),
       newNoteHeader(draft, "箱根", zone),

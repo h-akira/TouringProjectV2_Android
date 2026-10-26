@@ -104,9 +104,19 @@ data class RideBody(
 /** A conversation's memo (slice 3 spec §6.2); null removes it. */
 @Serializable data class AskMemoBody(val memo: String?, val updatedAt: String)
 
-/** A point memo as a whole (slice 3 spec §6.2). location is null for one opened before its ride had a point. */
+/**
+ * A point memo as a whole (slice 3 spec §6.2). location is null for one opened before its ride had a point.
+ * headingDegrees and headingSample are as an unreached ask's (OfflineAskBody).
+ */
 @Serializable
-data class NoteBody(val at: String, val location: Point?, val headingSample: HeadingSample?, val text: String, val updatedAt: String)
+data class NoteBody(
+  val at: String,
+  val location: Point?,
+  val headingSample: HeadingSample?,
+  val text: String,
+  val updatedAt: String,
+  val headingDegrees: Double? = null,
+)
 
 /** What the Backend settled for a point memo when it first took it; null when it could not tell (no place, no heading). */
 @Serializable data class NoteSaved(val address: String? = null, val headingDegrees: Double? = null)

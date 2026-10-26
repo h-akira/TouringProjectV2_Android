@@ -158,11 +158,6 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   /** SC-07 and SC-08 change kept asks through here; each change is something new to send (slice 3 spec §5.1). */
   val askEdits = RoomAskEdits(database.asks(), System::currentTimeMillis, sync::request) { message, e -> Log.w("trv2.ask", message, e) }
 
-  /** SC-19 writes point memos through here; each change is something new to send (slice 3 spec §5.1). */
-  val notes = RoomNotes(database.notes(), database.rides(), System::currentTimeMillis, { UUID.randomUUID().toString() }, sync::request) { message, e ->
-    Log.w("trv2.note", message, e)
-  }
-
   val rides = RideController(
     RideDeps(
       now = System::currentTimeMillis,
@@ -187,6 +182,12 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     params = { settings.settings.value?.headingParams ?: HeadingParams() },
     log = { message, e -> Log.w("trv2.ride", message, e) },
   )
+
+  /** SC-19 writes point memos through here; each change is something new to send (slice 3 spec §5.1). */
+  val notes = RoomNotes(
+    database.notes(), database.rides(), System::currentTimeMillis, { UUID.randomUUID().toString() }, sync::request,
+    heading = { here, now -> routeHeading.find(here, now).degrees },
+  ) { message, e -> Log.w("trv2.note", message, e) }
 
   /** How many asks the device keeps for the ride recording or paused (SC-02, SC-04; Android #35). */
   val activeAskCount: StateFlow<Int> =

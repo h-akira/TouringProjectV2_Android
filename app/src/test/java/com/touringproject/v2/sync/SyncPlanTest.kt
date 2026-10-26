@@ -81,6 +81,14 @@ class SyncPlanTest {
     assertNull(bare.headingSample)
   }
 
+  // Slice 5 spec §4.4: a memo written since slice 5 goes with the device's heading and no sample.
+  @Test
+  fun a_point_memo_goes_with_the_devices_heading() {
+    val body = UnsentNote("n1", "r1", 1_000, 35.3, 138.9, null, null, null, "展望スペース", 2_000, 90.0).toBody()
+    assertEquals(90.0, body.headingDegrees!!, 0.0)
+    assertNull(body.headingSample)
+  }
+
   // Slice 5 spec §4.4: an unreached ask goes with the device's heading; one kept before slice 5 still has its sample.
   @Test
   fun an_unreached_ask_goes_with_its_heading_and_an_old_one_with_its_sample() {
