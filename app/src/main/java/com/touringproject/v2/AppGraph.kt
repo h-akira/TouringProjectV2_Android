@@ -47,6 +47,7 @@ import com.touringproject.v2.recordings.TrialState
 import com.touringproject.v2.records.RideListItem
 import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.records.activeAskCount
+import com.touringproject.v2.records.whileShown
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.RideController
 import com.touringproject.v2.ride.RideDeps
@@ -153,7 +154,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   )
 
   /** SC-14 and SC-18: what is left to send, and how much is kept (slice 4 spec §7.1). */
-  val saveSummary: StateFlow<SaveSummary?> = records.summary.stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
+  val saveSummary: StateFlow<SaveSummary?> = records.summary.whileShown(scope)
 
   /** Reads the user's records in from the cloud: SC-18's change of user name and SC-14's read again (slice 4 spec §6). */
   val takeover = Takeover(
