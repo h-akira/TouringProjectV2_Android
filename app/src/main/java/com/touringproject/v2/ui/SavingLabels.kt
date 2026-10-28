@@ -40,7 +40,8 @@ fun rereadMessage(result: TakeResult): String = when (result) {
   is TakeResult.Done -> if (result.count == 0) "新しい記録はありませんでした" else "${result.count}件の記録を読み込みました"
   // Reading again is held back by a ride only.
   is TakeResult.Blocked -> "走行を終えてから読み直せます"
-  TakeResult.Failed -> "読み込めませんでした"
+  // A read again changes no name, so it never comes to Mismatched.
+  TakeResult.Failed, TakeResult.Mismatched -> "読み込めませんでした"
 }
 
 /** SC-18 after DL-03. */
@@ -51,4 +52,5 @@ fun switchMessage(result: TakeResult): String = when (result) {
     BlockReason.UNSENT -> "未送信の記録があるため、変えられませんでした"
   }
   TakeResult.Failed -> "読み込めませんでした。ユーザー名は変えていません"
+  TakeResult.Mismatched -> "ユーザー名は変わりましたが、記録を入れられませんでした。端末の記録は前の名前のままです"
 }

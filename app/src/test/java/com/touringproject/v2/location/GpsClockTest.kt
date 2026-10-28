@@ -41,4 +41,20 @@ class GpsClockTest {
     positions.lastKnown { got += it }
     assertEquals(3_000_000L, gps.now())
   }
+
+  // Android #84: the last known fix teaches the clock before any watch, so a process made again while a ride is paused
+  // tells a point's age on the fixes' time; without the permission the device's clock stands in, and nothing breaks.
+  @Test
+  fun the_last_known_fix_teaches_the_clock_before_any_watch() {
+    fun positions(lastKnown: ((Fix) -> Unit) -> Unit) = object : PositionSource {
+      override fun now() = clock
+      override fun elapsed() = elapsed
+      override fun lastKnown(onFix: (Fix) -> Unit) = lastKnown(onFix)
+      override fun watch(onFix: (Fix) -> Unit) = Subscription {}
+    }
+    gps.learnFrom(positions { throw SecurityException("no permission") })
+    assertEquals(clock, gps.now())
+    gps.learnFrom(positions { onFix -> onFix(Fix(35.0, 139.0, 1_000_000, 5.0, elapsedMs = 9_000)) })
+    assertEquals(1_001_000L, gps.now())
+  }
 }

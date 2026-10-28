@@ -8,6 +8,10 @@ import com.touringproject.v2.api.CloudRecord
 import com.touringproject.v2.api.RecordsApi
 import com.touringproject.v2.ride.RoutePoint
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -42,7 +46,8 @@ private val nothingToSend = object : SyncStore {
   override suspend fun unreachedRefused(askId: String, updatedAt: Long) = Unit
 }
 
-private class Cloud(val scope: TestScope) {
+/** runIn is where a read runs: a test cancels it apart from the test's own scope. */
+private class Cloud(val scope: TestScope, val runIn: CoroutineScope = scope) {
   /** Pages by user name, then by cursor (null for the first). */
   val pages = mutableMapOf<String, Map<String?, CloudPage>>()
   val reads = mutableListOf<String>()
@@ -52,6 +57,8 @@ private class Cloud(val scope: TestScope) {
   val taken = mutableListOf<Pair<List<CloudRecord>, Boolean>>()
   var takes: TakeResult = TakeResult.Done(2)
   var failTake = false
+  /** When set, a take waits for it. */
+  var takeGate: CompletableDeferred<Unit>? = null
   /** The user names saved, in order; a name in failSave cannot be saved. */
   val saved = mutableListOf<String>()
   var failSave = setOf<String>()
@@ -60,17 +67,21 @@ private class Cloud(val scope: TestScope) {
 
   val store = object : TakeoverStore {
     override suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): TakeResult {
+      takeGate?.await()
       if (failTake) throw IOException("disk full")
       taken += cloud to replace
       return takes
     }
   }
 
-  /** SC-18's change from rider01. */
+  /** SC-18's change from rider01. A save, as DataStore's, throws when its coroutine has been cancelled. */
   fun switch(peek: Peek) = takeover.switchTo(
     peek,
     from = "rider01",
-    save = { if (it in failSave) throw IOException("disk full") else saved += it },
+    save = {
+      currentCoroutineContext().ensureActive()
+      if (it in failSave) throw IOException("disk full") else saved += it
+    },
     switched = { switched += 1 },
   )
 
@@ -85,7 +96,7 @@ private class Cloud(val scope: TestScope) {
 
   var hasKey = true
   val sync = RideSync(nothingToSend, { passes += 1; null }) { _, _ -> }
-  val takeover = Takeover({ if (hasKey) api(it) else null }, store, sync, { 1_000L }, scope) { _, _ -> }
+  val takeover = Takeover({ if (hasKey) api(it) else null }, store, sync, { 1_000L }, runIn) { _, _ -> }
 }
 
 class TakeoverTest {
@@ -171,6 +182,39 @@ class TakeoverTest {
     assertEquals(listOf("taro01", "rider01"), c.saved)
     assertEquals(0, c.switched)
     assertEquals(TakeResult.Failed, c.takeover.state.value.result)
+  }
+
+  // Android #88: a read cancelled while the records go in still puts the name back, so the two never part.
+  @Test
+  fun a_switch_cancelled_while_the_records_go_in_still_puts_the_name_back() = runTest {
+    val reads = Job()
+    val c = Cloud(this, runIn = CoroutineScope(coroutineContext + reads))
+    c.pages["taro01"] = mapOf(null to CloudPage(emptyList(), null))
+    c.takes = TakeResult.Blocked(BlockReason.UNSENT)
+    c.takeGate = CompletableDeferred()
+    c.switch(c.takeover.peek("taro01")!!)
+    runCurrent()
+    reads.cancel()
+    c.takeGate!!.complete(Unit)
+    runCurrent()
+    assertEquals(listOf("taro01", "rider01"), c.saved)
+  }
+
+  // Android #88: a name that cannot be put back is told as it is: the new name is saved, the records are the old one's.
+  @Test
+  fun a_name_that_cannot_be_put_back_is_told_as_mismatched() = runTest {
+    for (failTake in listOf(false, true)) {
+      val c = Cloud(this)
+      c.pages["taro01"] = mapOf(null to CloudPage(emptyList(), null))
+      c.takes = TakeResult.Blocked(BlockReason.UNSENT)
+      c.failTake = failTake
+      c.failSave = setOf("rider01")
+      c.switch(c.takeover.peek("taro01")!!)
+      runCurrent()
+      assertEquals(listOf("taro01"), c.saved)
+      assertEquals(0, c.switched)
+      assertEquals(TakeResult.Mismatched, c.takeover.state.value.result)
+    }
   }
 
   @Test

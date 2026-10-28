@@ -47,6 +47,7 @@ import com.touringproject.v2.recordings.TrialState
 import com.touringproject.v2.records.RideListItem
 import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.records.activeAskCount
+import com.touringproject.v2.records.whileShown
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.RideController
 import com.touringproject.v2.ride.RideDeps
@@ -118,7 +119,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val gpsClock = GpsClock(SystemClock::elapsedRealtime, System::currentTimeMillis)
   val routeSource: RouteSource = FusedRouteSource(context).seenBy(gpsClock)
   /** The 1 s positions of an ask's recording and of SC-22. */
-  val positionSource: PositionSource = FusedPositionSource(context).seenBy(gpsClock)
+  val positionSource: PositionSource = FusedPositionSource(context).seenBy(gpsClock).also { gpsClock.learnFrom(it) }
   private val database = RideDatabase.open(context)
   val rideStore = RoomRideStore(database.rides())
   // sync is made below; it is read only when an unreached ask has been written.
@@ -153,7 +154,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   )
 
   /** SC-14 and SC-18: what is left to send, and how much is kept (slice 4 spec §7.1). */
-  val saveSummary: StateFlow<SaveSummary?> = records.summary.stateIn(scope, SharingStarted.WhileSubscribed(5_000), null)
+  val saveSummary: StateFlow<SaveSummary?> = records.summary.whileShown(scope)
 
   /** Reads the user's records in from the cloud: SC-18's change of user name and SC-14's read again (slice 4 spec §6). */
   val takeover = Takeover(
@@ -201,16 +202,18 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
 
   /**
    * SC-22's heading, a new one each time the screen shows (slice 5 spec §4.5): the ride's route while it records, and
-   * points gathered the same way otherwise.
+   * points gathered the same way otherwise. A test puts one on fake sources here, to count the watches (Android #85).
    */
-  fun headingCheck() = HeadingCheck(
-    positionSource,
-    routeSource,
-    recording = { rides.active.value?.status == RideStatus.RECORDING },
-    rideHeading = routeHeading::find,
-    params = { settings.settings.value?.headingParams ?: HeadingParams() },
-    gpsNow = gpsClock::now,
-  )
+  var headingCheck: () -> HeadingCheck = {
+    HeadingCheck(
+      positionSource,
+      routeSource,
+      recording = { rides.active.value?.status == RideStatus.RECORDING },
+      rideHeading = routeHeading::find,
+      params = { settings.settings.value?.headingParams ?: HeadingParams() },
+      gpsNow = gpsClock::now,
+    )
+  }
 
   /** SC-19 writes point memos through here; each change is something new to send (slice 3 spec §5.1). */
   val notes = RoomNotes(

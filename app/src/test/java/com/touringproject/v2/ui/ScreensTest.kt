@@ -8,7 +8,6 @@ import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -219,6 +218,16 @@ class AskOverlayTest {
     rule.onNodeWithText(Banner.LOW_VOLUME.text).assertIsDisplayed()
     rule.onNodeWithTag("bandClose").performClick()
     assertEquals(2, dismissed)
+  }
+
+  // Android #81: a text ask's answer is read out on the media stream too, so the band shows while it is sent.
+  @Test
+  fun the_low_volume_band_shows_while_a_text_ask_is_sent_but_not_a_voice_one() {
+    var state by mutableStateOf(FlowState(phase = Phase.SENDING, typed = true, mediaVolume = MediaVolume(2, 15)))
+    rule.setContent { AskOverlay(state, { 0L }, {}, {}) }
+    rule.onNodeWithTag("overlayVolume").assertIsDisplayed()
+    state = FlowState(phase = Phase.SENDING, mediaVolume = MediaVolume(2, 15))
+    rule.onNodeWithTag("overlayVolume").assertDoesNotExist()
   }
 
   @Test

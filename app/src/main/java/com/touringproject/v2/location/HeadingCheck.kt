@@ -16,8 +16,8 @@ data class HeadingView(val result: HeadingResult, val here: Fix?, val fromRide: 
  * SC-22's heading, worked out as an ask's is (findHeading), every HEADING_CHECK_TICK_MS while run() runs. The current
  * position is the newest fresh fix of a 1 s watch, as an ask's recording takes it. While a ride records, the material is
  * its route (rideHeading, which is RouteHeading). Otherwise (no ride, or a paused one, whose route is not watched) the
- * points are gathered here, asked for and sifted as a ride's route is (acceptRoutePoint, isSince), and kept only in
- * memory; they are dropped when a ride starts recording, when one stops (gathering starts again) and when run() ends.
+ * points are gathered here, asked for and sifted as a ride's route is (acceptRoutePoint, isSince), and the newest
+ * HEADING_POINTS kept only in memory; they are dropped when a ride starts recording, when one stops (gathering starts again) and when run() ends.
  * Cancelling run() removes both watches; a recording ride's own route watch is the service's and goes on.
  */
 class HeadingCheck(
@@ -76,7 +76,11 @@ class HeadingCheck(
     return runCatching {
       route.watch { fix ->
         synchronized(lock) {
-          if (gen == gathering && acceptRoutePoint(fix) && fix.isSince(since, sinceClock)) points += fix
+          if (gen == gathering && acceptRoutePoint(fix) && fix.isSince(since, sinceClock)) {
+            points += fix
+            // As many as a ride's route is read for, the newest (Android #83).
+            if (points.size > HEADING_POINTS) points.removeAt(0)
+          }
         }
       }
     }.getOrNull()

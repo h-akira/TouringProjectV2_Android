@@ -25,7 +25,16 @@ data class FlowState(
   val mediaVolume: MediaVolume? = null,
   /** How long this ask may record (SC-11), for SC-03's countdown. */
   val recordLimitMs: Long = DEFAULT_RECORD_LIMIT_MS,
+  /** A text ask (slice 5 spec §5.3). */
+  val typed: Boolean = false,
 )
+
+/**
+ * Whether SC-03 tells a low media volume now: while recording, and for a text ask while it is sent and its answer waited
+ * for, as the answer is read out on the media stream (Android #81). A voice ask's route has taken the stream over then.
+ */
+val FlowState.tellsVolume: Boolean
+  get() = phase == Phase.RECORDING || (typed && (phase == Phase.SENDING || phase == Phase.WAITING))
 
 val IDLE = FlowState()
 
@@ -38,7 +47,7 @@ sealed interface FlowEvent {
     val recordLimitMs: Long = DEFAULT_RECORD_LIMIT_MS,
   ) : FlowEvent
   /** A text ask from Home (slice 5 spec §5.3): nothing to record, so it starts as it is sent. */
-  data class StartText(override val now: Long) : FlowEvent
+  data class StartText(override val now: Long, val mediaVolume: MediaVolume? = null) : FlowEvent
   data class PhoneMic(override val now: Long) : FlowEvent
   data class StopRecording(override val now: Long) : FlowEvent
   data class Sent(val askId: String, override val now: Long) : FlowEvent
@@ -57,7 +66,9 @@ fun reduce(state: FlowState, event: FlowEvent): FlowState = when (event) {
       )
     } else state
   is FlowEvent.StartText ->
-    if (state.phase == Phase.IDLE || state.phase == Phase.FAILED) FlowState(phase = Phase.SENDING, source = Source.SCREEN, phaseStartedAt = event.now) else state
+    if (state.phase == Phase.IDLE || state.phase == Phase.FAILED) {
+      FlowState(phase = Phase.SENDING, source = Source.SCREEN, phaseStartedAt = event.now, mediaVolume = event.mediaVolume, typed = true)
+    } else state
   is FlowEvent.PhoneMic -> if (state.phase == Phase.RECORDING) state.copy(phoneMic = true) else state
   is FlowEvent.StopRecording ->
     if (state.phase == Phase.RECORDING) state.copy(phase = Phase.SENDING, phaseStartedAt = event.now) else state

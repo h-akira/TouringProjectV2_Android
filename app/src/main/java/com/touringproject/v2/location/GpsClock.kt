@@ -14,6 +14,14 @@ class GpsClock(private val elapsed: () -> Long, private val clock: () -> Long) {
   }
 
   fun now(): Long = offset?.let { elapsed() + it } ?: clock()
+
+  /**
+   * Learns from positions' last known fix, so a process that has not had a fix yet (made again while a ride is paused,
+   * whose route is not watched) tells ages on the fixes' time (Android #84). Without the permission nothing is learnt.
+   */
+  fun learnFrom(positions: PositionSource) {
+    runCatching { positions.lastKnown(::seen) }
+  }
 }
 
 /** The same route, each fix shown to clock on the way. */

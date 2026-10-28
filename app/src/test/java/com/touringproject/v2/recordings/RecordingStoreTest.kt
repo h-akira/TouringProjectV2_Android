@@ -104,6 +104,22 @@ class RecordingStoreTest {
     assertEquals(listOf(meta(200)), store.list())
   }
 
+  // Android #80: a recording kept before its POST leaves the ten before it alone; only one that stays prunes them.
+  @Test
+  fun a_recording_saved_then_discarded_leaves_the_ten_before_it() = runTest {
+    val store = RecordingStore(dir, io = StandardTestDispatcher(testScheduler))
+    val keeper = RecordingKeeper(store, this) { _, _ -> }
+    (1L..10L).forEach { store.save(meta(it), byteArrayOf(1)) }
+    keeper.saved(meta(11), byteArrayOf(1))
+    keeper.discarded("rec-11.pcm")
+    testScheduler.advanceUntilIdle()
+    assertEquals((10L downTo 1L).toList(), store.list().map { it.recordedAt })
+    keeper.saved(meta(12), byteArrayOf(1))
+    keeper.kept()
+    testScheduler.advanceUntilIdle()
+    assertEquals(listOf(12L) + (10L downTo 2L), store.list().map { it.recordedAt })
+  }
+
   @Test
   fun the_keeper_never_lets_a_store_failure_reach_the_ask() = runTest {
     // A file where the directory should be: every write fails.

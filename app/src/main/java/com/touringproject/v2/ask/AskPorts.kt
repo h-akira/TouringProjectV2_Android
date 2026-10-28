@@ -44,6 +44,8 @@ interface RecordingSink {
   fun transcribed(name: String, transcript: String)
   /** The recording saved goes again: its ask never reached the Backend (US-C-09.001). */
   fun discarded(name: String)
+  /** The recording saved stays (its ask was taken or refused): only the newest ones are kept now (Android #80). */
+  fun kept()
 }
 
 /** Fire and forget: a failure to keep an ask must not end it. */

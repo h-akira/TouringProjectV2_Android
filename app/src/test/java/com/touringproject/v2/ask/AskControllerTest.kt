@@ -83,6 +83,8 @@ private class Harness(
   val metas = mutableListOf<RecordingMeta>()
   val keptPcm = mutableListOf<ByteArray>()
   val discarded = mutableListOf<String>()
+  /** How many times the older recordings were asked to be pruned. */
+  var prunes = 0
   val transcripts = mutableListOf<Pair<String, String>>()
   val kept = mutableListOf<AskRecord>()
   private val results = answers.toMutableList()
@@ -134,6 +136,7 @@ private class Harness(
         if (at >= 0) { metas.removeAt(at); keptPcm.removeAt(at) }
       }
       override fun transcribed(name: String, transcript: String) { transcripts += name to transcript }
+      override fun kept() { prunes += 1 }
     },
     asks = { kept += it },
     online = { online },
@@ -709,6 +712,18 @@ class AskControllerTest {
     assertTrue(failed.metas.isEmpty())
   }
 
+  // Android #80: the older recordings are pruned only for a recording that stays: its ask was taken, or refused.
+  @Test
+  fun older_recordings_are_pruned_only_for_a_recording_that_stays() = runTest {
+    // What the POST fails with (null: it goes through), and how many prunes follow.
+    val cases = listOf(null to 1, ApiErrorKind.INVALID_KEY to 1, ApiErrorKind.NETWORK to 0)
+    for ((error, prunes) in cases) {
+      val h = Harness(this, stopAfterMs = 1_000, post = { error?.let { throw ApiError(it) } ?: ACCEPTED })
+      h.controller.run(Source.HANDSFREE)
+      assertEquals(prunes, h.prunes)
+    }
+  }
+
   // The rider cancelled while the ask was being sent: they let it go, so it is not kept even when the send fails.
   @Test
   fun an_ask_cancelled_while_sending_is_not_kept_as_unreached() = runTest {
@@ -792,7 +807,9 @@ class TextAskTest {
   fun a_text_ask_starts_at_sending_and_is_read_out_without_returning() = runTest {
     val h = Harness(this, answers = listOf(done(transcript = null)))
     h.askText("右手に見える山は何？")
-    assertEquals(listOf("svc:start", "loc:latest", "post", "cue:sent", "get", "play:https://audio/1.mp3", "svc:stop"), h.log)
+    assertEquals(listOf("vol:read", "svc:start", "loc:latest", "post", "cue:sent", "get", "play:https://audio/1.mp3", "svc:stop"), h.log)
+    // Android #81: the volume is read as the ask starts, for SC-03's band.
+    assertEquals(MediaVolume(2, 25), h.states.first().mediaVolume)
     assertEquals(
       AskBody(volumeDb = 6, text = "右手に見える山は何？", location = Point(35.6812, 139.7671), headingDegrees = 12.5, conversationId = null, rideId = "r1"),
       h.bodies.single(),
@@ -839,7 +856,7 @@ class TextAskTest {
     assertEquals(listOf(TextAskOutcome.OFFLINE), h.outcomes)
     assertTrue(h.kept.isEmpty())
     assertTrue(h.states.none { it.phase == Phase.FAILED })
-    assertEquals(listOf("svc:start", "loc:latest", "post", "svc:stop"), h.log)
+    assertEquals(listOf("vol:read", "svc:start", "loc:latest", "post", "svc:stop"), h.log)
   }
 
   // Refusals show why on SC-03 (US-B-06.004), and the sheet keeps the text.
@@ -873,6 +890,51 @@ class TextAskTest {
     advanceUntilIdle()
     assertEquals(listOf(TextAskOutcome.SENT), h.outcomes)
     assertTrue(h.kept.isEmpty())
+  }
+
+  // Android #79: cancelled while it is sent, the sheet can send again at once, and a POST that goes through afterwards
+  // is still a text not taken: the sheet keeps it and no answer is waited for.
+  @Test
+  fun a_text_ask_cancelled_while_it_is_sent_is_not_taken_even_when_the_post_goes_through() = runTest {
+    val posted = CompletableDeferred<Unit>()
+    val h = Harness(this, post = { posted.await(); ACCEPTED })
+    val running = launch { h.askText("右手に見える山は何？") }
+    h.until { "post" in h.log }
+    h.controller.cancel()
+    assertEquals(listOf(TextAskOutcome.NOT_TAKEN), h.outcomes)
+    posted.complete(Unit)
+    running.join()
+    assertEquals(listOf(TextAskOutcome.NOT_TAKEN), h.outcomes)
+    assertFalse("get" in h.log)
+    assertTrue(h.kept.isEmpty())
+    assertEquals(Phase.IDLE, h.phase)
+  }
+
+  // Sent again at once after the cancel, the new ask goes on untouched by the first POST, and the cancelled ask does not
+  // become the conversation the next question goes on with.
+  @Test
+  fun a_text_ask_sent_again_after_a_cancel_is_untouched_by_the_first_post() = runTest {
+    val posted = CompletableDeferred<Unit>()
+    var posts = 0
+    val h = Harness(this, answers = listOf(PROCESSING, done(transcript = null)), post = {
+      if (++posts == 1) {
+        posted.await()
+        AskAccepted("a0", "c0", "2999-01-01T00:00:00Z")
+      } else ACCEPTED
+    })
+    val first = launch { h.askText("右手に見える山は何？") }
+    h.until { "post" in h.log }
+    h.controller.cancel()
+    val again = mutableListOf<TextAskOutcome>()
+    val second = launch { h.controller.runText("右手に見える山は何？") { again += it } }
+    h.until { h.phase == Phase.WAITING }
+    posted.complete(Unit)
+    first.join()
+    second.join()
+    assertEquals(listOf(TextAskOutcome.NOT_TAKEN), h.outcomes)
+    assertEquals(listOf(TextAskOutcome.SENT), again)
+    assertEquals("c1", h.deps.conversation.current(h.now()))
+    assertEquals(1, h.kept.size)
   }
 
   // §4.1: without a fresh position, the text ask goes without a place, and the heading is asked without one.

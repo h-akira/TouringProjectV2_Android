@@ -49,5 +49,7 @@ class SavingLabelsTest {
     assertEquals("走行を終えてから変えられます", switchMessage(TakeResult.Blocked(BlockReason.RIDE)))
     assertEquals("未送信の記録があるため、変えられませんでした", switchMessage(TakeResult.Blocked(BlockReason.UNSENT)))
     assertEquals("読み込めませんでした。ユーザー名は変えていません", switchMessage(TakeResult.Failed))
+    // Android #88: the name could not be put back, so SC-18 tells what is so.
+    assertEquals("ユーザー名は変わりましたが、記録を入れられませんでした。端末の記録は前の名前のままです", switchMessage(TakeResult.Mismatched))
   }
 }

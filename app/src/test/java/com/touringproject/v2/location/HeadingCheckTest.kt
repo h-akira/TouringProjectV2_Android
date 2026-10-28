@@ -148,6 +148,24 @@ class HeadingCheckTest {
     assertTrue(w.views.last().result is HeadingResult.Found)
   }
 
+  // Android #83: only the newest HEADING_POINTS points gathered are kept, as a ride's route reads no more. A point 30 m
+  // back, then points at a stop: the reference is found while it is among the newest, and gone once it is not.
+  @Test
+  fun only_the_newest_points_gathered_are_kept() = runTest {
+    fun TestScope.after(atStop: Int): HeadingResult {
+      val w = World()
+      open(w)
+      w.elapsed += 200_000
+      w.onRoute!!(w.fix(-30.0, ageMs = 150_000))
+      (atStop downTo 1).forEach { w.onRoute!!(w.fix(0.0, ageMs = it * 1_000L)) }
+      w.onPosition!!(w.fix(0.0))
+      w.tick(this)
+      return w.views.last().result
+    }
+    assertTrue(after(HEADING_POINTS - 1) is HeadingResult.Found)
+    assertEquals(HeadingResult.None(NoHeading.NOT_MOVED), after(HEADING_POINTS))
+  }
+
   @Test
   fun leaving_removes_both_watches() = runTest {
     val w = World()

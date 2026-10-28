@@ -42,11 +42,22 @@ class RecordingStore(private val dir: File, private val io: CoroutineDispatcher 
   /** Bumped after every change, so SC-12 can reload its list. */
   val changes: StateFlow<Int> = changeCount.asStateFlow()
 
-  suspend fun save(meta: RecordingMeta, pcm: ByteArray) = change {
+  /**
+   * Without prune, the older recordings are left until prune() (an ask's recording, which may go again: Android #80), so
+   * there may be one over the newest [keep] meanwhile.
+   */
+  suspend fun save(meta: RecordingMeta, pcm: ByteArray, prune: Boolean = true) = change {
     require(PCM_RE.matches(meta.name)) { "bad recording name" }
     dir.mkdirs()
     File(dir, meta.name).writeBytes(pcm)
     File(dir, metaName(meta.name)).writeText(json.encodeToString(RecordingMeta.serializer(), meta))
+    if (prune) pruneNow()
+  }
+
+  /** Leaves only the newest [keep] recordings. */
+  suspend fun prune() = change { pruneNow() }
+
+  private fun pruneNow() {
     // A JSON that cannot be read would hold a slot without ever being listed.
     dir.listFiles { file -> file.name.endsWith(".json") }?.filter { parse(it) == null }?.forEach { it.delete() }
     recordingsToDelete(dir.list()?.toList() ?: emptyList(), keep).forEach { File(dir, it).delete() }
@@ -103,8 +114,13 @@ class RecordingKeeper(
   private val scope: CoroutineScope,
   private val logError: (String, Throwable) -> Unit,
 ) : RecordingSink {
+  // Kept before its POST: the older recordings are pruned only once it is known to stay (kept).
   override fun saved(meta: RecordingMeta, pcm: ByteArray) {
-    scope.launch { guard("save") { store.save(meta, pcm) } }
+    scope.launch { guard("save") { store.save(meta, pcm, prune = false) } }
+  }
+
+  override fun kept() {
+    scope.launch { guard("prune") { store.prune() } }
   }
 
   override fun transcribed(name: String, transcript: String) {

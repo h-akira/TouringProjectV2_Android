@@ -50,7 +50,8 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   private var busySpeech: Deferred<Unit>? = null
 
   // Per-ask state: an older ask that is still unwinding must not read or change the newer one's.
-  private class Run(val id: Int, val source: Source, var returned: Boolean = false)
+  // cancelled is told when the rider ends the ask with the big button (a text ask's sheet: Android #79).
+  private class Run(val id: Int, val source: Source, var returned: Boolean = false, val cancelled: () -> Unit = {})
 
   // meta and pcm go to SC-12 as the ask is sent; an unreached ask's recording goes again (Android #68).
   // heading is worked out once, where the recording ended, for the ask sent and the unreached one alike.
@@ -95,6 +96,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   /** The big button: end the current ask now; whatever it is awaiting is ignored when it returns. */
   fun cancel() {
     if (state.phase == Phase.IDLE) return
+    current?.cancelled?.invoke()
     runId += 1
     current = null
     deps.player.stop()
@@ -173,9 +175,6 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   suspend fun runText(text: String, taken: (TextAskOutcome) -> Unit) {
     val d = deps
     if (state.phase == Phase.FAILED) d.speech.stop()
-    val run = Run(++runId, Source.SCREEN)
-    current = run
-    runsStarted += 1
     var told = false
     val tell = { outcome: TextAskOutcome ->
       if (!told) {
@@ -183,7 +182,11 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
         taken(outcome)
       }
     }
-    dispatch(FlowEvent.StartText(d.now()))
+    // Cancelled before the Backend took it, the sheet can send again at once, without waiting for the POST.
+    val run = Run(++runId, Source.SCREEN, cancelled = { tell(TextAskOutcome.NOT_TAKEN) })
+    current = run
+    runsStarted += 1
+    dispatch(FlowEvent.StartText(d.now(), d.mediaVolume()))
     try {
       val ride = d.ride()
       refusal(ride)?.let {
@@ -261,10 +264,12 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       }
       return null
     }
-    // The Backend has it either way: the sheet's text has gone, and the conversation goes on.
-    tell(TextAskOutcome.SENT)
-    d.conversation.update(accepted.conversationId, accepted.conversationExpiresAt)
+    // The Backend has it either way, so a conversation it went on with goes on. A text cancelled meanwhile stays not
+    // taken, and the sheet keeps it (Android #79); the ask left on the Backend is taken as a voice ask's is, but a
+    // conversation it started is not the one to go on with: the text is sent again, and starts or joins its own.
+    if (isCurrent(run) || body.conversationId != null) d.conversation.update(accepted.conversationId, accepted.conversationExpiresAt)
     if (!isCurrent(run)) return null
+    tell(TextAskOutcome.SENT)
     dispatch(FlowEvent.Sent(accepted.askId, d.now()))
     d.cues.sent()
     return SentAsk(accepted.askId, accepted.conversationId, body.conversationId == null, d.now(), here, rideId, ASK_INPUT_TEXT, text)
@@ -391,9 +396,11 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
         keepUnreached(recording, rideId, run)
         return null
       }
+      d.recordings.kept()
       fail(reason, run)
       return null
     }
+    d.recordings.kept()
     // The ask exists on the Backend either way, so keep the conversation going even if it was cancelled.
     d.conversation.update(accepted.conversationId, accepted.conversationExpiresAt)
     if (!isCurrent(run)) return null
