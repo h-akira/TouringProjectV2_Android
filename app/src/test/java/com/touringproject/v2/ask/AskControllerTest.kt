@@ -910,6 +910,33 @@ class TextAskTest {
     assertEquals(Phase.IDLE, h.phase)
   }
 
+  // Sent again at once after the cancel, the new ask goes on untouched by the first POST, and the cancelled ask does not
+  // become the conversation the next question goes on with.
+  @Test
+  fun a_text_ask_sent_again_after_a_cancel_is_untouched_by_the_first_post() = runTest {
+    val posted = CompletableDeferred<Unit>()
+    var posts = 0
+    val h = Harness(this, answers = listOf(PROCESSING, done(transcript = null)), post = {
+      if (++posts == 1) {
+        posted.await()
+        AskAccepted("a0", "c0", "2999-01-01T00:00:00Z")
+      } else ACCEPTED
+    })
+    val first = launch { h.askText("右手に見える山は何？") }
+    h.until { "post" in h.log }
+    h.controller.cancel()
+    val again = mutableListOf<TextAskOutcome>()
+    val second = launch { h.controller.runText("右手に見える山は何？") { again += it } }
+    h.until { h.phase == Phase.WAITING }
+    posted.complete(Unit)
+    first.join()
+    second.join()
+    assertEquals(listOf(TextAskOutcome.NOT_TAKEN), h.outcomes)
+    assertEquals(listOf(TextAskOutcome.SENT), again)
+    assertEquals("c1", h.deps.conversation.current(h.now()))
+    assertEquals(1, h.kept.size)
+  }
+
   // §4.1: without a fresh position, the text ask goes without a place, and the heading is asked without one.
   @Test
   fun without_a_position_a_text_ask_goes_without_a_place() = runTest {

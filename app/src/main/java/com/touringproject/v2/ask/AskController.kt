@@ -264,9 +264,10 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       }
       return null
     }
-    // The Backend has it either way, so the conversation goes on. A text cancelled meanwhile stays not taken, and the sheet
-    // keeps it (Android #79); the ask left on the Backend is taken as a voice ask's is.
-    d.conversation.update(accepted.conversationId, accepted.conversationExpiresAt)
+    // The Backend has it either way, so a conversation it went on with goes on. A text cancelled meanwhile stays not
+    // taken, and the sheet keeps it (Android #79); the ask left on the Backend is taken as a voice ask's is, but a
+    // conversation it started is not the one to go on with: the text is sent again, and starts or joins its own.
+    if (isCurrent(run) || body.conversationId != null) d.conversation.update(accepted.conversationId, accepted.conversationExpiresAt)
     if (!isCurrent(run)) return null
     tell(TextAskOutcome.SENT)
     dispatch(FlowEvent.Sent(accepted.askId, d.now()))
