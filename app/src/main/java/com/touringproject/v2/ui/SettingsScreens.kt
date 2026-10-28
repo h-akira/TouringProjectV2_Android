@@ -91,6 +91,7 @@ fun SettingsScreen(
   saved: String = "",
   onData: () -> Unit = {},
   onRecordingSettings: () -> Unit = {},
+  onHeadingCheck: () -> Unit = {},
 ) {
   val returnValue = if (!settings.returnEnabled) "戻らない" else settings.returnApp?.label ?: "未設定"
   // Scrolls: the list outgrows a small screen.
@@ -104,6 +105,8 @@ fun SettingsScreen(
     SettingsRow("録音の設定", recordingRowValue(settings), onRecordingSettings)
     SettingsRow("回答の音量", "+${settings.answerVolumeDb}dB", onVolume)
     SettingsRow("録音の確認", "", onRecordings)
+    // Under the other check, as the mock's 確認 section has them (slice 5 spec §14).
+    SettingsRow("位置と方位の確認", "", onHeadingCheck)
     SettingsRow("バージョン", version, null, Modifier.testTag("versionRow"))
   }
 }

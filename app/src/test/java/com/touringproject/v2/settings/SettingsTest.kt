@@ -104,6 +104,13 @@ class SettingsTest {
     assertEquals(s.copy(recordLimitSeconds = 20, startCueMs = 1_500), s.withRecordingDefaults())
   }
 
+  // SC-22's 「既定値に戻す」 puts back its three values only.
+  @Test
+  fun the_heading_defaults_leave_the_other_settings_as_they_are() {
+    val s = Settings("rider01", startCueMs = 0, headingReferenceMeters = 30, headingAccuracyMeters = 50, headingHoldMinutes = 2)
+    assertEquals(s.copy(headingReferenceMeters = 15, headingAccuracyMeters = 20, headingHoldMinutes = 10), s.withHeadingDefaults())
+  }
+
   @Test
   fun not_json_falls_back_to_defaults() {
     val (s, needsSave) = decodeSettings("{not json", Random(3))

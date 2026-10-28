@@ -26,7 +26,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberDecoratedNavEntries
@@ -39,10 +42,13 @@ import com.touringproject.v2.api.ApiClient
 import com.touringproject.v2.ask.Phase
 import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.ask.rideNow
+import com.touringproject.v2.location.HeadingView
 import com.touringproject.v2.records.NoteDraft
 import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.settings.LaunchableApp
+import com.touringproject.v2.settings.headingParams
+import com.touringproject.v2.settings.withHeadingDefaults
 import com.touringproject.v2.settings.withRecordingDefaults
 import com.touringproject.v2.sync.TakeOp
 import kotlinx.coroutines.delay
@@ -59,6 +65,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object VolumeKey : NavKey
 @Serializable data object RecordingsKey : NavKey
 @Serializable data object RecordingSettingsKey : NavKey
+@Serializable data object HeadingCheckKey : NavKey
 @Serializable data object RideRecordingKey : NavKey
 @Serializable data object DataKey : NavKey
 @Serializable data object RecordsKey : NavKey
@@ -190,6 +197,8 @@ fun AppUi(graph: AppGraph) {
                   rideList?.let { rideSections(it, System.currentTimeMillis(), ZoneId.systemDefault()) },
                   onRide = { tabs.push(RideKey(it)) },
                   modifier = Modifier.safeDrawingPadding(),
+                  userName = current.userName,
+                  onUser = { tabs.open(Tab.SETTINGS, UserKey) },
                 )
               }
               entry<RideKey> { key ->
@@ -242,6 +251,26 @@ fun AppUi(graph: AppGraph) {
                   saved = saveRowValue(summary ?: SaveSummary()),
                   onData = { tabs.push(DataKey) },
                   onRecordingSettings = { tabs.push(RecordingSettingsKey) },
+                  onHeadingCheck = { tabs.push(HeadingCheckKey) },
+                )
+              }
+              entry<HeadingCheckKey> {
+                var view by remember { mutableStateOf<HeadingView?>(null) }
+                val lifecycle = LocalLifecycleOwner.current.lifecycle
+                // Its watches run only while SC-22 shows; leaving it, or the app going to the back, drops what it
+                // gathered (slice 5 spec §4.5).
+                LaunchedEffect(lifecycle) {
+                  lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { graph.headingCheck().run { view = it } }
+                }
+                HeadingCheckScreen(
+                  view?.let { headingCheckUi(it, current.headingParams) },
+                  current,
+                  { next -> scope.launch { graph.settings.update(next) } },
+                  onReset = {
+                    scope.launch { graph.settings.update(current.withHeadingDefaults()) }
+                    Toast.makeText(context, "既定値に戻しました", Toast.LENGTH_SHORT).show()
+                  },
+                  modifier = Modifier.safeDrawingPadding(),
                 )
               }
               entry<RecordingSettingsKey> {

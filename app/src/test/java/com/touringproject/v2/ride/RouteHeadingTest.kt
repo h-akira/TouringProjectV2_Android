@@ -29,13 +29,21 @@ class RouteHeadingTest {
   private val store = RoomRideStore(db.rides())
   private var ride: Ride? = null
   private var params = HeadingParams()
+  private var now = 0L
   private val failures = mutableListOf<String>()
   private val heading = RouteHeading(
     ride = { ride },
     points = { rideId, segment, count -> db.rides().segmentTail(rideId, segment, count).map { it.toPoint() } },
     params = { params },
+    now = { now },
     log = { message, _ -> failures += message },
   )
+
+  /** The heading at here, the present being at (on the points' own time). */
+  private suspend fun RouteHeading.find(here: Fix, at: Long): HeadingResult {
+    now = at
+    return find(here)
+  }
 
   @After
   fun close() = db.close()
@@ -84,7 +92,7 @@ class RouteHeadingTest {
   @Test
   fun without_a_ride_or_its_points_there_is_no_route() = runBlocking {
     assertEquals(HeadingResult.None(NoHeading.NOT_MOVED), heading.find(here(0, 0), 0))
-    val broken = RouteHeading({ newRide("r1", "箱根", 0, 7, HOUR_MS) }, { _, _, _ -> error("closed") }, { params }) { message, _ -> failures += message }
+    val broken = RouteHeading({ newRide("r1", "箱根", 0, 7, HOUR_MS) }, { _, _, _ -> error("closed") }, { params }, { now }) { message, _ -> failures += message }
     assertNull(broken.find(here(0, 0), 0).degrees)
     assertEquals(listOf("heading_points_failed rideId=r1"), failures)
   }

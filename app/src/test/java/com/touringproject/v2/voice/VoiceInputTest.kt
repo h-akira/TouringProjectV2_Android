@@ -150,17 +150,19 @@ class VoiceInputTest {
     assertEquals(VOICE_IDLE, h.voice.state)
   }
 
+  // Android #61: the press starts nothing, and the failure cue tells it was not taken.
   @Test
-  fun a_press_while_the_text_is_being_made_does_nothing() = runTest {
+  fun a_press_while_the_text_is_being_made_starts_nothing_and_gets_the_failure_cue() = runTest {
     val h = VoiceHarness(this, getGate = CompletableDeferred())
     h.voice.press(Source.SCREEN)
     runCurrent()
     h.voice.press(Source.SCREEN)
     advanceTimeBy(1_500)
     assertEquals(VoicePhase.TRANSCRIBING, h.voice.state.phase)
-    h.voice.press(Source.SCREEN)
+    h.voice.press(Source.HANDSFREE)
     runCurrent()
     assertEquals(1, h.log.count { it == "rec:start" })
+    assertEquals("cue:failure", h.log.last())
     h.getGate!!.complete(Unit)
     advanceUntilIdle()
     assertEquals("展望スペース", h.voice.state.heard?.text)

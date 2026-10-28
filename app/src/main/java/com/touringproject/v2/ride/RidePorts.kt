@@ -28,6 +28,8 @@ interface DeadlineAlarm {
 
 class RideDeps(
   val now: () -> Long,
+  /** The time since boot (SystemClock.elapsedRealtime): what a route point's age is told by (Android #17). */
+  val elapsed: () -> Long,
   /** The device's boot count, or null when the system does not tell. */
   val bootCount: () -> Int?,
   val newId: () -> String,

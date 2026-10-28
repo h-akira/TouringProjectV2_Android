@@ -20,6 +20,18 @@ class MemosTest {
     assertEquals("あ".repeat(2000), cutMemo("あ".repeat(2500)))
   }
 
+  // Android #61: an emoji made of several code points is kept whole or left out whole at the 2000th character.
+  @Test
+  fun the_cut_splits_no_emoji_made_of_several_code_points() {
+    val family = "👨‍👩‍👧"
+    assertEquals("あ".repeat(1997), cutMemo("あ".repeat(1997) + family))
+    assertEquals("あ".repeat(1995) + family, cutMemo("あ".repeat(1995) + family + "い"))
+    assertEquals("あ".repeat(1999), cutMemo("あ".repeat(1999) + "🇯🇵"))
+    assertEquals("あ".repeat(1997) + "🇯🇵", cutMemo("あ".repeat(1997) + "🇯🇵🇯🇵"))
+    assertEquals("あ".repeat(1999), cutMemo("あ".repeat(1999) + "👍🏽"))
+    assertEquals("あ".repeat(1999), cutMemo("あ".repeat(1999) + "❤️"))
+  }
+
   @Test
   fun a_memo_fits_up_to_2000_characters() {
     assertTrue(memoFits(null))

@@ -19,7 +19,7 @@ class RoomNotes(
   private val now: () -> Long,
   private val newId: () -> String,
   private val changed: () -> Unit,
-  private val heading: suspend (here: Fix?, now: Long) -> Double? = { _, _ -> null },
+  private val heading: suspend (here: Fix?) -> Double? = { null },
   private val log: (String, Throwable) -> Unit,
 ) : NoteEdits {
   override suspend fun draft(rideId: String): NoteDraft {
@@ -33,7 +33,7 @@ class RoomNotes(
       log("note_points_failed rideId=$rideId", e)
       null
     }
-    return noteDraft(newId(), rideId, at, newest, heading(newest?.toFix(), at))
+    return noteDraft(newId(), rideId, at, newest, heading(newest?.toFix()))
   }
 
   override suspend fun create(draft: NoteDraft, text: String): Boolean =

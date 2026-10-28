@@ -48,6 +48,12 @@ fun RoutePoint.toFix() = Fix(lat, lon, t, accuracy)
 fun noteDraft(id: String, rideId: String, at: Long, newest: RoutePoint?, headingDegrees: Double?) =
   NoteDraft(id, rideId, at, newest?.lat, newest?.lon, headingDegrees)
 
+/** The text with what was heard added; whole is false when some of it did not fit (Android #61). */
+data class Appended(val text: String, val whole: Boolean)
+
 /** SC-19's voice input: what was heard goes at the end of what is written, on a line of its own, within 2000 characters. */
-fun appendHeard(current: String, heard: String): String =
-  cutMemo(if (current.isEmpty() || current.endsWith("\n")) current + heard else current + "\n" + heard)
+fun appendHeard(current: String, heard: String): Appended {
+  val joined = if (current.isEmpty() || current.endsWith("\n")) current + heard else current + "\n" + heard
+  val kept = cutMemo(joined)
+  return Appended(kept, kept.length == joined.length)
+}

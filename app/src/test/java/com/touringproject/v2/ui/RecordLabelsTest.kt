@@ -163,6 +163,16 @@ class RecordLabelsTest {
     assertEquals("場所不明", shortPlace(null))
   }
 
+  // Android #50: only a prefecture's own name goes, of whichever length.
+  @Test
+  fun the_short_place_keeps_a_place_that_only_has_ken_in_it() {
+    assertEquals("西区県庁前", shortPlace("西区県庁前"))
+    assertEquals("箱根町", shortPlace("神奈川県箱根町"))
+    assertEquals("鹿児島市", shortPlace("鹿児島県鹿児島市"))
+    assertEquals("那覇市", shortPlace("沖縄県那覇市"))
+    assertEquals("大阪市北区", shortPlace("大阪府大阪市北区"))
+  }
+
   // US-D-04.005: the memos show in the list, the timeline, the pins and SC-07.
   @Test
   fun memos_are_marked_where_the_rider_looks_for_them() {

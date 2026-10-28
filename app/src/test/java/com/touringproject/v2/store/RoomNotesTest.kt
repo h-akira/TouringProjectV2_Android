@@ -35,7 +35,7 @@ class RoomNotesTest {
   private val headingAsked = mutableListOf<Pair<Fix?, Long>>()
   private val notes = RoomNotes(
     db.notes(), db.rides(), { now }, { "n1" }, { changes += 1 },
-    heading = { here, at -> headingAsked += here to at; 271.5 },
+    heading = { here -> headingAsked += here to now; 271.5 },
   ) { message, _ -> errors += message }
   private val records = RoomRecords(db.rides(), db.asks(), db.notes())
   private val ride = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS)

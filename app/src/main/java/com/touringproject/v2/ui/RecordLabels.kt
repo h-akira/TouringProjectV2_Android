@@ -157,7 +157,13 @@ fun notePins(notes: List<NoteRecord>): List<MapPin> {
   }
 }
 
-private val PREFECTURE = Regex("^(東京都|北海道|(京都|大阪)府|.{2,3}県)")
+// The 43 prefectures named 〜県, by name: "two or three characters and 県" also matched an address like 西区県庁前 (Android #50).
+private val KEN = listOf(
+  "青森", "岩手", "宮城", "秋田", "山形", "福島", "茨城", "栃木", "群馬", "埼玉", "千葉", "神奈川", "新潟", "富山", "石川",
+  "福井", "山梨", "長野", "岐阜", "静岡", "愛知", "三重", "滋賀", "兵庫", "奈良", "和歌山", "鳥取", "島根", "岡山", "広島",
+  "山口", "徳島", "香川", "愛媛", "高知", "福岡", "佐賀", "長崎", "熊本", "大分", "宮崎", "鹿児島", "沖縄",
+)
+private val PREFECTURE = Regex("^(東京都|北海道|(京都|大阪)府|(${KEN.joinToString("|")})県)")
 
 /** The mock's short place: the address without its prefecture; an address that starts otherwise is kept whole (Android #45). */
 fun shortPlace(address: String?): String = address?.replace(PREFECTURE, "")?.ifBlank { null } ?: "場所不明"

@@ -2,6 +2,7 @@ package com.touringproject.v2.ride
 
 import com.touringproject.v2.location.Fix
 import com.touringproject.v2.location.acceptRoutePoint
+import com.touringproject.v2.location.isSince
 import com.touringproject.v2.records.memoFits
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -33,6 +34,9 @@ class RideController(private val deps: RideDeps) {
   val storeFailed: StateFlow<Boolean> = storeFailing.asStateFlow()
   // The last stored point of the active ride, for the distance of the next one.
   private var lastPoint: RoutePoint? = null
+  // The time since boot when this process began to take the open segment's points (its start or resume, or load()).
+  // A fix made before it is not on the segment's route, whatever the clock says (Android #17, #24).
+  private var takingSince: Long? = null
   // A ride whose save failed; it is written again first by every later call.
   private var unsaved: Ride? = null
   // False until the ride left over from before this process has been read; until then no new ride may start.
@@ -70,6 +74,7 @@ class RideController(private val deps: RideDeps) {
       Reconcile.Resume -> {
         activeRide.value = ride
         lastPoint = read("last_point") { d.store.lastPoint(ride!!.id) }
+        takingSince = d.elapsed()
         d.alarm.set(ride!!.id, ride.deadline!!)
         d.recording(true)
       }
@@ -144,6 +149,7 @@ class RideController(private val deps: RideDeps) {
     save(ride)
     activeRide.value = ride
     lastPoint = null
+    takingSince = d.elapsed()
     d.alarm.set(ride.id, ride.deadline!!)
     d.recording(true)
     d.log("ride_start", mapOf("ride" to ride.id))
@@ -175,6 +181,7 @@ class RideController(private val deps: RideDeps) {
     save(resumed)
     activeRide.value = resumed
     lastPoint = null
+    takingSince = d.elapsed()
     d.alarm.set(resumed.id, resumed.deadline!!)
     d.recording(true)
     true
@@ -288,7 +295,7 @@ class RideController(private val deps: RideDeps) {
     val now = d.now()
     if (autoEndIfDue(ride, now)) return@locked
     // Fused may hand over a cached fix when the watch starts again: one from before this segment is not on its route.
-    if (!acceptRoutePoint(fix) || fix.timestamp < ride.segments.last().startedAt) {
+    if (!acceptRoutePoint(fix) || !fix.isSince(takingSince, ride.segments.last().startedAt)) {
       write("alive") { d.store.markAlive(ride.id, now) }
       activeRide.value = ride.copy(lastAliveAt = now)
       return@locked

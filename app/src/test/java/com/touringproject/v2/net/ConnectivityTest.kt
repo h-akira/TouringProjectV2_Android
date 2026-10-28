@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -49,5 +50,23 @@ class ConnectivityTest {
     assertTrue(connectivity.online.value)
     callback.onLost(new)
     assertFalse(connectivity.online.value)
+  }
+
+  // Android #69: each comeback is counted as the system reports it, so a short drop no one saw still counts.
+  @Test
+  fun each_comeback_is_counted_where_it_is_reported() {
+    val before = shadowOf(manager).networkCallbacks.toSet()
+    val connectivity = Connectivity(app)
+    val callback = (shadowOf(manager).networkCallbacks - before).single()
+    val network = manager.activeNetwork!!
+    val caps = ShadowNetworkCapabilities.newInstance().also { shadowOf(it).addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) }
+    assertEquals(0, connectivity.comebacks.value)
+    callback.onLost(network)
+    callback.onCapabilitiesChanged(network, caps)
+    assertTrue(connectivity.online.value)
+    assertEquals(1, connectivity.comebacks.value)
+    // Capabilities reported again while online are not a comeback.
+    callback.onCapabilitiesChanged(network, caps)
+    assertEquals(1, connectivity.comebacks.value)
   }
 }

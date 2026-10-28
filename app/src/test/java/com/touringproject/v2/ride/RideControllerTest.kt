@@ -16,7 +16,7 @@ import java.io.IOException
 private const val MAX = 24 * HOUR_MS
 
 /** An in-memory store that can be told to fail, and a world that records what the controller asked of it. */
-private class World(var now: Long = 1_000, var boot: Int? = 7) {
+private class World(var now: Long = 1_000, var boot: Int? = 7, var elapsed: Long = 500) {
   val rides = mutableMapOf<String, Ride>()
   val points = mutableMapOf<String, MutableList<RoutePoint>>()
   var failWrites = false
@@ -79,6 +79,7 @@ private class World(var now: Long = 1_000, var boot: Int? = 7) {
   val controller = RideController(
     RideDeps(
       now = { now },
+      elapsed = { elapsed },
       bootCount = { boot },
       newId = { "r${++ids}" },
       maxRecordingMs = { max },
@@ -163,6 +164,53 @@ class RideControllerTest {
     w.controller.pause()
     w.controller.onFix(fix(2_000, 35.0))
     assertNull(w.points["r1"])
+  }
+
+  // Android #17: with the clock set 5 minutes ahead, the segment starts "later" than the fixes' own (GNSS) time; the
+  // time since boot tells which fixes came after the start, and a cached one from before is still dropped.
+  @Test
+  fun a_clock_set_ahead_drops_no_point_of_the_segment_and_a_cached_fix_still_goes() = runTest {
+    val w = World(now = 1_000 + 5 * 60_000, elapsed = 500)
+    w.controller.load()
+    w.controller.start("箱根")
+    w.controller.onFix(Fix(35.000, 139.0, 900, 5.0, elapsedMs = 400))
+    w.controller.onFix(Fix(35.001, 139.0, 2_000, 5.0, elapsedMs = 1_500))
+    w.controller.onFix(Fix(35.002, 139.0, 7_000, 5.0, elapsedMs = 6_500))
+    assertEquals(listOf(2_000L, 7_000L), w.points.getValue("r1").map { it.t })
+  }
+
+  // Android #24: the clock was set back 30 minutes while paused, so the new segment starts "in the future" (Android #22);
+  // the points after the resume are kept all the same.
+  @Test
+  fun a_clock_set_back_during_a_pause_drops_no_point_after_the_resume() = runTest {
+    val w = World(now = 2_000_000, elapsed = 500)
+    w.controller.load()
+    w.controller.start("箱根")
+    w.now = 2_600_000
+    w.elapsed = 600_500
+    w.controller.pause()
+    w.now = 1_000_000
+    w.elapsed = 700_500
+    w.controller.resume()
+    assertEquals(2_600_000L, w.stored().segments.last().startedAt)
+    w.controller.onFix(Fix(35.0, 139.0, 1_005_000, 5.0, elapsedMs = 705_500))
+    assertEquals(listOf(1_005_000L), w.points.getValue("r1").map { it.t })
+  }
+
+  // A process that takes over a recording ride (load) takes its points from then on, by the time since boot.
+  @Test
+  fun a_ride_taken_over_by_a_new_process_takes_points_made_after_it() = runTest {
+    val before = World()
+    before.controller.load()
+    before.controller.start("箱根")
+    val after = World(now = 30_000, elapsed = 29_500).apply {
+      rides += before.rides
+      points += before.points
+    }
+    after.controller.load()
+    after.controller.onFix(Fix(35.000, 139.0, 29_000, 5.0, elapsedMs = 29_000))
+    after.controller.onFix(Fix(35.001, 139.0, 31_000, 5.0, elapsedMs = 31_000))
+    assertEquals(listOf(31_000L), after.points.getValue("r1").map { it.t })
   }
 
   @Test

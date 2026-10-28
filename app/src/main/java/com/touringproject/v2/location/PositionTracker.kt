@@ -16,10 +16,19 @@ fun interface Subscription {
 }
 
 interface PositionSource {
+  /** The device's clock. */
   fun now(): Long
+  /** The time since boot (SystemClock.elapsedRealtime). */
+  fun elapsed(): Long
   fun lastKnown(onFix: (Fix) -> Unit)
   fun watch(onFix: (Fix) -> Unit): Subscription
 }
+
+/**
+ * Whether the fix is at most MAX_CURRENT_AGE_MS old: by the time since boot when the fix tells it, since the fix's own
+ * time may be off the device's clock (Android #17); otherwise by the clock.
+ */
+fun Fix.isFresh(now: Long, elapsed: Long): Boolean = (elapsedMs?.let { elapsed - it } ?: (now - timestamp)) <= MAX_CURRENT_AGE_MS
 
 class PositionTracker(private val source: PositionSource) : Positions {
   private val fixes = mutableListOf<Fix>()
@@ -45,7 +54,7 @@ class PositionTracker(private val source: PositionSource) : Positions {
     subscription = null
     val latest = fixes.maxByOrNull { it.timestamp }
     fixes.clear()
-    return latest?.takeIf { source.now() - it.timestamp <= MAX_CURRENT_AGE_MS }
+    return latest?.takeIf { it.isFresh(source.now(), source.elapsed()) }
   }
 
   /**
@@ -58,6 +67,6 @@ class PositionTracker(private val source: PositionSource) : Positions {
         runCatching { source.lastKnown { if (cont.isActive) cont.resume(it) } }.onFailure { if (cont.isActive) cont.resume(null) }
       }
     }
-    return fix?.takeIf { source.now() - it.timestamp <= MAX_CURRENT_AGE_MS }
+    return fix?.takeIf { it.isFresh(source.now(), source.elapsed()) }
   }
 }
