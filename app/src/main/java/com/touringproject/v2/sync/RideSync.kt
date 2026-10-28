@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -320,13 +319,9 @@ fun credentialChanges(key: Flow<String?>, userName: Flow<String?>): Flow<Unit> =
     .map { }
 
 /**
- * A trigger each time the device's network comes back (slice 4 spec §5.2): a change from none to one, not the state it
- * starts in. While the process lives, what waited for the network then goes without the app coming to the front.
+ * A trigger each time the device's network comes back (slice 4 spec §5.2), from the count of comebacks
+ * (Connectivity.comebacks): any rise of it, not the count it starts at. A count conflates, so two comebacks before the
+ * collector runs are one trigger, but none is missed (Android #69). While the process lives, what waited for the
+ * network then goes without the app coming to the front.
  */
-fun reconnections(online: Flow<Boolean>): Flow<Unit> = flow {
-  var before: Boolean? = null
-  online.collect { now ->
-    if (before == false && now) emit(Unit)
-    before = now
-  }
-}
+fun reconnections(comebacks: Flow<Int>): Flow<Unit> = comebacks.distinctUntilChanged().drop(1).map { }

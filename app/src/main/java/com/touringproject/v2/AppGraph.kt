@@ -356,7 +356,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     }
     scope.launch { sync.run() }
     // The network coming back lets what waited for it go, while the process lives (slice 4 spec §5.2).
-    scope.launch { reconnections(connectivity.online).collect { sync.request() } }
+    scope.launch { reconnections(connectivity.comebacks).collect { sync.request() } }
     // SC-16: the recording ride's deadline follows the longest recording time, wherever it was changed (Android #33).
     scope.launch { maxRecordingChanges(settings.settings).collect { rides.maxRecordingChanged() } }
     scope.launch {
