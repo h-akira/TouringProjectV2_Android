@@ -48,6 +48,14 @@ class HeadingLabelsTest {
     assertEquals("位置の精度 6m · 基準の点 18m 手前（30秒前）", recent.detail)
   }
 
+  // Android #86: a reference point a moment after the present (each fix's time stands a little differently to the time
+  // since boot) is 0 seconds old, never less.
+  @Test
+  fun a_reference_after_the_present_is_0_seconds_old() {
+    val ui = headingCheckUi(HeadingView(HeadingResult.Found(0.0, reference, 15.0), here, true, -1_500), HeadingParams())
+    assertEquals("位置の精度 6m · 基準の点 15m 手前（0秒前）", ui.detail)
+  }
+
   @Test
   fun degrees_that_round_to_360_are_0_and_an_unknown_accuracy_says_so() {
     val ui = headingCheckUi(HeadingView(HeadingResult.Found(359.7, reference, 15.0), here.copy(accuracy = null), false, 5_000), HeadingParams())

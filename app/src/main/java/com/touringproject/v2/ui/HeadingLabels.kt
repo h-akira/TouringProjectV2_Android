@@ -35,7 +35,8 @@ fun headingCheckUi(view: HeadingView, params: HeadingParams): HeadingCheckUi {
   return when (val result = view.result) {
     is HeadingResult.Found -> {
       val degrees = result.degrees
-      val age = view.referenceAgeMs ?: 0
+      // A reference a moment after the present (each fix's time stands a little differently) is new (Android #86).
+      val age = (view.referenceAgeMs ?: 0).coerceAtLeast(0)
       val held = if (age > HELD_AFTER_MS) "。止まる直前の向きを保っています" else ""
       HeadingCheckUi(
         title = "${compass16(degrees)}へ（${degrees.roundToInt() % 360}°）",
