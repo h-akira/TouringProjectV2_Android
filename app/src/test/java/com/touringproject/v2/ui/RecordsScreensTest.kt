@@ -79,6 +79,16 @@ class RecordsScreensTest {
     assertEquals(listOf("r1"), opened)
   }
 
+  // Slice 5 spec §7: the list says whose records these are, and the name opens SC-18.
+  @Test
+  fun the_list_shows_the_user_name_which_opens_the_user_screen() {
+    var opened = 0
+    rule.setContent { RideListScreen(emptyList(), {}, userName = "rider01", onUser = { opened++ }) }
+    rule.onNodeWithTag("listUser").assertTextEquals("👤 rider01")
+    rule.onNodeWithTag("listUser").performClick()
+    assertEquals(1, opened)
+  }
+
   @Test
   fun without_rides_the_list_says_how_to_record_one() {
     rule.setContent { RideListScreen(emptyList(), {}) }

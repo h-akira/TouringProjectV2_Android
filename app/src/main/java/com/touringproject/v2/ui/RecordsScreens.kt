@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -80,11 +81,27 @@ private fun TopBar(title: String, onBack: () -> Unit, actions: @Composable () ->
 private fun Muted(text: String, modifier: Modifier = Modifier, size: Int = 14) =
   Text(text, modifier, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = size.sp)
 
-/** SC-05's rides, the one recording or paused first. The switch to the days comes with plan 4b. */
+/**
+ * SC-05's rides, the one recording or paused first. userName is the user whose records these are, shown by the title
+ * (US-E-06.010); pressing it opens SC-18, as Home's does (slice 5 spec §7).
+ */
 @Composable
-fun RideListScreen(sections: List<RideSection>?, onRide: (String) -> Unit, modifier: Modifier = Modifier) {
+fun RideListScreen(
+  sections: List<RideSection>?,
+  onRide: (String) -> Unit,
+  modifier: Modifier = Modifier,
+  userName: String? = null,
+  onUser: () -> Unit = {},
+) {
   Column(modifier.fillMaxSize()) {
-    Text("記録", Modifier.padding(16.dp), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+      Text("記録", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+      userName?.let {
+        OutlinedButton(onClick = onUser, modifier = Modifier.testTag("listUser")) {
+          Text("👤 $it", fontFamily = FontFamily.Monospace)
+        }
+      }
+    }
     when {
       sections == null -> Unit
       sections.isEmpty() -> Muted("まだ走行の記録がありません。ホームの「▶ 走行を開始」で記録します。", Modifier.padding(horizontal = 16.dp), 16)

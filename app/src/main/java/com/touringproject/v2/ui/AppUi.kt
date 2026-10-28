@@ -197,6 +197,8 @@ fun AppUi(graph: AppGraph) {
                   rideList?.let { rideSections(it, System.currentTimeMillis(), ZoneId.systemDefault()) },
                   onRide = { tabs.push(RideKey(it)) },
                   modifier = Modifier.safeDrawingPadding(),
+                  userName = current.userName,
+                  onUser = { tabs.open(Tab.SETTINGS, UserKey) },
                 )
               }
               entry<RideKey> { key ->

@@ -118,6 +118,18 @@ class AppUiTest {
     rule.onNodeWithText("走行の記録").assertExists()
   }
 
+  // Slice 5 spec §7: SC-05's user name opens SC-18 above Settings' first screen, as Home's does.
+  @Test
+  fun the_records_user_name_opens_the_user_name_screen() {
+    val graph = (rule.activity.application as TouringApp).graph
+    rule.onNodeWithTag("tab-RECORDS").performClick()
+    rule.onNodeWithTag("listUser").assertTextContains(graph.settings.current().userName, substring = true)
+    rule.onNodeWithTag("listUser").performClick()
+    rule.onNodeWithTag("userInput").assertExists()
+    back()
+    rule.onNodeWithText("走行の記録").assertExists()
+  }
+
   // Android #34
   @Test
   fun a_name_being_typed_survives_a_trip_to_another_tab() {
