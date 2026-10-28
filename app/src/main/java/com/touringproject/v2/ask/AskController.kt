@@ -395,9 +395,11 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
         keepUnreached(recording, rideId, run)
         return null
       }
+      d.recordings.kept()
       fail(reason, run)
       return null
     }
+    d.recordings.kept()
     // The ask exists on the Backend either way, so keep the conversation going even if it was cancelled.
     d.conversation.update(accepted.conversationId, accepted.conversationExpiresAt)
     if (!isCurrent(run)) return null

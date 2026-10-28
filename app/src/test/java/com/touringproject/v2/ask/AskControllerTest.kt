@@ -83,6 +83,8 @@ private class Harness(
   val metas = mutableListOf<RecordingMeta>()
   val keptPcm = mutableListOf<ByteArray>()
   val discarded = mutableListOf<String>()
+  /** How many times the older recordings were asked to be pruned. */
+  var prunes = 0
   val transcripts = mutableListOf<Pair<String, String>>()
   val kept = mutableListOf<AskRecord>()
   private val results = answers.toMutableList()
@@ -134,6 +136,7 @@ private class Harness(
         if (at >= 0) { metas.removeAt(at); keptPcm.removeAt(at) }
       }
       override fun transcribed(name: String, transcript: String) { transcripts += name to transcript }
+      override fun kept() { prunes += 1 }
     },
     asks = { kept += it },
     online = { online },
@@ -707,6 +710,18 @@ class AskControllerTest {
     assertEquals(1, keptAtPost)
     assertEquals(listOf("rec-0.pcm"), failed.discarded)
     assertTrue(failed.metas.isEmpty())
+  }
+
+  // Android #80: the older recordings are pruned only for a recording that stays: its ask was taken, or refused.
+  @Test
+  fun older_recordings_are_pruned_only_for_a_recording_that_stays() = runTest {
+    // What the POST fails with (null: it goes through), and how many prunes follow.
+    val cases = listOf(null to 1, ApiErrorKind.INVALID_KEY to 1, ApiErrorKind.NETWORK to 0)
+    for ((error, prunes) in cases) {
+      val h = Harness(this, stopAfterMs = 1_000, post = { error?.let { throw ApiError(it) } ?: ACCEPTED })
+      h.controller.run(Source.HANDSFREE)
+      assertEquals(prunes, h.prunes)
+    }
   }
 
   // The rider cancelled while the ask was being sent: they let it go, so it is not kept even when the send fails.
