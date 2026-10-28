@@ -5,11 +5,13 @@ import com.touringproject.v2.api.CloudRecord
 import com.touringproject.v2.api.RecordsApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // Reading the user's records back from the cloud (slice 4 spec §6, adr/0010): when the user name changes, and when SC-14
 // reads them again.
@@ -43,6 +45,12 @@ sealed interface TakeResult {
 
   /** Nothing changed: the cloud could not be read whole, or what it said could not be written. */
   data object Failed : TakeResult
+
+  /**
+   * A change of user name whose records did not come in, and whose name could not be put back: the saved name is the
+   * new one, the device's records the old name's (Android #88).
+   */
+  data object Mismatched : TakeResult
 }
 
 enum class TakeOp { SWITCH, REREAD }
@@ -90,38 +98,35 @@ class Takeover(
   /**
    * SC-18 after DL-03: the device's records go and the name's come in (§6.4). The name and the records cannot be
    * written in one transaction, so the name is saved first (save throws when it cannot be) and put back to from when
-   * the records do not come in; nothing changes when the read, the name or the write fails (Android #72). No pass of
-   * the sync runs meanwhile, so nothing goes out under the new name before its records are in. switched follows a
-   * change that is done.
+   * the records do not come in; nothing changes when the read, the name or the write fails (Android #72). From the
+   * name saved to the name put back, a cancel does not stop it, and a name that cannot be put back is Mismatched
+   * (Android #88). No pass of the sync runs meanwhile, so nothing goes out under the new name before its records are
+   * in. switched follows a change that is done.
    */
   fun switchTo(peek: Peek, from: String, save: suspend (userName: String) -> Unit, switched: suspend () -> Unit) =
     start(TakeOp.SWITCH) {
       val records = readAll(peek.userName, peek.first)
-      save(peek.userName)
-      val result = try {
-        store.take(records, replace = true, now())
-      } catch (e: Exception) {
-        putBack(from, save)
-        throw e
+      withContext(NonCancellable) {
+        save(peek.userName)
+        val result = try {
+          store.take(records, replace = true, now())
+        } catch (e: Exception) {
+          if (!putBack(from, save)) return@withContext TakeResult.Mismatched
+          throw e
+        }
+        if (result !is TakeResult.Done) return@withContext if (putBack(from, save)) result else TakeResult.Mismatched
+        switched()
+        result
       }
-      if (result !is TakeResult.Done) {
-        putBack(from, save)
-        return@start result
-      }
-      switched()
-      result
     }
 
-  // A name that cannot be put back is logged: the records are the old name's, the saved name the new one.
-  private suspend fun putBack(from: String, save: suspend (userName: String) -> Unit) {
-    try {
-      save(from)
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      log("takeover_failed", mapOf("op" to "put_back", "error" to e.toString()))
-      throw e
-    }
+  // False when the name cannot be put back (logged): the records are the old name's, the saved name the new one.
+  private suspend fun putBack(from: String, save: suspend (userName: String) -> Unit): Boolean = try {
+    save(from)
+    true
+  } catch (e: Exception) {
+    log("takeover_failed", mapOf("op" to "put_back", "error" to e.toString()))
+    false
   }
 
   /** SC-14's クラウドから読み直す: the current name's records, merged with the device's. */
