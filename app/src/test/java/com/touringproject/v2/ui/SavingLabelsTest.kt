@@ -34,6 +34,8 @@ class SavingLabelsTest {
   fun the_settings_row_tells_whether_anything_is_left() {
     assertEquals("保存済み", saveRowValue(SaveSummary(rides = 3, asks = 9)))
     assertEquals("未送信あり", saveRowValue(SaveSummary(memos = 1)))
+    // Android #75: nothing before the first count.
+    assertEquals("", saveRowValue(null))
   }
 
   @Test

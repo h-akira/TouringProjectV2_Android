@@ -28,8 +28,12 @@ fun lastSavedLabel(at: Long?, now: Long, zone: ZoneId): String {
   return if (saved.toLocalDate() == Instant.ofEpochMilli(now).atZone(zone).toLocalDate()) "最終保存 $time" else "最終保存 ${dayLabel(saved.toLocalDate(), weekday = false)} $time"
 }
 
-/** SC-09's データの保存 row. */
-fun saveRowValue(summary: SaveSummary): String = if (summary.unsent > 0) "未送信あり" else "保存済み"
+/** SC-09's データの保存 row; empty until what is left has been counted (Android #75). */
+fun saveRowValue(summary: SaveSummary?): String = when {
+  summary == null -> ""
+  summary.unsent > 0 -> "未送信あり"
+  else -> "保存済み"
+}
 
 /** SC-14 after クラウドから読み直す. */
 fun rereadMessage(result: TakeResult): String = when (result) {

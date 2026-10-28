@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextEquals
@@ -308,6 +309,26 @@ class SettingsScreensTest {
     rule.onNodeWithTag("changeUser").assertIsNotEnabled()
     rule.onNodeWithText("読み込んでいます…").assertExists()
     rule.onNodeWithTag("userMessage").assertTextEquals("ユーザー名を変えました")
+  }
+
+  // Android #75: until what is left to send has been counted, the name cannot change, and nothing is said of why.
+  @Test
+  fun the_name_cannot_change_before_what_is_left_is_counted() {
+    var counted by mutableStateOf(false)
+    rule.setContent { UserScreen("rider01", null, false, null, { null }, {}, {}, counted = counted) }
+    rule.onNodeWithTag("changeUser").assertIsNotEnabled()
+    rule.onNodeWithTag("userBlock").assertDoesNotExist()
+    counted = true
+    rule.onNodeWithTag("changeUser").assertIsEnabled()
+  }
+
+  // Android #75: before the first count, SC-14 says neither saved nor left to send.
+  @Test
+  fun sc14_says_nothing_of_what_is_saved_before_it_is_counted() {
+    rule.setContent { DataScreen(data.copy(summary = null), {}, {}, {}) }
+    rule.onNodeWithTag("saveState").assertDoesNotExist()
+    rule.onNodeWithTag("saveNow").assertDoesNotExist()
+    rule.onNodeWithText("19").assertDoesNotExist()
   }
 
   private val data = DataUi(SaveSummary(rides = 3, asks = 19), "最終保存 10:22", false, false, false, false, "rider01", null, 10)

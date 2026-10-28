@@ -44,7 +44,6 @@ import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.ask.rideNow
 import com.touringproject.v2.location.HeadingView
 import com.touringproject.v2.records.NoteDraft
-import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.headingParams
@@ -248,7 +247,7 @@ fun AppUi(graph: AppGraph) {
                   onRecordings = { tabs.push(RecordingsKey) },
                   version = BuildConfig.VERSION_NAME,
                   modifier = Modifier.safeDrawingPadding(),
-                  saved = saveRowValue(summary ?: SaveSummary()),
+                  saved = saveRowValue(summary),
                   onData = { tabs.push(DataKey) },
                   onRecordingSettings = { tabs.push(RecordingSettingsKey) },
                   onHeadingCheck = { tabs.push(HeadingCheckKey) },
@@ -293,7 +292,7 @@ fun AppUi(graph: AppGraph) {
                 DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
                 DataScreen(
                   DataUi(
-                    summary = summary ?: SaveSummary(),
+                    summary = summary,
                     lastSaved = lastSavedLabel(lastSaved, System.currentTimeMillis(), ZoneId.systemDefault()),
                     sending = sending,
                     recording = ride?.status == RideStatus.RECORDING,
@@ -362,6 +361,7 @@ fun AppUi(graph: AppGraph) {
                   onChange = { peek -> graph.takeover.switchTo(peek, current.userName, graph::saveUserName, graph::switched) },
                   onData = { tabs.push(DataKey) },
                   modifier = Modifier.safeDrawingPadding(),
+                  counted = summary != null,
                 )
               }
               entry<ReturnAppKey> {

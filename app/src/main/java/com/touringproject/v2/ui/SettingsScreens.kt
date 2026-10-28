@@ -116,7 +116,8 @@ fun SettingsScreen(
  * records or is paused, so reading the cloud again waits for its end. reading: a read of the cloud is under way.
  */
 data class DataUi(
-  val summary: SaveSummary,
+  /** null until what is left has been counted: nothing is said of what is saved meanwhile (Android #75). */
+  val summary: SaveSummary?,
   val lastSaved: String,
   val sending: Boolean,
   val recording: Boolean,
@@ -141,15 +142,16 @@ private fun DataRow(title: String, value: String) {
 @Composable
 fun DataScreen(ui: DataUi, onSave: () -> Unit, onUser: () -> Unit, onReread: () -> Unit, modifier: Modifier = Modifier) {
   val muted = Color(0xFF666666)
+  val summary = ui.summary
   Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(0xFFCCCCCC))) {
+    if (summary != null) Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(0xFFCCCCCC))) {
       Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (ui.summary.unsent == 0) {
+        if (summary.unsent == 0) {
           Text("● すべてクラウドに保存済み", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("saveState"))
           Text(ui.lastSaved, color = muted, fontSize = 14.sp)
         } else {
           Text("● 未送信の記録があります", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("saveState"))
-          Text("${unsentBreakdown(ui.summary)}。通信できるようになると自動で送ります。", color = muted, fontSize = 14.sp, modifier = Modifier.testTag("unsentBreakdown"))
+          Text("${unsentBreakdown(summary)}。通信できるようになると自動で送ります。", color = muted, fontSize = 14.sp, modifier = Modifier.testTag("unsentBreakdown"))
           Button(onClick = onSave, enabled = !ui.sending, modifier = Modifier.fillMaxWidth().testTag("saveNow")) {
             Text(if (ui.sending) "送っています…" else "今すぐ保存", fontSize = 16.sp)
           }
@@ -175,8 +177,8 @@ fun DataScreen(ui: DataUi, onSave: () -> Unit, onUser: () -> Unit, onReread: () 
       fontSize = 14.sp,
     )
     Text("件数", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-    DataRow("走行", ui.summary.rides.toString())
-    DataRow("質問", ui.summary.asks.toString())
+    DataRow("走行", summary?.rides?.toString().orEmpty())
+    DataRow("質問", summary?.asks?.toString().orEmpty())
     DataRow("端末の音声", "${ui.recordings} / $KEEP_RECORDINGS")
   }
 }
@@ -365,7 +367,8 @@ enum class UserBlock(val message: String) {
 /**
  * SC-18. peek reads the new name's first page (null when it cannot), and DL-03 tells from it whether the name has
  * records (slice 4 spec §6.4). onChange starts the change after DL-03; reading is true while a read of the cloud is under
- * way, and message is what the last change came to.
+ * way, and message is what the last change came to. counted is false until what is left to send has been counted, and
+ * the name cannot change meanwhile (Android #75).
  */
 @Composable
 fun UserScreen(
@@ -377,6 +380,7 @@ fun UserScreen(
   onChange: (Peek) -> Unit,
   onData: () -> Unit,
   modifier: Modifier = Modifier,
+  counted: Boolean = true,
 ) {
   val scope = rememberCoroutineScope()
   // Saveable, so a name being typed survives a trip to another tab (Android #34).
@@ -406,7 +410,7 @@ fun UserScreen(
           if (peeked == null) error = "読み込めませんでした" else confirming = peeked
         }
       },
-      enabled = block == null && !reading && !checking,
+      enabled = counted && block == null && !reading && !checking,
       modifier = Modifier.fillMaxWidth().testTag("changeUser"),
       colors = ButtonDefaults.buttonColors(containerColor = Blue),
     ) { Text(if (reading || checking) "読み込んでいます…" else "変更する", fontSize = 18.sp) }
