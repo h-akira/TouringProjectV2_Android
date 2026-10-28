@@ -875,6 +875,24 @@ class TextAskTest {
     assertTrue(h.kept.isEmpty())
   }
 
+  // Android #79: cancelled while it is sent, the sheet can send again at once, and a POST that goes through afterwards
+  // is still a text not taken: the sheet keeps it and no answer is waited for.
+  @Test
+  fun a_text_ask_cancelled_while_it_is_sent_is_not_taken_even_when_the_post_goes_through() = runTest {
+    val posted = CompletableDeferred<Unit>()
+    val h = Harness(this, post = { posted.await(); ACCEPTED })
+    val running = launch { h.askText("右手に見える山は何？") }
+    h.until { "post" in h.log }
+    h.controller.cancel()
+    assertEquals(listOf(TextAskOutcome.NOT_TAKEN), h.outcomes)
+    posted.complete(Unit)
+    running.join()
+    assertEquals(listOf(TextAskOutcome.NOT_TAKEN), h.outcomes)
+    assertFalse("get" in h.log)
+    assertTrue(h.kept.isEmpty())
+    assertEquals(Phase.IDLE, h.phase)
+  }
+
   // §4.1: without a fresh position, the text ask goes without a place, and the heading is asked without one.
   @Test
   fun without_a_position_a_text_ask_goes_without_a_place() = runTest {
