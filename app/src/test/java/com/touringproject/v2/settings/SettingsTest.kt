@@ -134,6 +134,23 @@ class SettingsTest {
     assertEquals(3, errors.size)
   }
 
+  // Android #72: the change of user name must know its save failed; the settings stay as they were.
+  @Test
+  fun a_save_that_cannot_be_written_throws_and_keeps_the_settings() = runTest {
+    val store = FakeStore()
+    val repo = SettingsRepository(store, Random(5))
+    val loaded = repo.load()
+    repo.save(loaded.copy(userName = "taro01"))
+    assertEquals("taro01", SettingsRepository(store).load().userName)
+    val readOnly = object : KeyValueStore {
+      override suspend fun get(key: String): String? = store.get(key)
+      override suspend fun set(key: String, value: String?) = throw java.io.IOException("disk full")
+    }
+    val stuck = SettingsRepository(readOnly).apply { load() }
+    assertTrue(runCatching { stuck.save(stuck.current().copy(userName = "hanako02")) }.isFailure)
+    assertEquals("taro01", stuck.current().userName)
+  }
+
   @Test
   fun recent_apps_keep_the_latest_five_without_duplicates() {
     val apps = (1..6).map { LaunchableApp("p$it", "A$it") }

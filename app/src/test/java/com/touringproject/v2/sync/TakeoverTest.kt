@@ -17,6 +17,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 
 private fun mark(id: String) = CloudDeleted("note", id, "r1", "2026-10-22T03:00:00Z")
 
@@ -50,15 +51,28 @@ private class Cloud(val scope: TestScope) {
   var gate: CompletableDeferred<Unit>? = null
   val taken = mutableListOf<Pair<List<CloudRecord>, Boolean>>()
   var takes: TakeResult = TakeResult.Done(2)
-  val switched = mutableListOf<String>()
+  var failTake = false
+  /** The user names saved, in order; a name in failSave cannot be saved. */
+  val saved = mutableListOf<String>()
+  var failSave = setOf<String>()
+  var switched = 0
   var passes = 0
 
   val store = object : TakeoverStore {
     override suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): TakeResult {
+      if (failTake) throw IOException("disk full")
       taken += cloud to replace
       return takes
     }
   }
+
+  /** SC-18's change from rider01. */
+  fun switch(peek: Peek) = takeover.switchTo(
+    peek,
+    from = "rider01",
+    save = { if (it in failSave) throw IOException("disk full") else saved += it },
+    switched = { switched += 1 },
+  )
 
   fun api(user: String) = object : RecordsApi {
     override suspend fun records(cursor: String?): CloudPage {
@@ -91,18 +105,20 @@ class TakeoverTest {
     assertNull(c.takeover.peek("taro01"))
   }
 
-  // Slice 4 spec §6.4: every page is read, the device's records are replaced with them, and then the name is saved.
+  // Slice 4 spec §6.4: every page is read, then the name is saved and the device's records are replaced with them
+  // (the name first: Android #72).
   @Test
-  fun a_switch_reads_every_page_then_replaces_the_records_and_saves_the_name() = runTest {
+  fun a_switch_reads_every_page_then_saves_the_name_and_replaces_the_records() = runTest {
     val c = Cloud(this)
     c.pages["taro01"] = mapOf(null to CloudPage(listOf(mark("n1")), "c2"), "c2" to CloudPage(listOf(mark("n2")), null))
     val peek = c.takeover.peek("taro01")!!
-    c.takeover.switchTo(peek) { c.switched += it }
+    c.switch(peek)
     assertEquals(TakeOp.SWITCH, c.takeover.state.value.running)
     runCurrent()
     assertEquals(listOf("taro01:null", "taro01:c2"), c.reads)
     assertEquals(listOf(listOf(mark("n1"), mark("n2")) to true), c.taken)
-    assertEquals(listOf("taro01"), c.switched)
+    assertEquals(listOf("taro01"), c.saved)
+    assertEquals(1, c.switched)
     assertEquals(TakeState(null, TakeOp.SWITCH, TakeResult.Done(2)), c.takeover.state.value)
   }
 
@@ -111,23 +127,50 @@ class TakeoverTest {
     val c = Cloud(this)
     c.pages["taro01"] = mapOf(null to CloudPage(listOf(mark("n1")), "c2"))
     c.failOn = setOf("c2")
-    c.takeover.switchTo(c.takeover.peek("taro01")!!) { c.switched += it }
+    c.switch(c.takeover.peek("taro01")!!)
     runCurrent()
     assertEquals(emptyList<Any>(), c.taken)
-    assertEquals(emptyList<String>(), c.switched)
+    assertEquals(emptyList<String>(), c.saved)
+    assertEquals(0, c.switched)
     assertEquals(TakeResult.Failed, c.takeover.state.value.result)
   }
 
-  // US-E-06.008: something left to send (found in the write's own transaction) keeps the name as it was.
+  // US-E-06.008: something left to send (found in the write's own transaction) puts the name back as it was.
   @Test
-  fun a_blocked_switch_keeps_the_name() = runTest {
+  fun a_blocked_switch_puts_the_name_back() = runTest {
     val c = Cloud(this)
     c.pages["taro01"] = mapOf(null to CloudPage(emptyList(), null))
     c.takes = TakeResult.Blocked(BlockReason.UNSENT)
-    c.takeover.switchTo(c.takeover.peek("taro01")!!) { c.switched += it }
+    c.switch(c.takeover.peek("taro01")!!)
     runCurrent()
-    assertEquals(emptyList<String>(), c.switched)
+    assertEquals(listOf("taro01", "rider01"), c.saved)
+    assertEquals(0, c.switched)
     assertEquals(TakeResult.Blocked(BlockReason.UNSENT), c.takeover.state.value.result)
+  }
+
+  // Android #72: a name that cannot be saved leaves the records as they were, and so does a write that fails after it.
+  @Test
+  fun a_name_that_cannot_be_saved_changes_nothing() = runTest {
+    val c = Cloud(this)
+    c.pages["taro01"] = mapOf(null to CloudPage(emptyList(), null))
+    c.failSave = setOf("taro01")
+    c.switch(c.takeover.peek("taro01")!!)
+    runCurrent()
+    assertEquals(emptyList<Any>(), c.taken)
+    assertEquals(0, c.switched)
+    assertEquals(TakeResult.Failed, c.takeover.state.value.result)
+  }
+
+  @Test
+  fun a_write_that_fails_after_the_name_puts_the_name_back() = runTest {
+    val c = Cloud(this)
+    c.pages["taro01"] = mapOf(null to CloudPage(emptyList(), null))
+    c.failTake = true
+    c.switch(c.takeover.peek("taro01")!!)
+    runCurrent()
+    assertEquals(listOf("taro01", "rider01"), c.saved)
+    assertEquals(0, c.switched)
+    assertEquals(TakeResult.Failed, c.takeover.state.value.result)
   }
 
   @Test

@@ -88,14 +88,40 @@ class Takeover(
   }
 
   /**
-   * SC-18 after DL-03: the device's records go and the name's come in (§6.4), then switched saves the name; nothing
-   * changes when the read or the write fails.
+   * SC-18 after DL-03: the device's records go and the name's come in (§6.4). The name and the records cannot be
+   * written in one transaction, so the name is saved first (save throws when it cannot be) and put back to from when
+   * the records do not come in; nothing changes when the read, the name or the write fails (Android #72). No pass of
+   * the sync runs meanwhile, so nothing goes out under the new name before its records are in. switched follows a
+   * change that is done.
    */
-  fun switchTo(peek: Peek, switched: suspend (userName: String) -> Unit) = start(TakeOp.SWITCH) {
-    val records = readAll(peek.userName, peek.first)
-    val result = store.take(records, replace = true, now())
-    if (result is TakeResult.Done) switched(peek.userName)
-    result
+  fun switchTo(peek: Peek, from: String, save: suspend (userName: String) -> Unit, switched: suspend () -> Unit) =
+    start(TakeOp.SWITCH) {
+      val records = readAll(peek.userName, peek.first)
+      save(peek.userName)
+      val result = try {
+        store.take(records, replace = true, now())
+      } catch (e: Exception) {
+        putBack(from, save)
+        throw e
+      }
+      if (result !is TakeResult.Done) {
+        putBack(from, save)
+        return@start result
+      }
+      switched()
+      result
+    }
+
+  // A name that cannot be put back is logged: the records are the old name's, the saved name the new one.
+  private suspend fun putBack(from: String, save: suspend (userName: String) -> Unit) {
+    try {
+      save(from)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      log("takeover_failed", mapOf("op" to "put_back", "error" to e.toString()))
+      throw e
+    }
   }
 
   /** SC-14's クラウドから読み直す: the current name's records, merged with the device's. */

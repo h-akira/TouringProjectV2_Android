@@ -359,7 +359,7 @@ fun AppUi(graph: AppGraph) {
                   reading = take.running != null,
                   message = take.result?.takeIf { take.last == TakeOp.SWITCH }?.let(::switchMessage),
                   peek = graph.takeover::peek,
-                  onChange = { peek -> graph.takeover.switchTo(peek, graph::switchedTo) },
+                  onChange = { peek -> graph.takeover.switchTo(peek, current.userName, graph::saveUserName, graph::switched) },
                   onData = { tabs.push(DataKey) },
                   modifier = Modifier.safeDrawingPadding(),
                 )
