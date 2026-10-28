@@ -120,8 +120,12 @@ class RideForegroundServiceTest {
     // Saved before the app's own load runs, as if the process had died while recording.
     runBlocking { app.graph.rideStore.save(newRide("r1", "箱根", 0, null, 1_000)) }
     app.sendBroadcast(Intent(app, DeadlineReceiver::class.java))
-    waitUntil { app.graph.rides.active.value == null && runBlocking { app.graph.rideStore.active() } == null }
-    val posted = shadowOf(app.getSystemService(NotificationManager::class.java)).allNotifications.single()
+    // The notice comes after the ride is saved as ended, so it is waited for too (Android #59).
+    val notices = shadowOf(app.getSystemService(NotificationManager::class.java))
+    waitUntil {
+      app.graph.rides.active.value == null && runBlocking { app.graph.rideStore.active() } == null && notices.allNotifications.isNotEmpty()
+    }
+    val posted = notices.allNotifications.single()
     assertEquals("走行を自動で終了しました", shadowOf(posted).contentTitle)
   }
 
