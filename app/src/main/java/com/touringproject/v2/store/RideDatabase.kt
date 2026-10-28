@@ -558,9 +558,9 @@ interface RideDao {
 
 data class KeptRideRow(val id: String, val updatedAt: Long, val points: Int)
 
-data class NoteVersion(val id: String, val updatedAt: Long)
+data class NoteVersion(val id: String, val rideId: String, val updatedAt: Long)
 
-data class AskVersion(val askId: String, val updatedAt: Long?, val memoUpdatedAt: Long?)
+data class AskVersion(val askId: String, val rideId: String?, val updatedAt: Long?, val memoUpdatedAt: Long?)
 
 /** Reading the cloud's records in (slice 4 spec §6.3): what the merge reads of the device, and what it writes. */
 @Dao
@@ -571,10 +571,10 @@ interface TakeoverDao {
   @Query("SELECT id, updatedAt, (SELECT COUNT(*) FROM route_points WHERE route_points.rideId = rides.id) AS points FROM rides")
   suspend fun rides(): List<KeptRideRow>
 
-  @Query("SELECT id, updatedAt FROM notes")
+  @Query("SELECT id, rideId, updatedAt FROM notes")
   suspend fun notes(): List<NoteVersion>
 
-  @Query("SELECT askId, updatedAt, memoUpdatedAt FROM asks")
+  @Query("SELECT askId, rideId, updatedAt, memoUpdatedAt FROM asks")
   suspend fun asks(): List<AskVersion>
 
   @Query("DELETE FROM route_points")

@@ -59,6 +59,15 @@ class SettingsRepository(
     guard { store.set(SETTINGS_KEY, encodeSettings(next)) }
   }
 
+  /**
+   * Writes next, and only then holds it; throws when the store cannot write it, leaving the settings as they were. For
+   * the change of user name, which must not go on with a name that was not saved (Android #72).
+   */
+  suspend fun save(next: Settings) {
+    store.set(SETTINGS_KEY, encodeSettings(next))
+    state.value = next
+  }
+
   private suspend fun <T> guard(block: suspend () -> T): T? = try {
     block()
   } catch (e: CancellationException) {

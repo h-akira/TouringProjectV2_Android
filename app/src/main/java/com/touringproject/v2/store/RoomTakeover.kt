@@ -4,10 +4,12 @@ import androidx.room.withTransaction
 import com.touringproject.v2.api.CloudRecord
 import com.touringproject.v2.ride.RoutePoint
 import com.touringproject.v2.ride.stepMeters
+import com.touringproject.v2.sync.BlockReason
 import com.touringproject.v2.sync.DeviceRecords
 import com.touringproject.v2.sync.KeptAsk
 import com.touringproject.v2.sync.KeptRide
 import com.touringproject.v2.sync.Merge
+import com.touringproject.v2.sync.TakeResult
 import com.touringproject.v2.sync.TakenAsk
 import com.touringproject.v2.sync.TakeoverStore
 import com.touringproject.v2.sync.merge
@@ -15,30 +17,36 @@ import com.touringproject.v2.sync.merge
 /**
  * Takes the cloud's records in (slice 4 spec §6.3). The device is read, merged with the cloud and written in one
  * transaction, so a write that fails, or a cloud record that cannot be read, leaves the device as it was. What comes in
- * is marked as sent, so it is not sent back.
+ * is marked as sent, so it is not sent back. waitingToSave tells whether a ride's change waits in memory to be written
+ * again (RideController); for a change of user name it counts as left to send (Android #72).
  */
-class RoomTakeover(private val db: RideDatabase) : TakeoverStore {
+class RoomTakeover(private val db: RideDatabase, private val waitingToSave: () -> Boolean = { false }) : TakeoverStore {
   private val takeover = db.takeover()
   private val rides = db.rides()
   private val asks = db.asks()
 
-  override suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): Int? = db.withTransaction {
-    if (takeover.activeRides() > 0) return@withTransaction null
+  override suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): TakeResult = db.withTransaction {
+    if (takeover.activeRides() > 0) return@withTransaction TakeResult.Blocked(BlockReason.RIDE)
     if (replace) {
-      if (rides.summaryNow().unsent > 0) return@withTransaction null
+      if (rides.summaryNow().unsent > 0 || waitingToSave()) return@withTransaction TakeResult.Blocked(BlockReason.UNSENT)
       takeover.clearAll()
     }
     val merged = merge(device(), cloud, now)
     write(merged)
-    merged.count
+    TakeResult.Done(merged.count)
   }
 
-  private suspend fun device() = DeviceRecords(
-    rides = takeover.rides().associate { it.id to KeptRide(it.updatedAt, it.points) },
-    notes = takeover.notes().associate { it.id to it.updatedAt },
-    asks = takeover.asks().associate { it.askId to KeptAsk(it.updatedAt, it.memoUpdatedAt) },
-    deletions = rides.deletions().map { it.kind to it.id }.toSet(),
-  )
+  private suspend fun device(): DeviceRecords {
+    val notes = takeover.notes()
+    val asks = takeover.asks()
+    return DeviceRecords(
+      rides = takeover.rides().associate { it.id to KeptRide(it.updatedAt, it.points) },
+      notes = notes.associate { it.id to it.updatedAt },
+      asks = asks.associate { it.askId to KeptAsk(it.updatedAt, it.memoUpdatedAt) },
+      deletions = rides.deletions().map { it.kind to it.id }.toSet(),
+      rideOf = notes.associate { it.id to it.rideId } + asks.mapNotNull { a -> a.rideId?.let { a.askId to it } },
+    )
+  }
 
   // A ride the cloud removed goes with all of it, as a deletion on the device does, but leaves no mark to send.
   private suspend fun write(merged: Merge) {

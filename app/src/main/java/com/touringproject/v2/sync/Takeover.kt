@@ -17,11 +17,20 @@ import kotlinx.coroutines.launch
 interface TakeoverStore {
   /**
    * Merges the cloud's records into the device's (slice 4 spec §6.1) in one transaction; with replace, all the device
-   * keeps goes first (§6.4: another user name). Returns how many records came in or went, or null when nothing was done
-   * because a ride is recording or paused or, with replace, something is left to send (US-E-06.008). A failure throws
-   * and changes nothing.
+   * keeps goes first (§6.4: another user name). Returns Done with how many records came in or went, or Blocked when
+   * nothing was done because a ride is recording or paused or, with replace, something is left to send (US-E-06.008).
+   * A failure throws and changes nothing.
    */
-  suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): Int?
+  suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): TakeResult
+}
+
+/** Why a read of the cloud changed nothing (Android #73). */
+enum class BlockReason {
+  /** A ride is recording or paused. */
+  RIDE,
+
+  /** Something is left to send (a change of user name only). */
+  UNSENT,
 }
 
 /** What a read of the cloud came to. */
@@ -29,8 +38,8 @@ sealed interface TakeResult {
   /** The records are in: count came in or went. A user name changed is saved. */
   data class Done(val count: Int) : TakeResult
 
-  /** Nothing changed: a ride is recording or paused, or something is left to send. */
-  data object Blocked : TakeResult
+  /** Nothing changed, for reason. */
+  data class Blocked(val reason: BlockReason) : TakeResult
 
   /** Nothing changed: the cloud could not be read whole, or what it said could not be written. */
   data object Failed : TakeResult
@@ -38,7 +47,7 @@ sealed interface TakeResult {
 
 enum class TakeOp { SWITCH, REREAD }
 
-/** running is the read under way; last and result the one before, for the screen that started it to tell. */
+/** running is the read under way; last and result the one that ended, for the screen that started it to tell. */
 data class TakeState(val running: TakeOp? = null, val last: TakeOp? = null, val result: TakeResult? = null)
 
 /** The first page for a user name, read before DL-03 asks (slice 4 spec §6.4); exists picks which of its texts. */
@@ -79,24 +88,51 @@ class Takeover(
   }
 
   /**
-   * SC-18 after DL-03: the device's records go and the name's come in (§6.4), then switched saves the name; nothing
-   * changes when the read or the write fails.
+   * SC-18 after DL-03: the device's records go and the name's come in (§6.4). The name and the records cannot be
+   * written in one transaction, so the name is saved first (save throws when it cannot be) and put back to from when
+   * the records do not come in; nothing changes when the read, the name or the write fails (Android #72). No pass of
+   * the sync runs meanwhile, so nothing goes out under the new name before its records are in. switched follows a
+   * change that is done.
    */
-  fun switchTo(peek: Peek, switched: suspend (userName: String) -> Unit) = start(TakeOp.SWITCH) {
-    val records = readAll(peek.userName, peek.first)
-    val count = store.take(records, replace = true, now()) ?: return@start TakeResult.Blocked
-    switched(peek.userName)
-    TakeResult.Done(count)
+  fun switchTo(peek: Peek, from: String, save: suspend (userName: String) -> Unit, switched: suspend () -> Unit) =
+    start(TakeOp.SWITCH) {
+      val records = readAll(peek.userName, peek.first)
+      save(peek.userName)
+      val result = try {
+        store.take(records, replace = true, now())
+      } catch (e: Exception) {
+        putBack(from, save)
+        throw e
+      }
+      if (result !is TakeResult.Done) {
+        putBack(from, save)
+        return@start result
+      }
+      switched()
+      result
+    }
+
+  // A name that cannot be put back is logged: the records are the old name's, the saved name the new one.
+  private suspend fun putBack(from: String, save: suspend (userName: String) -> Unit) {
+    try {
+      save(from)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      log("takeover_failed", mapOf("op" to "put_back", "error" to e.toString()))
+      throw e
+    }
   }
 
   /** SC-14's クラウドから読み直す: the current name's records, merged with the device's. */
   fun reread(userName: String) = start(TakeOp.REREAD) {
-    store.take(readAll(userName, null), replace = false, now())?.let { TakeResult.Done(it) } ?: TakeResult.Blocked
+    store.take(readAll(userName, null), replace = false, now())
   }
 
   private fun start(op: TakeOp, block: suspend () -> TakeResult) {
     if (stateNow.value.running != null) return
-    stateNow.value = stateNow.value.copy(running = op)
+    // The last read's result goes, so the screen does not tell it while this one reads (Android #74).
+    stateNow.value = TakeState(running = op)
     scope.launch {
       val result = try {
         sync.withoutPasses { block() }

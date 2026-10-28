@@ -113,6 +113,26 @@ class MergeTest {
     assertEquals(3, merged.count)
   }
 
+  // Android #77: an ask or point memo marked with its ride goes with the ride, and is counted once, as the ride.
+  @Test
+  fun what_goes_with_its_ride_is_counted_once() {
+    val device = DeviceRecords(
+      rides = mapOf("r1" to KeptRide(T0_MS, 3), "r2" to KeptRide(T0_MS, 0)),
+      notes = mapOf("n1" to T0_MS, "n2" to T0_MS),
+      asks = mapOf("a1" to KeptAsk(null, null)),
+      rideOf = mapOf("n1" to "r1", "a1" to "r1", "n2" to "r2"),
+    )
+    val cloud = listOf(
+      CloudDeleted("ask", "a1", "r1", iso(4_000_000)),
+      CloudDeleted("note", "n1", "r1", iso(4_000_000)),
+      CloudDeleted("ride", "r1", null, iso(5_000_000)),
+      CloudDeleted("note", "n2", "r2", iso(5_000_000)),
+    )
+    val merged = merge(device, cloud, NOW)
+    assertEquals(GoneRecords(setOf("r1"), setOf("a1"), setOf("n1", "n2")), merged.gone)
+    assertEquals(2, merged.count)
+  }
+
   // A record deleted on the device, its deletion not yet sent, stays deleted.
   @Test
   fun the_devices_own_deletions_keep_the_cloud_copy_out() {

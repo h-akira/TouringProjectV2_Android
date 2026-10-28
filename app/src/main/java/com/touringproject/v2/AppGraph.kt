@@ -161,7 +161,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       val key = apiKeys.current()
       if (apiBaseUrl.isEmpty() || key == null) null else ApiClient(apiBaseUrl, key, user, http)
     },
-    store = RoomTakeover(database),
+    // Read at the take, long after rides below is built.
+    store = RoomTakeover(database) { rides.waitingToSave.value },
     sync = sync,
     now = System::currentTimeMillis,
     scope = scope,
@@ -371,12 +372,16 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     }
   }
 
+  /** A change of user name saves the name before the records come in, and throws when it cannot (Android #72). */
+  suspend fun saveUserName(userName: String) {
+    settings.save(settings.current().copy(userName = userName))
+  }
+
   /**
-   * A change of user name has read the new name's records in (slice 4 spec §6.4): the name is saved, and the
-   * conversation ends, since the Agent keeps one per user name. SC-12's recordings are the device's and stay.
+   * A change of user name has read the new name's records in (slice 4 spec §6.4): the conversation ends, since the
+   * Agent keeps one per user name. SC-12's recordings are the device's and stay.
    */
-  suspend fun switchedTo(userName: String) {
-    settings.update(settings.current().copy(userName = userName))
+  fun switched() {
     conversation.reset()
   }
 

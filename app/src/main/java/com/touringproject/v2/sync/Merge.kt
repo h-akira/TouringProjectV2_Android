@@ -26,12 +26,16 @@ data class KeptRide(val updatedAt: Long, val points: Int)
 /** What the device keeps of an ask: an unreached ask's version (null for the Backend's own) and its memo's. */
 data class KeptAsk(val updatedAt: Long?, val memoUpdatedAt: Long?)
 
-/** The device's records by id; deletions are its own deletions not yet sent, as kind (ask / ride / note) to id. */
+/**
+ * The device's records by id; deletions are its own deletions not yet sent, as kind (ask / ride / note) to id. rideOf
+ * is the ride each kept ask and point memo belongs to.
+ */
 data class DeviceRecords(
   val rides: Map<String, KeptRide> = emptyMap(),
   val notes: Map<String, Long> = emptyMap(),
   val asks: Map<String, KeptAsk> = emptyMap(),
   val deletions: Set<Pair<String, String>> = emptySet(),
+  val rideOf: Map<String, String> = emptyMap(),
 )
 
 /** A ride's meta to write. sentUpdatedAt is the version the Backend has: behind updatedAt for a ride that ends here. */
@@ -136,7 +140,9 @@ fun merge(device: DeviceRecords, cloud: List<CloudRecord>, now: Long): Merge {
   }
 
   val gone = GoneRecords(goneRides intersect device.rides.keys, goneAsks intersect device.asks.keys, goneNotes intersect device.notes.keys)
-  val count = rides.size + notes.size + counted + gone.rides.size + gone.asks.size + gone.notes.size
+  // An ask or point memo that goes with its ride is counted as the ride (Android #77).
+  val apart = (gone.asks + gone.notes).count { device.rideOf[it] !in gone.rides }
+  val count = rides.size + notes.size + counted + gone.rides.size + apart
   return Merge(rides, routes, notes, asks, gone, count)
 }
 

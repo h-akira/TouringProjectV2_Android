@@ -44,7 +44,6 @@ import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.ask.rideNow
 import com.touringproject.v2.location.HeadingView
 import com.touringproject.v2.records.NoteDraft
-import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.headingParams
@@ -248,7 +247,7 @@ fun AppUi(graph: AppGraph) {
                   onRecordings = { tabs.push(RecordingsKey) },
                   version = BuildConfig.VERSION_NAME,
                   modifier = Modifier.safeDrawingPadding(),
-                  saved = saveRowValue(summary ?: SaveSummary()),
+                  saved = saveRowValue(summary),
                   onData = { tabs.push(DataKey) },
                   onRecordingSettings = { tabs.push(RecordingSettingsKey) },
                   onHeadingCheck = { tabs.push(HeadingCheckKey) },
@@ -293,7 +292,7 @@ fun AppUi(graph: AppGraph) {
                 DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
                 DataScreen(
                   DataUi(
-                    summary = summary ?: SaveSummary(),
+                    summary = summary,
                     lastSaved = lastSavedLabel(lastSaved, System.currentTimeMillis(), ZoneId.systemDefault()),
                     sending = sending,
                     recording = ride?.status == RideStatus.RECORDING,
@@ -345,11 +344,16 @@ fun AppUi(graph: AppGraph) {
               entry<UserKey> {
                 val summary by graph.saveSummary.collectAsStateWithLifecycle()
                 val take by graph.takeover.state.collectAsStateWithLifecycle()
+                val waitingToSave by graph.rides.waitingToSave.collectAsStateWithLifecycle()
                 DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
-                // The write checks again in its own transaction (US-E-06.008); a change still waiting to be written counts.
+                // A ride's change waiting to be written has nothing else to write it while no ride runs.
+                LaunchedEffect(Unit) { graph.rides.retrySave() }
+                // The write checks again in its own transaction (US-E-06.008); a ride's change still waiting to be
+                // written counts (Android #76).
                 val block = when {
                   ride != null -> UserBlock.RIDE
-                  (summary?.unsent ?: 0) > 0 || storeFailed -> UserBlock.UNSENT
+                  (summary?.unsent ?: 0) > 0 -> UserBlock.UNSENT
+                  waitingToSave -> UserBlock.WAITING
                   else -> null
                 }
                 UserScreen(
@@ -357,9 +361,10 @@ fun AppUi(graph: AppGraph) {
                   reading = take.running != null,
                   message = take.result?.takeIf { take.last == TakeOp.SWITCH }?.let(::switchMessage),
                   peek = graph.takeover::peek,
-                  onChange = { peek -> graph.takeover.switchTo(peek, graph::switchedTo) },
+                  onChange = { peek -> graph.takeover.switchTo(peek, current.userName, graph::saveUserName, graph::switched) },
                   onData = { tabs.push(DataKey) },
                   modifier = Modifier.safeDrawingPadding(),
+                  counted = summary != null,
                 )
               }
               entry<ReturnAppKey> {
