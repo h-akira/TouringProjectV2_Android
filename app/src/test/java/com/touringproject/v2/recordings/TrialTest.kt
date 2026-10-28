@@ -1,11 +1,12 @@
 package com.touringproject.v2.recordings
 
-import com.touringproject.v2.ask.RECORD_LIMIT_MS
 import com.touringproject.v2.ask.Recorded
 import com.touringproject.v2.ask.Recorder
 import com.touringproject.v2.ask.RouteControl
 import com.touringproject.v2.ask.Source
 import com.touringproject.v2.audio.InputDevice
+import com.touringproject.v2.settings.DEFAULT_RECORD_LIMIT_MS
+import com.touringproject.v2.settings.DEFAULT_START_CUE_MS
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -29,8 +30,12 @@ private class TrialHarness(
   val pcm: ByteArray = byteArrayOf(1, 2),
   var playGate: CompletableDeferred<Unit>? = null,
   val playError: Exception? = null,
+  /** SC-11's values (slice 5 spec §6). */
+  val limitMs: Long = DEFAULT_RECORD_LIMIT_MS,
+  val cueMs: Int = DEFAULT_START_CUE_MS,
 ) {
   val log = mutableListOf<String>()
+  val cues = mutableListOf<Int>()
   val states = mutableListOf<TrialState>()
   val trial = TrialController(
     TrialDeps(
@@ -51,7 +56,7 @@ private class TrialHarness(
         override suspend fun stop(): Recorded { log += "rec:stop"; return Recorded(pcm, "trial.pcm") }
         override suspend fun cancel() { log += "rec:cancel" }
       },
-      cueStart = { log += "cue:start" },
+      cueStart = { log += "cue:start"; cues += it },
       player = object : PcmPlayback {
         override suspend fun play(pcm: ByteArray) {
           log += "play:${pcm.size}"
@@ -64,6 +69,8 @@ private class TrialHarness(
         }
       },
       onState = { states += it },
+      recordLimitMs = { limitMs },
+      startCueMs = { cueMs },
     ),
   )
 
@@ -98,7 +105,17 @@ class TrialTest {
     val h = TrialHarness(this)
     h.trial.start()
     assertTrue("play:2" in h.log)
-    assertTrue(testScheduler.currentTime >= RECORD_LIMIT_MS)
+    assertTrue(testScheduler.currentTime >= DEFAULT_RECORD_LIMIT_MS)
+    assertEquals(listOf(1_500), h.cues)
+  }
+
+  // US-E-03.001: the trial records with SC-11's limit and start cue, as a question does.
+  @Test
+  fun the_trial_takes_sc_11s_limit_and_cue() = runTest {
+    val h = TrialHarness(this, limitMs = 35_000, cueMs = 0)
+    h.trial.start()
+    assertTrue(testScheduler.currentTime in 35_000L until 36_000L)
+    assertEquals(listOf(0), h.cues)
   }
 
   @Test

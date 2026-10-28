@@ -1,6 +1,7 @@
 package com.touringproject.v2.ask
 
 import com.touringproject.v2.audio.MediaVolume
+import com.touringproject.v2.settings.DEFAULT_RECORD_LIMIT_MS
 import com.touringproject.v2.settings.ReturnTiming
 import com.touringproject.v2.settings.Settings
 
@@ -22,13 +23,22 @@ data class FlowState(
   val phaseStartedAt: Long = 0,
   // Read when the ask starts, before the intercom route switches the music stream to the call device's volume.
   val mediaVolume: MediaVolume? = null,
+  /** How long this ask may record (SC-11), for SC-03's countdown. */
+  val recordLimitMs: Long = DEFAULT_RECORD_LIMIT_MS,
 )
 
 val IDLE = FlowState()
 
 sealed interface FlowEvent {
   val now: Long
-  data class Start(val source: Source, override val now: Long, val mediaVolume: MediaVolume? = null) : FlowEvent
+  data class Start(
+    val source: Source,
+    override val now: Long,
+    val mediaVolume: MediaVolume? = null,
+    val recordLimitMs: Long = DEFAULT_RECORD_LIMIT_MS,
+  ) : FlowEvent
+  /** A text ask from Home (slice 5 spec §5.3): nothing to record, so it starts as it is sent. */
+  data class StartText(override val now: Long) : FlowEvent
   data class PhoneMic(override val now: Long) : FlowEvent
   data class StopRecording(override val now: Long) : FlowEvent
   data class Sent(val askId: String, override val now: Long) : FlowEvent
@@ -41,8 +51,13 @@ sealed interface FlowEvent {
 fun reduce(state: FlowState, event: FlowEvent): FlowState = when (event) {
   is FlowEvent.Start ->
     if (state.phase == Phase.IDLE || state.phase == Phase.FAILED) {
-      FlowState(phase = Phase.RECORDING, source = event.source, phaseStartedAt = event.now, mediaVolume = event.mediaVolume)
+      FlowState(
+        phase = Phase.RECORDING, source = event.source, phaseStartedAt = event.now, mediaVolume = event.mediaVolume,
+        recordLimitMs = event.recordLimitMs,
+      )
     } else state
+  is FlowEvent.StartText ->
+    if (state.phase == Phase.IDLE || state.phase == Phase.FAILED) FlowState(phase = Phase.SENDING, source = Source.SCREEN, phaseStartedAt = event.now) else state
   is FlowEvent.PhoneMic -> if (state.phase == Phase.RECORDING) state.copy(phoneMic = true) else state
   is FlowEvent.StopRecording ->
     if (state.phase == Phase.RECORDING) state.copy(phase = Phase.SENDING, phaseStartedAt = event.now) else state

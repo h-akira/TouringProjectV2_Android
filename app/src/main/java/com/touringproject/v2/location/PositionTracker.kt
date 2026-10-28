@@ -1,10 +1,15 @@
 package com.touringproject.v2.location
 
 import com.touringproject.v2.ask.Positions
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 
-// Collects position fixes while a question is recorded. A last-known point older than MAX_CURRENT_AGE_MS is not
-// sent as the current position, and callbacks that belong to an earlier begin() are ignored.
+// Collects position fixes while a question is recorded, only to tell where it was asked: the heading comes from the
+// ride's route (slice 5 spec §4.1). A last-known point older than MAX_CURRENT_AGE_MS is not sent as the current
+// position, and callbacks that belong to an earlier begin() are ignored.
 const val MAX_CURRENT_AGE_MS = 30_000L
+const val LATEST_WAIT_MS = 2_000L
 
 fun interface Subscription {
   fun remove()
@@ -34,14 +39,25 @@ class PositionTracker(private val source: PositionSource) : Positions {
   }
 
   @Synchronized
-  override fun end(): Pair<Fix?, List<Fix>> {
+  override fun end(): Fix? {
     generation += 1
     subscription?.remove()
     subscription = null
-    val sorted = fixes.sortedBy { it.timestamp }
+    val latest = fixes.maxByOrNull { it.timestamp }
     fixes.clear()
-    val latest = sorted.lastOrNull()
-    val current = latest?.takeIf { source.now() - it.timestamp <= MAX_CURRENT_AGE_MS }
-    return current to sorted
+    return latest?.takeIf { source.now() - it.timestamp <= MAX_CURRENT_AGE_MS }
+  }
+
+  /**
+   * The ride's route keeps Fused's last fix fresh while a ride records (every 5 s), which is when text asks are taken.
+   * None comes when there is no fix, or no permission; the wait is cut off at LATEST_WAIT_MS.
+   */
+  override suspend fun latest(): Fix? {
+    val fix = withTimeoutOrNull(LATEST_WAIT_MS) {
+      suspendCancellableCoroutine<Fix?> { cont ->
+        runCatching { source.lastKnown { if (cont.isActive) cont.resume(it) } }.onFailure { if (cont.isActive) cont.resume(null) }
+      }
+    }
+    return fix?.takeIf { source.now() - it.timestamp <= MAX_CURRENT_AGE_MS }
   }
 }

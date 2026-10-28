@@ -24,6 +24,7 @@ import com.touringproject.v2.ask.Phase
 import com.touringproject.v2.ask.RecordingMeta
 import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.audio.MediaVolume
+import com.touringproject.v2.audio.MediaVolumeWatch
 import com.touringproject.v2.recordings.TRIAL_IDLE
 import com.touringproject.v2.recordings.TrialPhase
 import com.touringproject.v2.recordings.TrialState
@@ -50,6 +51,19 @@ class HomeScreenTest {
     rule.setContent { HomeScreen(HomeUi("rider01", null, "新しい会話です"), { taps++ }, {}, {}, {}) }
     rule.onNodeWithTag("tapToTalk").performClick()
     assertEquals(1, taps)
+  }
+
+  // Slice 5 spec §5.1: 「⌨ 文字で質問」 stands next to 「🎤 押して話す」 and, like it, only while asks are taken.
+  @Test
+  fun the_text_ask_button_opens_the_sheet_only_while_asks_are_taken() {
+    var hint by mutableStateOf<String?>(null)
+    var opened = 0
+    rule.setContent { HomeScreen(HomeUi("rider01", null, "新しい会話です", askHint = hint), {}, {}, {}, {}, onTextAsk = { opened++ }) }
+    rule.onNodeWithText("⌨ 文字で質問").performClick()
+    assertEquals(1, opened)
+    hint = "再開すると、インカムのボタンで話せます"
+    rule.onNodeWithTag("textAsk").assertIsNotEnabled().performClick()
+    assertEquals(1, opened)
   }
 
   // Slice 2 spec §4.7: without a recording ride the button stays where it is but cannot be pressed, and says why.
@@ -118,8 +132,9 @@ class HomeScreenTest {
   fun the_media_volume_is_read_while_home_is_shown_and_a_withheld_reading_keeps_the_last() {
     // 4b #2, and the carried-over rule: null (media on the call route) must not clear a low reading.
     val readings = ArrayDeque(listOf<MediaVolume?>(MediaVolume(2, 15), null))
+    val watch = MediaVolumeWatch { readings.removeFirstOrNull() }
     rule.setContent {
-      val volume = rememberMediaVolume(readable = true) { readings.removeFirstOrNull() }
+      val volume = rememberMediaVolume(readable = true, watch)
       Text(if (volumeWarning(volume, null)) "low" else "ok")
     }
     rule.onNodeWithText("low").assertIsDisplayed()
@@ -127,10 +142,29 @@ class HomeScreenTest {
     rule.onNodeWithText("low").assertIsDisplayed()
   }
 
+  // Android #9: a Home made anew (back from Settings) starts from the last good reading, though the next is withheld.
+  @Test
+  fun a_new_home_starts_from_the_last_good_reading() {
+    val readings = ArrayDeque(listOf<MediaVolume?>(MediaVolume(2, 15)))
+    val watch = MediaVolumeWatch { readings.removeFirstOrNull() }
+    watch.refresh()
+    var shown by mutableStateOf(true)
+    rule.setContent {
+      if (shown) {
+        val volume = rememberMediaVolume(readable = true, watch)
+        Text(if (volumeWarning(volume, null)) "low" else "ok")
+      }
+    }
+    shown = false
+    rule.waitForIdle()
+    shown = true
+    rule.onNodeWithText("low").assertIsDisplayed()
+  }
+
   @Test
   fun no_reading_is_taken_while_an_ask_holds_the_route() {
     var reads = 0
-    rule.setContent { rememberMediaVolume(readable = false) { reads++; MediaVolume(2, 15) } }
+    rule.setContent { rememberMediaVolume(readable = false, MediaVolumeWatch { reads++; MediaVolume(2, 15) }) }
     rule.mainClock.advanceTimeBy(VOLUME_CHECK_MS * 2)
     assertEquals(0, reads)
   }
@@ -346,10 +380,45 @@ class SettingsScreensTest {
         Settings("rider01", answerVolumeDb = 3, maxRecordingHours = 12), null, {}, {}, { opened += "ride" }, {}, { opened += "volume" }, { opened += "recordings" }, "0.2.0",
       )
     }
-    rule.onNodeWithText("最長 12時間").performClick()
-    rule.onNodeWithText("+3dB").performClick()
+    rule.onNodeWithText("最長 12時間").performScrollTo().performClick()
+    rule.onNodeWithText("+3dB").performScrollTo().performClick()
     rule.onNodeWithText("録音の確認").performScrollTo().performClick()
     assertEquals(listOf("ride", "volume", "recordings"), opened)
+  }
+
+  // Slice 5 spec §6: SC-09's row says SC-11's values and opens it.
+  @Test
+  fun the_settings_list_leads_to_the_recording_settings() {
+    var opened = false
+    rule.setContent {
+      SettingsScreen(Settings("rider01", recordLimitSeconds = 45, startCueMs = 0), null, {}, {}, {}, {}, {}, {}, "0.2.0", onRecordingSettings = { opened = true })
+    }
+    rule.onNodeWithText("録音の設定").assertExists()
+    rule.onNodeWithText("上限 45秒 · 合図 なし").performScrollTo().performClick()
+    assertTrue(opened)
+  }
+
+  // SC-11: the limit goes in 5 s steps from 10 to 60 s, and the cue is one of six lengths.
+  @Test
+  fun the_recording_limit_steps_by_5_seconds_within_10_to_60_and_the_cue_is_chosen() {
+    var settings by mutableStateOf(Settings("rider01"))
+    var resets = 0
+    rule.setContent { RecordingSettingsScreen(settings, { settings = it }, { resets++ }) }
+    rule.onNodeWithTag("limitValue").assertTextEquals("20秒")
+    rule.onNodeWithTag("limitUp").performClick()
+    rule.onNodeWithTag("limitValue").assertTextEquals("25秒")
+    settings = settings.copy(recordLimitSeconds = 60)
+    rule.onNodeWithTag("limitUp").assertIsNotEnabled()
+    settings = settings.copy(recordLimitSeconds = 10)
+    rule.onNodeWithTag("limitDown").assertIsNotEnabled()
+    rule.onNodeWithTag("limitUp").assertIsEnabled()
+    for ((ms, label) in listOf(0 to "なし", 500 to "0.5秒", 1_000 to "1秒", 1_500 to "1.5秒", 2_000 to "2秒", 3_000 to "3秒")) {
+      rule.onNodeWithTag("cue-$ms").assertTextEquals(label)
+    }
+    rule.onNodeWithTag("cue-3000").performClick()
+    assertEquals(3_000, settings.startCueMs)
+    rule.onNodeWithTag("recordingDefaults").performClick()
+    assertEquals(1, resets)
   }
 
   @Test
@@ -476,6 +545,23 @@ class RecordingsScreenTest {
     trial = TrialState(device = intercom)
     rule.onNodeWithText("録ったマイク: インカム（M1-S PRO）").assertIsDisplayed()
     assertEquals(2, taps)
+  }
+
+  // Android #11: a question that starts while DL-01 is open closes it, so 「消す」 cannot be pressed for nothing.
+  @Test
+  fun a_question_starting_closes_the_delete_all_confirmation() {
+    var busy by mutableStateOf(false)
+    var deleted = 0
+    rule.setContent { RecordingsScreen(ui(askBusy = busy), {}, {}, {}, { deleted++ }) }
+    rule.onNodeWithTag("deleteAll").performClick()
+    rule.onNodeWithText("録音をすべて消しますか？").assertExists()
+    busy = true
+    rule.waitForIdle()
+    rule.onNodeWithText("録音をすべて消しますか？").assertDoesNotExist()
+    busy = false
+    rule.waitForIdle()
+    rule.onNodeWithText("録音をすべて消しますか？").assertDoesNotExist()
+    assertEquals(0, deleted)
   }
 
   @Test

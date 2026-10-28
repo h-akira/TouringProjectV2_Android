@@ -29,14 +29,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.touringproject.v2.ask.FlowState
 import com.touringproject.v2.ask.Phase
-import com.touringproject.v2.ask.RECORD_LIMIT_MS
 import com.touringproject.v2.ask.spokenMessage
 import kotlinx.coroutines.delay
 
 data class OverlayText(val title: String, val big: String, val detail: String, val button: String)
 
 fun overlayText(state: FlowState, seconds: Long): OverlayText = when (state.phase) {
-  Phase.RECORDING -> OverlayText("話してください", (RECORD_LIMIT_MS / 1000 - seconds).coerceAtLeast(0).toString(), "もう一度ボタンを押すか、ここを押すと送ります", "送らずにやめる")
+  Phase.RECORDING -> OverlayText("話してください", (state.recordLimitMs / 1000 - seconds).coerceAtLeast(0).toString(), "もう一度ボタンを押すか、ここを押すと送ります", "送らずにやめる")
   Phase.SENDING -> OverlayText("送っています…", "", "", "送らずにやめる")
   Phase.WAITING -> OverlayText("考えています…", seconds.toString(), "最初の質問は10秒ほど", "待つのをやめる")
   Phase.SPEAKING -> OverlayText("回答中", "", state.answer ?: "", "読み上げを止める")

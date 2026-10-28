@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.time.Instant
 
 /**
  * The memo is not copied: the loop writes an ask once, at its end, and SC-08 changes its memo apart (AskDao.writeMemo),
@@ -32,9 +31,6 @@ fun AskRecord.toEntity() = AskEntity(
   failure = failure,
   rideId = rideId,
   updatedAt = updatedAt,
-  sampleLatitude = sample?.latitude,
-  sampleLongitude = sample?.longitude,
-  sampleAt = sample?.let { Instant.parse(it.at).toEpochMilli() },
 )
 
 /**

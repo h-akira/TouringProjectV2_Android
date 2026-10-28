@@ -7,9 +7,9 @@ import com.touringproject.v2.api.AskBody
 import com.touringproject.v2.api.AskResult
 import com.touringproject.v2.api.Point
 import com.touringproject.v2.location.Fix
-import com.touringproject.v2.location.pickHeadingSample
 import com.touringproject.v2.settings.ReturnTiming
 import com.touringproject.v2.settings.Settings
+import com.touringproject.v2.settings.recordLimitMs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -17,7 +17,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.util.Base64
 
-const val RECORD_LIMIT_MS = 20_000L
 const val TICK_MS = 250L
 const val WAITING_CUE_MS = 5_000L
 const val FAILED_SCREEN_MS = 5_000L
@@ -53,12 +52,13 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   // Per-ask state: an older ask that is still unwinding must not read or change the newer one's.
   private class Run(val id: Int, val source: Source, var returned: Boolean = false)
 
-  // meta and pcm go to SC-12 once the ask has reached the Backend, or failed there; an unreached ask's recording goes.
+  // meta and pcm go to SC-12 as the ask is sent; an unreached ask's recording goes again (Android #68).
+  // heading is worked out once, where the recording ended, for the ask sent and the unreached one alike.
   private class Recording(
     val audio: String,
     val name: String,
     val current: Fix?,
-    val fixes: List<Fix>,
+    val heading: Double?,
     val endedAt: Long,
     val meta: RecordingMeta,
     val pcm: ByteArray,
@@ -77,6 +77,15 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
 
   fun tapToTalk() {
     if (!isBusy(state)) scope.launch { run(Source.SCREEN) }
+  }
+
+  /** Home's text sheet (slice 5 spec §5.3). taken is told once what became of it; nothing starts while an ask runs. */
+  fun askText(text: String, taken: (TextAskOutcome) -> Unit) {
+    if (isBusy(state)) {
+      taken(TextAskOutcome.NOT_TAKEN)
+      return
+    }
+    scope.launch { runText(text, taken) }
   }
 
   fun stopRecording() {
@@ -103,21 +112,18 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     val run = Run(++runId, source)
     current = run
     runsStarted += 1
-    dispatch(FlowEvent.Start(source, d.now(), d.mediaVolume()))
+    // SC-11's values as they are when the ask starts; a change takes effect from the next ask.
+    val atStart = d.settings()
+    dispatch(FlowEvent.Start(source, d.now(), d.mediaVolume(), atStart.recordLimitMs))
     try {
       // Slice 2 spec §4.7: only a recording ride takes asks. Read once, so pausing meanwhile neither stops the ask nor
       // takes it out of the ride.
-      val rideId = when (val ride = d.ride()) {
-        is RideNow.Recording -> ride.rideId
-        RideNow.Paused -> {
-          fail(FailureReason.PAUSED, run)
-          return
-        }
-        RideNow.NotRecording -> {
-          fail(FailureReason.NOT_RECORDING, run)
-          return
-        }
+      val ride = d.ride()
+      refusal(ride)?.let {
+        fail(it, run)
+        return
       }
+      val rideId = (ride as RideNow.Recording).rideId
       val apiKey = d.apiKey()
       if (apiKey == null) {
         fail(FailureReason.NO_KEY, run)
@@ -139,7 +145,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
         return
       }
       serviceRunning = true
-      val recording = record(run) ?: return
+      val recording = record(run, atStart) ?: return
       // US-C-09: without a network the ask cannot be asked; when and where it was is kept instead (slice 4 spec §4.1).
       if (!d.online()) {
         keepUnreached(recording, rideId, run)
@@ -157,6 +163,111 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
         stopService()
       }
     }
+  }
+
+  /**
+   * A text ask (slice 5 spec §5.3): from the screen, so it never returns to the nav app. It starts as it is sent (SC-03's
+   * 送っています…) and goes on like a voice ask once the Backend has taken it. Without a network it keeps nothing and
+   * shows no failure: the sheet says so and keeps the text, as the rider has stopped and can send it again.
+   */
+  suspend fun runText(text: String, taken: (TextAskOutcome) -> Unit) {
+    val d = deps
+    if (state.phase == Phase.FAILED) d.speech.stop()
+    val run = Run(++runId, Source.SCREEN)
+    current = run
+    runsStarted += 1
+    var told = false
+    val tell = { outcome: TextAskOutcome ->
+      if (!told) {
+        told = true
+        taken(outcome)
+      }
+    }
+    dispatch(FlowEvent.StartText(d.now()))
+    try {
+      val ride = d.ride()
+      refusal(ride)?.let {
+        tell(TextAskOutcome.NOT_TAKEN)
+        fail(it, run)
+        return
+      }
+      val rideId = (ride as RideNow.Recording).rideId
+      val apiKey = d.apiKey()
+      if (apiKey == null) {
+        tell(TextAskOutcome.NOT_TAKEN)
+        fail(FailureReason.NO_KEY, run)
+        return
+      }
+      if (!d.online()) {
+        tell(TextAskOutcome.OFFLINE)
+        return
+      }
+      val settings = d.settings()
+      val api = d.api(apiKey, settings.userName)
+      try {
+        d.service.start()
+      } catch (e: Exception) {
+        d.log("service_failed", mapOf("error" to e.toString()))
+        tell(TextAskOutcome.NOT_TAKEN)
+        fail(FailureReason.SERVICE, run)
+        return
+      }
+      serviceRunning = true
+      val here = d.location.latest()
+      if (!isCurrent(run)) return
+      val sent = sendText(text, here, d.heading(here, d.now()), rideId, api, run, tell) ?: return
+      val result = waitForAnswer(sent, null, api, run) ?: return
+      speak(result, settings, run)
+    } finally {
+      // Cancelled before the Backend took it: the rider let it go, and the sheet keeps the text.
+      tell(TextAskOutcome.NOT_TAKEN)
+      if (isCurrent(run)) {
+        current = null
+        dispatch(FlowEvent.Dismiss(d.now()))
+        stopService()
+      }
+    }
+  }
+
+  private suspend fun sendText(
+    text: String,
+    here: Fix?,
+    heading: Double?,
+    rideId: String,
+    api: AskApi,
+    run: Run,
+    tell: (TextAskOutcome) -> Unit,
+  ): SentAsk? {
+    val d = deps
+    val body = AskBody(
+      volumeDb = d.settings().answerVolumeDb,
+      text = text,
+      location = here?.let { Point(it.latitude, it.longitude) },
+      headingDegrees = heading,
+      conversationId = d.conversation.current(d.now()),
+      rideId = rideId,
+    )
+    val accepted = try {
+      api.postAsk(body)
+    } catch (e: Exception) {
+      d.log("post_failed", mapOf("kind" to ((e as? ApiError)?.kind?.name ?: "unknown")))
+      when (val reason = reasonFor(e)) {
+        FailureReason.NETWORK -> tell(TextAskOutcome.OFFLINE)
+        else -> {
+          tell(TextAskOutcome.NOT_TAKEN)
+          // A refused text is no speech not heard: say that it could not be answered.
+          fail(if (reason == FailureReason.NO_SPEECH) FailureReason.AGENT_FAILED else reason, run)
+        }
+      }
+      return null
+    }
+    // The Backend has it either way: the sheet's text has gone, and the conversation goes on.
+    tell(TextAskOutcome.SENT)
+    d.conversation.update(accepted.conversationId, accepted.conversationExpiresAt)
+    if (!isCurrent(run)) return null
+    dispatch(FlowEvent.Sent(accepted.askId, d.now()))
+    d.cues.sent()
+    return SentAsk(accepted.askId, accepted.conversationId, body.conversationId == null, d.now(), here, rideId, ASK_INPUT_TEXT, text)
   }
 
   private fun stopService() {
@@ -190,7 +301,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     }
   }
 
-  private suspend fun record(run: Run): Recording? {
+  private suspend fun record(run: Run, settings: Settings): Recording? {
     val d = deps
     d.location.begin()
     val routed = try {
@@ -218,9 +329,9 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       return null
     }
     // After the recorder is running: the rider starts talking on this cue, so nothing said after it is lost.
-    d.cues.start()
+    d.cues.start(settings.startCueMs)
     val startedAt = d.now()
-    while (state.phase == Phase.RECORDING && isCurrent(run) && d.now() - startedAt < RECORD_LIMIT_MS) {
+    while (state.phase == Phase.RECORDING && isCurrent(run) && d.now() - startedAt < settings.recordLimitMs) {
       d.sleep(TICK_MS)
     }
     if (!isCurrent(run)) {
@@ -250,8 +361,9 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     }
     val endedAt = d.now()
     val meta = RecordingMeta(stopped.name, startedAt, pcmDurationMs(stopped.pcm.size), phoneMic, device, null)
-    val (currentFix, fixes) = d.location.end()
-    return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, currentFix, fixes, endedAt, meta, stopped.pcm)
+    val here = d.location.end()
+    val heading = d.heading(here, endedAt)
+    return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, here, heading, endedAt, meta, stopped.pcm)
   }
 
   private suspend fun send(recording: Recording, rideId: String, api: AskApi, run: Run): SentAsk? {
@@ -261,10 +373,13 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       volumeDb = d.settings().answerVolumeDb,
       audio = recording.audio,
       location = here?.let { Point(it.latitude, it.longitude) },
-      headingSample = here?.let { pickHeadingSample(recording.fixes, it) },
+      headingDegrees = recording.heading,
       conversationId = d.conversation.current(d.now()),
       rideId = rideId,
     )
+    // Kept for SC-12 before the POST, which may take retries: the process may die meanwhile, and an ask the Backend took
+    // should keep its recording (Android #68). One that never reaches the Backend loses it again (US-C-09.001).
+    d.recordings.saved(recording.meta, recording.pcm)
     val accepted = try {
       api.postAsk(body)
     } catch (e: Exception) {
@@ -272,14 +387,13 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       val reason = reasonFor(e)
       // The Backend did not take the ask in (slice 4 spec §4.1); a refusal (the key, the request) is no unreached ask.
       if (reason == FailureReason.NETWORK) {
+        d.recordings.discarded(recording.name)
         keepUnreached(recording, rideId, run)
         return null
       }
-      d.recordings.saved(recording.meta, recording.pcm)
       fail(reason, run)
       return null
     }
-    d.recordings.saved(recording.meta, recording.pcm)
     // The ask exists on the Backend either way, so keep the conversation going even if it was cancelled.
     d.conversation.update(accepted.conversationId, accepted.conversationExpiresAt)
     if (!isCurrent(run)) return null
@@ -289,21 +403,21 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   }
 
   /**
-   * US-C-09: the ask never reached the Backend. Its time, place and heading's sample are kept as an unreached ask, which
-   * is sent later; the recording is dropped (US-C-09.001) and the conversation is left as it was (US-C-09.006). An ask
-   * the rider cancelled meanwhile is not kept: they let it go.
+   * US-C-09: the ask never reached the Backend. Its time, place and heading are kept as an unreached ask, which is sent
+   * later; the recording is dropped (US-C-09.001) and the conversation is left as it was (US-C-09.006). An ask the
+   * rider cancelled meanwhile is not kept: they let it go.
    */
   private suspend fun keepUnreached(recording: Recording, rideId: String, run: Run) {
     val d = deps
     if (isCurrent(run)) {
-      val here = recording.current
-      d.asks.keep(unreachedAsk(d.newId(), recording.endedAt, here, here?.let { pickHeadingSample(recording.fixes, it) }, rideId))
+      d.asks.keep(unreachedAsk(d.newId(), recording.endedAt, recording.current, recording.heading, rideId))
       d.log("ask_unreached", mapOf("rideId" to rideId))
     }
     fail(FailureReason.NETWORK, run)
   }
 
-  private suspend fun waitForAnswer(sent: SentAsk, recordingName: String, api: AskApi, run: Run): AskResult? {
+  /** recordingName is the kept recording to add what was heard to; a text ask has none. */
+  private suspend fun waitForAnswer(sent: SentAsk, recordingName: String?, api: AskApi, run: Run): AskResult? {
     val d = deps
     var sinceCue = 0L
     val sleep: suspend (Long) -> Unit = { ms ->
@@ -320,8 +434,9 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       fail(reasonFor(e), run)
       return null
     }
-    if (outcome is PollOutcome.Done) outcome.result.transcript?.let { d.recordings.transcribed(recordingName, it) }
-    // Kept even when the rider has cancelled meanwhile: the Backend has the ask either way.
+    if (outcome is PollOutcome.Done && recordingName != null) outcome.result.transcript?.let { d.recordings.transcribed(recordingName, it) }
+    // A result that has already arrived is kept even if the rider cancels at the same moment; a cancel while waiting
+    // stops the poll (Cancelled) and keeps nothing (Android #30).
     when (outcome) {
       is PollOutcome.Done -> d.asks.keep(askRecord(sent, outcome.result, d.now()))
       PollOutcome.Timeout -> d.asks.keep(askRecord(sent, null, d.now()))

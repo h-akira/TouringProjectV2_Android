@@ -1,5 +1,6 @@
 package com.touringproject.v2.settings
 
+import com.touringproject.v2.location.HeadingParams
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
@@ -69,6 +70,38 @@ class SettingsTest {
   fun the_longest_recording_time_is_24_hours_until_chosen_from_6_12_24_48() {
     assertEquals(24, decodeSettings("""{"userName":"rider01"}""").first.maxRecordingHours)
     assertEquals(listOf(6, 12, 24, 48), MAX_RECORDING_HOURS_CHOICES)
+  }
+
+  // Slice 5 spec §6 and §4.3: SC-11's and SC-22's values, with their defaults until chosen.
+  @Test
+  fun recording_and_heading_values_start_at_their_defaults() {
+    val s = decodeSettings("""{"userName":"rider01"}""").first
+    assertEquals(20, s.recordLimitSeconds)
+    assertEquals(20_000L, s.recordLimitMs)
+    assertEquals(1_500, s.startCueMs)
+    assertEquals(HeadingParams(referenceMeters = 15, accuracyMeters = 20, holdMinutes = 10), s.headingParams)
+    assertEquals(listOf(10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60), RECORD_LIMIT_SECONDS_CHOICES)
+    assertEquals(listOf(0, 500, 1_000, 1_500, 2_000, 3_000), START_CUE_MS_CHOICES)
+    assertEquals(listOf(10, 15, 20, 30), HEADING_REFERENCE_M_CHOICES)
+    assertEquals(listOf(10, 20, 30, 50), HEADING_ACCURACY_M_CHOICES)
+    assertEquals(listOf(2, 5, 10, 30), HEADING_HOLD_MINUTES_CHOICES)
+  }
+
+  @Test
+  fun recording_and_heading_values_round_trip_and_odd_ones_fall_back() = runTest {
+    val store = FakeStore()
+    val s = Settings("rider01", recordLimitSeconds = 45, startCueMs = 0, headingReferenceMeters = 30, headingAccuracyMeters = 50, headingHoldMinutes = 2)
+    SettingsRepository(store).update(s)
+    assertEquals(s, SettingsRepository(store).load())
+    val odd = """{"userName":"rider01","recordLimitSeconds":12,"startCueMs":"long","headingReferenceMeters":5,"headingAccuracyMeters":100,"headingHoldMinutes":60}"""
+    assertEquals(Settings("rider01"), decodeSettings(odd).first)
+  }
+
+  // SC-11's 「既定値に戻す」 puts back its two values only.
+  @Test
+  fun the_recording_defaults_leave_the_other_settings_as_they_are() {
+    val s = Settings("rider01", answerVolumeDb = 3, recordLimitSeconds = 45, startCueMs = 0, headingHoldMinutes = 2)
+    assertEquals(s.copy(recordLimitSeconds = 20, startCueMs = 1_500), s.withRecordingDefaults())
   }
 
   @Test

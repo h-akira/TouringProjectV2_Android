@@ -41,7 +41,7 @@ class RoomSyncStore(
   override suspend fun askMemoRefused(askId: String, updatedAt: Long) = asks.markMemoRefused(askId, updatedAt)
 
   override suspend fun unsentNotes(): List<UnsentNote> = notes.unsent().map {
-    UnsentNote(it.id, it.rideId, it.at, it.latitude, it.longitude, it.sampleLatitude, it.sampleLongitude, it.sampleAt, it.text, it.updatedAt)
+    UnsentNote(it.id, it.rideId, it.at, it.latitude, it.longitude, it.sampleLatitude, it.sampleLongitude, it.sampleAt, it.text, it.updatedAt, it.headingDegrees)
   }
 
   override suspend fun noteSent(noteId: String, updatedAt: Long, address: String?, headingDegrees: Double?) =
@@ -53,7 +53,7 @@ class RoomSyncStore(
   override suspend fun unsentUnreached(): List<UnsentUnreached> = asks.unsentUnreached().mapNotNull {
     val rideId = it.rideId ?: return@mapNotNull null
     val updatedAt = it.updatedAt ?: return@mapNotNull null
-    UnsentUnreached(it.askId, rideId, it.askedAt, it.latitude, it.longitude, it.sampleLatitude, it.sampleLongitude, it.sampleAt, updatedAt)
+    UnsentUnreached(it.askId, rideId, it.askedAt, it.latitude, it.longitude, it.sampleLatitude, it.sampleLongitude, it.sampleAt, updatedAt, it.headingDegrees)
   }
 
   override suspend fun unreachedSent(askId: String, updatedAt: Long, address: String?, headingDegrees: Double?) =

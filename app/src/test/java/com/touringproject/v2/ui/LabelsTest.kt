@@ -12,6 +12,7 @@ import com.touringproject.v2.recordings.TRIAL_IDLE
 import com.touringproject.v2.recordings.TrialPhase
 import com.touringproject.v2.recordings.TrialState
 import com.touringproject.v2.settings.LaunchableApp
+import com.touringproject.v2.settings.Settings
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -81,13 +82,6 @@ class LabelsTest {
   }
 
   @Test
-  fun a_withheld_reading_keeps_the_last_good_one() {
-    // AudioRoute.mediaVolume() is null while media still routes to the intercom's call link.
-    assertEquals(MediaVolume(10, 15), nextVolume(MediaVolume(10, 15), null))
-    assertEquals(MediaVolume(3, 15), nextVolume(MediaVolume(10, 15), MediaVolume(3, 15)))
-  }
-
-  @Test
   fun a_dismissed_warning_stays_closed_until_the_volume_changes() {
     assertTrue(volumeWarning(MediaVolume(3, 15), null))
     assertFalse(volumeWarning(MediaVolume(3, 15), 3))
@@ -114,11 +108,20 @@ class LabelsTest {
   }
 
   @Test
+  fun the_recording_row_says_the_limit_and_the_cue() {
+    assertEquals(listOf("なし", "0.5秒", "1秒", "1.5秒", "2秒", "3秒"), listOf(0, 500, 1_000, 1_500, 2_000, 3_000).map(::cueLabel))
+    assertEquals("上限 20秒 · 合図 1.5秒", recordingRowValue(Settings("rider01")))
+    assertEquals("上限 60秒 · 合図 なし", recordingRowValue(Settings("rider01", recordLimitSeconds = 60, startCueMs = 0)))
+  }
+
+  @Test
   fun overlay_text_per_phase() {
     val recording = overlayText(FlowState(phase = Phase.RECORDING), seconds = 3)
     assertEquals("17", recording.big)
     assertEquals("送らずにやめる", recording.button)
     assertEquals("0", overlayText(FlowState(phase = Phase.RECORDING), seconds = 25).big)
+    // SC-11: the countdown starts from the ask's own limit.
+    assertEquals("42", overlayText(FlowState(phase = Phase.RECORDING, recordLimitMs = 45_000), seconds = 3).big)
     assertEquals("12", overlayText(FlowState(phase = Phase.WAITING), seconds = 12).big)
     assertEquals("愛鷹山です。", overlayText(FlowState(phase = Phase.SPEAKING, answer = "愛鷹山です。"), 0).detail)
     assertEquals("時間切れです。もう一度お話しください。", overlayText(FlowState(phase = Phase.FAILED, failure = FailureReason.TIMEOUT), 0).title)

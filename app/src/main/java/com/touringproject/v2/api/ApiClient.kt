@@ -27,6 +27,10 @@ class ApiError(val kind: ApiErrorKind, message: String? = null) : Exception(mess
 
 @Serializable data class Point(val latitude: Double, val longitude: Double)
 
+/**
+ * The older point the Backend once worked a heading out from. Only point memos and unreached asks kept before
+ * slice 5 still have one; whatever the device makes now goes with headingDegrees (slice 5 spec §4.4).
+ */
 @Serializable data class HeadingSample(val latitude: Double, val longitude: Double, val at: String)
 
 @Serializable
@@ -34,7 +38,8 @@ data class AskBody(
   val audio: String? = null,
   val text: String? = null,
   val location: Point? = null,
-  val headingSample: HeadingSample? = null,
+  /** Worked out on the device from the ride's route (slice 5 spec §4); null when there is none. */
+  val headingDegrees: Double? = null,
   val conversationId: String? = null,
   val volumeDb: Int? = null,
   /** The recording ride the ask belongs to; every ask has one since asks need a recording ride (slice 2 spec §4.7). */
@@ -99,16 +104,36 @@ data class RideBody(
 /** A conversation's memo (slice 3 spec §6.2); null removes it. */
 @Serializable data class AskMemoBody(val memo: String?, val updatedAt: String)
 
-/** A point memo as a whole (slice 3 spec §6.2). location is null for one opened before its ride had a point. */
+/**
+ * A point memo as a whole (slice 3 spec §6.2). location is null for one opened before its ride had a point.
+ * headingDegrees and headingSample are as an unreached ask's (OfflineAskBody).
+ */
 @Serializable
-data class NoteBody(val at: String, val location: Point?, val headingSample: HeadingSample?, val text: String, val updatedAt: String)
+data class NoteBody(
+  val at: String,
+  val location: Point?,
+  val headingSample: HeadingSample?,
+  val text: String,
+  val updatedAt: String,
+  val headingDegrees: Double? = null,
+)
 
 /** What the Backend settled for a point memo when it first took it; null when it could not tell (no place, no heading). */
 @Serializable data class NoteSaved(val address: String? = null, val headingDegrees: Double? = null)
 
-/** An ask that never reached the Backend, as a whole (slice 4 spec §4.4). location is null when it had no place yet. */
+/**
+ * An ask that never reached the Backend, as a whole (slice 4 spec §4.4). location is null when it had no place yet.
+ * headingDegrees is the device's heading; headingSample is left only on one kept before slice 5 (spec §4.4).
+ */
 @Serializable
-data class OfflineAskBody(val askedAt: String, val location: Point?, val headingSample: HeadingSample?, val rideId: String, val updatedAt: String)
+data class OfflineAskBody(
+  val askedAt: String,
+  val location: Point?,
+  val headingSample: HeadingSample?,
+  val rideId: String,
+  val updatedAt: String,
+  val headingDegrees: Double? = null,
+)
 
 /** What the Backend settled for an unreached ask when it first took it; null when it could not tell. */
 @Serializable data class OfflineAskSaved(val address: String? = null, val headingDegrees: Double? = null)

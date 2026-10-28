@@ -38,10 +38,12 @@ data class RecordingMeta(
   val transcript: String?,
 )
 
-/** Fire and forget: a failure here must not end the ask. */
+/** Fire and forget: a failure here must not end the ask. Each call is carried out after the ones before it. */
 interface RecordingSink {
   fun saved(meta: RecordingMeta, pcm: ByteArray)
   fun transcribed(name: String, transcript: String)
+  /** The recording saved goes again: its ask never reached the Backend (US-C-09.001). */
+  fun discarded(name: String)
 }
 
 /** Fire and forget: a failure to keep an ask must not end it. */
@@ -51,7 +53,10 @@ fun interface AskLog {
 
 interface Positions {
   fun begin()
-  fun end(): Pair<Fix?, List<Fix>>
+  /** Where the ask is: the newest fix since begin(), unless it is older than 30 s. */
+  fun end(): Fix?
+  /** Where a text ask is (slice 5 spec §4.1): the device's last known fix, unless it is older than 30 s. */
+  suspend fun latest(): Fix?
 }
 
 interface KeepAlive {
@@ -65,7 +70,8 @@ interface NavReturn {
 }
 
 interface Cues {
-  fun start()
+  /** The start cue, durationMs long (SC-11); 0 sounds none. */
+  fun start(durationMs: Int)
   fun sent()
   fun waiting()
   fun failure()
@@ -96,6 +102,16 @@ fun rideNow(active: Ride?): RideNow = when {
   else -> RideNow.Recording(active.id)
 }
 
+/**
+ * Why an ask is not taken now, or null when it is (slice 2 spec §4.7). The ask loop and Home's buttons both decide by
+ * this, so the two never part (Android #48).
+ */
+fun refusal(ride: RideNow): FailureReason? = when (ride) {
+  is RideNow.Recording -> null
+  RideNow.Paused -> FailureReason.PAUSED
+  RideNow.NotRecording -> FailureReason.NOT_RECORDING
+}
+
 class AskDeps(
   val now: () -> Long,
   val sleep: suspend (Long) -> Unit,
@@ -117,6 +133,8 @@ class AskDeps(
   /** Whether a ride is recording now: an ask starts only then (slice 2 spec §4.7). */
   val ride: () -> RideNow,
   val location: Positions,
+  /** The heading at here, as of now, from the recording ride's route (slice 5 spec §4); null when there is none. */
+  val heading: suspend (here: Fix?, now: Long) -> Double?,
   val service: KeepAlive,
   val nav: NavReturn,
   val cues: Cues,

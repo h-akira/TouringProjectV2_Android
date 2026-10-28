@@ -16,6 +16,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
 
 // The newest recordings stay on the device for SC-12 (slice 1 spec §5.4): rec-<time>.pcm with rec-<time>.json beside it.
 const val KEEP_RECORDINGS = 10
@@ -74,7 +75,15 @@ class RecordingStore(private val dir: File, private val io: CoroutineDispatcher 
     withContext(io) { File(dir, name).readBytes() }
   }
 
-  suspend fun deleteAll() = change { dir.deleteRecursively() }
+  /** Removes one recording with its JSON; nothing happens when it is already gone. */
+  suspend fun delete(name: String) = change {
+    if (!PCM_RE.matches(name)) return@change
+    File(dir, name).delete()
+    File(dir, metaName(name)).delete()
+  }
+
+  /** Throws when a file could not be deleted, so SC-12 can say so (Android #10); deleteRecursively only returns false. */
+  suspend fun deleteAll() = change { if (!dir.deleteRecursively()) throw IOException("recordings not all deleted") }
 
   private suspend fun change(block: () -> Unit) {
     try {
@@ -100,6 +109,11 @@ class RecordingKeeper(
 
   override fun transcribed(name: String, transcript: String) {
     scope.launch { guard("transcript") { store.setTranscript(name, transcript) } }
+  }
+
+  // Launched after the save on the same scope; the store's lock takes them in that order.
+  override fun discarded(name: String) {
+    scope.launch { guard("discard") { store.delete(name) } }
   }
 
   private suspend fun guard(what: String, block: suspend () -> Unit) {

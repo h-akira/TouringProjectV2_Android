@@ -36,13 +36,17 @@ import androidx.navigation3.ui.NavDisplay
 import com.touringproject.v2.AppGraph
 import com.touringproject.v2.BuildConfig
 import com.touringproject.v2.api.ApiClient
+import com.touringproject.v2.ask.Phase
 import com.touringproject.v2.ask.isBusy
+import com.touringproject.v2.ask.rideNow
 import com.touringproject.v2.records.NoteDraft
 import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.settings.LaunchableApp
+import com.touringproject.v2.settings.withRecordingDefaults
 import com.touringproject.v2.sync.TakeOp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 import kotlinx.serialization.Serializable
@@ -54,6 +58,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object ReturnAppKey : NavKey
 @Serializable data object VolumeKey : NavKey
 @Serializable data object RecordingsKey : NavKey
+@Serializable data object RecordingSettingsKey : NavKey
 @Serializable data object RideRecordingKey : NavKey
 @Serializable data object DataKey : NavKey
 @Serializable data object RecordsKey : NavKey
@@ -89,7 +94,7 @@ fun AppUi(graph: AppGraph) {
   val state by graph.state.collectAsStateWithLifecycle()
   val settings by graph.settings.settings.collectAsStateWithLifecycle()
   val apiKey by graph.apiKeys.apiKey.collectAsStateWithLifecycle()
-  val volumeDismissedAt by graph.volumeDismissedAt.collectAsStateWithLifecycle()
+  val volumeDismissedAt by graph.mediaVolume.dismissedAt.collectAsStateWithLifecycle()
   val ride by graph.rides.active.collectAsStateWithLifecycle()
   val storeFailed by graph.rides.storeFailed.collectAsStateWithLifecycle()
   val askStoreFailed by graph.askLog.failed.collectAsStateWithLifecycle()
@@ -98,6 +103,9 @@ fun AppUi(graph: AppGraph) {
   var mapFull by remember { mutableStateOf(false) }
   // Saveable: SC-17 and SC-04 stay open when the activity is recreated, e.g. on rotation (Android #20).
   var sheet by rememberSaveable { mutableStateOf<RideSheet?>(null) }
+  // Home's text sheet (slice 5 spec §5.2); kept by AppGraph while SC-03 covers the screen, so a text not taken comes
+  // back, and an outcome that comes after the activity was recreated still reaches it.
+  val textSheet by graph.textSheet.collectAsStateWithLifecycle()
   val now = rememberNow(ride != null)
   val context = LocalContext.current
   val scope = rememberCoroutineScope()
@@ -126,7 +134,7 @@ fun AppUi(graph: AppGraph) {
         ) { inner ->
           val screens = entryProvider<NavKey> {
               entry<HomeKey> {
-                val volume = rememberMediaVolume(volumeReadable(state.phase)) { graph.audioRoute.mediaVolume() }
+                val volume = rememberMediaVolume(volumeReadable(state.phase), graph.mediaVolume)
                 val ui = HomeUi(
                   userName = current.userName,
                   banner = homeBanner(
@@ -137,7 +145,7 @@ fun AppUi(graph: AppGraph) {
                     askStoreFailed = askStoreFailed,
                   ),
                   conversation = conversationLabel(expiresAt, System.currentTimeMillis()),
-                  askHint = askHint(ride),
+                  askHint = askHint(rideNow(ride)),
                 )
                 HomeScreen(
                   ui = ui,
@@ -146,7 +154,7 @@ fun AppUi(graph: AppGraph) {
                   onBanner = { tabs.open(Tab.SETTINGS, if (it == Banner.NO_KEY) ConnectionKey else ReturnAppKey) },
                   onNewConversation = graph.controller::resetConversation,
                   modifier = Modifier.safeDrawingPadding(),
-                  onDismissVolume = { volume?.let { graph.dismissVolumeWarning(it.current) } },
+                  onDismissVolume = { volume?.let { graph.mediaVolume.dismiss(it.current) } },
                   onDismissAskFailure = graph.askLog::dismiss,
                   ride = {
                     RideCard(
@@ -173,6 +181,7 @@ fun AppUi(graph: AppGraph) {
                       }
                     }
                   },
+                  onTextAsk = { graph.textSheet.update { it.copy(open = true, message = null) } },
                 )
               }
               entry<RecordsKey> {
@@ -232,6 +241,18 @@ fun AppUi(graph: AppGraph) {
                   modifier = Modifier.safeDrawingPadding(),
                   saved = saveRowValue(summary ?: SaveSummary()),
                   onData = { tabs.push(DataKey) },
+                  onRecordingSettings = { tabs.push(RecordingSettingsKey) },
+                )
+              }
+              entry<RecordingSettingsKey> {
+                RecordingSettingsScreen(
+                  current,
+                  { next -> scope.launch { graph.settings.update(next) } },
+                  onReset = {
+                    scope.launch { graph.settings.update(current.withRecordingDefaults()) }
+                    Toast.makeText(context, "既定値に戻しました", Toast.LENGTH_SHORT).show()
+                  },
+                  modifier = Modifier.safeDrawingPadding(),
                 )
               }
               entry<DataKey> {
@@ -357,10 +378,24 @@ fun AppUi(graph: AppGraph) {
         }
         // The ride may end elsewhere (deadline, shutdown) while SC-04 is open.
         LaunchedEffect(ride == null) { if (ride == null && sheet == RideSheet.END) sheet = null }
+        // The sheet is a window above everything, so it steps aside while SC-03 shows the ask (slice 5 spec §5.3).
+        if (textSheet.open && state.phase == Phase.IDLE) {
+          TextAskSheet(
+            textSheet,
+            onText = { text -> graph.textSheet.update { it.copy(text = text) } },
+            onSend = { question ->
+              if (!graph.textSheet.value.sending) {
+                graph.textSheet.update { it.copy(sending = true, message = null) }
+                graph.controller.askText(question) { outcome -> graph.textSheet.update { it.after(outcome) } }
+              }
+            },
+            onDismiss = { graph.textSheet.value = TextSheet() },
+          )
+        }
         Column(Modifier.fillMaxSize()) {
           AskOverlay(
             state, System::currentTimeMillis, graph.controller::stopRecording, graph.controller::cancel,
-            volumeDismissedAt = volumeDismissedAt, onDismissVolume = graph::dismissVolumeWarning,
+            volumeDismissedAt = volumeDismissedAt, onDismissVolume = graph.mediaVolume::dismiss,
           )
         }
       }

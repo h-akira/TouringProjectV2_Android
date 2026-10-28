@@ -60,16 +60,22 @@ fun Ride.toBody() = RideBody(
 
 fun RoutePoint.toBody() = PointBody(iso(t), lat, lon, accuracy, segment)
 
-/** A memo opened before its ride had a point goes without a place; the sample goes only when it is whole. */
+/**
+ * A memo opened before its ride had a point goes without a place. Its heading goes as degrees; a sample (kept before
+ * slice 5) goes too while it is whole, and the Backend takes the heading first (slice 5 spec §4.4).
+ */
 fun UnsentNote.toBody(): NoteBody {
   val location = if (latitude != null && longitude != null) Point(latitude, longitude) else null
   val sample = if (sampleLatitude != null && sampleLongitude != null && sampleAt != null) HeadingSample(sampleLatitude, sampleLongitude, iso(sampleAt)) else null
-  return NoteBody(iso(at), location, sample, text, iso(updatedAt))
+  return NoteBody(iso(at), location, sample, text, iso(updatedAt), headingDegrees)
 }
 
-/** An unreached ask goes with its place and sample as a point memo does: each only when it is whole. */
+/**
+ * An unreached ask goes with its place and heading; a sample (kept before slice 5) goes too while it is whole, and the
+ * Backend takes the heading first (slice 5 spec §4.4).
+ */
 fun UnsentUnreached.toBody(): OfflineAskBody {
   val location = if (latitude != null && longitude != null) Point(latitude, longitude) else null
   val sample = if (sampleLatitude != null && sampleLongitude != null && sampleAt != null) HeadingSample(sampleLatitude, sampleLongitude, iso(sampleAt)) else null
-  return OfflineAskBody(iso(askedAt), location, sample, rideId, iso(updatedAt))
+  return OfflineAskBody(iso(askedAt), location, sample, rideId, iso(updatedAt), headingDegrees)
 }

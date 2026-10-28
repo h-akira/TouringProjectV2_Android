@@ -1,5 +1,6 @@
 package com.touringproject.v2.ui
 
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -10,16 +11,19 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.touringproject.v2.MainActivity
 import com.touringproject.v2.TouringApp
+import com.touringproject.v2.ask.TextAskOutcome
 import com.touringproject.v2.ride.EndReason
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.end
 import com.touringproject.v2.ride.newRide
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.shadows.ShadowToast
 
 @RunWith(AndroidJUnit4::class)
 class AppUiTest {
@@ -52,6 +56,22 @@ class AppUiTest {
     rule.onNodeWithText("☁️ データの保存").performClick()
     rule.onNodeWithTag("saveState").assertExists()
     rule.onNodeWithText("クラウドから読み直す").assertExists()
+  }
+
+  // Slice 5 spec §6: SC-11 opens from the settings, saves each change at once, and puts both values back with a toast.
+  @Test
+  fun the_recording_settings_save_at_once_and_go_back_to_their_defaults() {
+    val graph = (rule.activity.application as TouringApp).graph
+    rule.onNodeWithTag("tab-SETTINGS").performClick()
+    rule.onNodeWithText("上限 20秒 · 合図 1.5秒").performScrollTo().performClick()
+    rule.onNodeWithTag("limitUp").performClick()
+    rule.onNodeWithTag("cue-0").performClick()
+    rule.waitUntil(5_000) { graph.settings.current().let { it.recordLimitSeconds == 25 && it.startCueMs == 0 } }
+    rule.onNodeWithTag("recordingDefaults").performClick()
+    rule.waitUntil(5_000) { graph.settings.current().let { it.recordLimitSeconds == 20 && it.startCueMs == 1_500 } }
+    assertEquals("既定値に戻しました", ShadowToast.getTextOfLatestToast())
+    back()
+    rule.onNodeWithText("上限 20秒 · 合図 1.5秒").assertExists()
   }
 
   @Test
@@ -108,6 +128,38 @@ class AppUiTest {
     val graph = (rule.activity.application as TouringApp).graph
     rule.runOnUiThread { graph.controller.press() }
     rule.waitUntil(5_000) { !rule.onAllNodesWithTagExists("tab-HOME") }
+  }
+
+  // Slice 5 spec §5.1: while a ride records, 「⌨ 文字で質問」 opens the sheet, which keeps the text over a recreation.
+  @Test
+  fun the_text_sheet_opens_while_a_ride_records_and_keeps_its_text() {
+    val graph = (rule.activity.application as TouringApp).graph
+    rule.onNodeWithTag("textAsk").assertIsNotEnabled()
+    runBlocking { graph.rides.start("箱根") }
+    rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasTestTag("textAsk").and(androidx.compose.ui.test.isEnabled())).fetchSemanticsNodes().isNotEmpty() }
+    rule.onNodeWithTag("textAsk").performClick()
+    rule.onNodeWithTag("textAskInput").performTextInput("右手の山は？")
+    rule.activityRule.scenario.recreate()
+    rule.waitUntil(5_000) { rule.onAllNodesWithTagExists("textAskInput") }
+    rule.onNodeWithTag("textAskInput").assertTextContains("右手の山は？")
+    rule.onNodeWithText("やめる").performClick()
+    rule.waitUntil(5_000) { !rule.onAllNodesWithTagExists("textAskInput") }
+  }
+
+  // A text ask's outcome comes after the activity was recreated (rotated while SC-03 shows): it still reaches the sheet,
+  // so a question that was sent does not come back to be sent again.
+  @Test
+  fun a_text_asks_outcome_reaches_the_sheet_after_the_activity_is_recreated() {
+    val graph = (rule.activity.application as TouringApp).graph
+    runBlocking { graph.rides.start("箱根") }
+    rule.waitUntil(5_000) { rule.onAllNodes(androidx.compose.ui.test.hasTestTag("textAsk").and(androidx.compose.ui.test.isEnabled())).fetchSemanticsNodes().isNotEmpty() }
+    rule.onNodeWithTag("textAsk").performClick()
+    rule.onNodeWithTag("textAskInput").performTextInput("右手の山は？")
+    rule.runOnUiThread { graph.textSheet.value = graph.textSheet.value.copy(sending = true) }
+    rule.activityRule.scenario.recreate()
+    rule.waitUntil(5_000) { rule.onAllNodesWithTagExists("textAskInput") }
+    rule.runOnUiThread { graph.textSheet.value = graph.textSheet.value.after(TextAskOutcome.SENT) }
+    rule.waitUntil(5_000) { !rule.onAllNodesWithTagExists("textAskInput") }
   }
 
   @Test

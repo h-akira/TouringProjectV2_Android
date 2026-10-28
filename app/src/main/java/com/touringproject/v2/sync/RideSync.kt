@@ -35,7 +35,10 @@ data class PendingDeletion(val kind: String, val id: String, val rideId: String?
 /** A conversation's memo that has changed since the Backend last took it; memo null removes it. */
 data class UnsentAskMemo(val askId: String, val memo: String?, val updatedAt: Long)
 
-/** A point memo that has changed since the Backend last took it, as a whole; it goes as it is now (slice 3 spec §5.1). */
+/**
+ * A point memo that has changed since the Backend last took it, as a whole; it goes as it is now (slice 3 spec §5.1).
+ * headingDegrees and the sample are as an unreached ask's (UnsentUnreached).
+ */
 data class UnsentNote(
   val id: String,
   val rideId: String,
@@ -47,9 +50,13 @@ data class UnsentNote(
   val sampleAt: Long?,
   val text: String,
   val updatedAt: Long,
+  val headingDegrees: Double? = null,
 )
 
-/** An unreached ask that has changed since the Backend last took it (slice 4 spec §5.1). */
+/**
+ * An unreached ask that has changed since the Backend last took it (slice 4 spec §5.1). headingDegrees is the device's
+ * heading, or what the Backend settled once it has taken it; the sample is left only on one kept before slice 5.
+ */
 data class UnsentUnreached(
   val askId: String,
   val rideId: String,
@@ -60,6 +67,7 @@ data class UnsentUnreached(
   val sampleLongitude: Double?,
   val sampleAt: Long?,
   val updatedAt: Long,
+  val headingDegrees: Double? = null,
 )
 
 interface SyncStore {

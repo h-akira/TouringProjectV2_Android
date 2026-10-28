@@ -123,7 +123,10 @@ data class AskEntity(
   val updatedAt: Long? = null,
   val sentUpdatedAt: Long? = null,
   val rejectedUpdatedAt: Long? = null,
-  /** The older point the Backend takes an unreached ask's heading from; null when there was none. */
+  /**
+   * The older point the Backend took an unreached ask's heading from, on asks kept before slice 5 only; since then the
+   * device's heading is in headingDegrees (slice 5 spec §4.4).
+   */
   val sampleLatitude: Double? = null,
   val sampleLongitude: Double? = null,
   val sampleAt: Long? = null,
@@ -131,8 +134,9 @@ data class AskEntity(
 
 /**
  * A point memo (slice 3 spec §4.1, US-D-08). Written while its ride records or is paused, and gone with the ride. The
- * place it was written at is null when the ride had no point yet; the sample is the older point the Backend takes the
- * heading from. address and headingDegrees are what the Backend answered; null until it has.
+ * place it was written at is null when the ride had no point yet. headingDegrees is the device's heading (slice 5 spec
+ * §4.4) until the Backend answers the one it settled; the sample is left only on memos kept before slice 5. address is
+ * what the Backend answered; null until it has.
  */
 @Entity(
   tableName = "notes",
@@ -426,6 +430,10 @@ interface RideDao {
   /** The ride's last count points, newest first: where a point memo opened now is (slice 3 spec §4.3). */
   @Query("SELECT * FROM route_points WHERE rideId = :rideId ORDER BY id DESC LIMIT :count")
   suspend fun lastPoints(rideId: String, count: Int): List<RoutePointEntity>
+
+  /** The segment's last count points, newest first: what the heading is worked out from (slice 5 spec §4.1). */
+  @Query("SELECT * FROM route_points WHERE rideId = :rideId AND segment = :segment ORDER BY id DESC LIMIT :count")
+  suspend fun segmentTail(rideId: String, segment: Int, count: Int): List<RoutePointEntity>
 
   @Query("UPDATE rides SET distanceMeters = :distanceMeters, lastAliveAt = :aliveAt WHERE id = :rideId")
   suspend fun updateDistance(rideId: String, distanceMeters: Double, aliveAt: Long)

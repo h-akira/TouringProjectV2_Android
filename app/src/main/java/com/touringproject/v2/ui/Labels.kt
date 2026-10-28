@@ -6,6 +6,8 @@ import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.audio.MediaVolume
 import com.touringproject.v2.recordings.TrialPhase
 import com.touringproject.v2.recordings.TrialState
+import com.touringproject.v2.settings.Settings
+import java.math.BigDecimal
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -59,11 +61,14 @@ fun mediaVolumeLow(volume: MediaVolume?): Boolean = volume != null && volume.max
 /** While an ask holds the intercom route, the music stream reports the call device's volume, not the media one. */
 fun volumeReadable(phase: Phase): Boolean = phase == Phase.IDLE || phase == Phase.FAILED
 
-/** A null reading (media still on the intercom's call link, which lingers after an ask) keeps the last good one. */
-fun nextVolume(previous: MediaVolume?, reading: MediaVolume?): MediaVolume? = reading ?: previous
-
 /** Low, and not dismissed at this very level: a dismissal lasts until the volume changes. */
 fun volumeWarning(volume: MediaVolume?, dismissedAt: Int?): Boolean = mediaVolumeLow(volume) && volume?.current != dismissedAt
+
+/** SC-11's start cue: 「なし」, or its length in seconds (0.5秒, 1秒, 1.5秒). */
+fun cueLabel(ms: Int): String = if (ms <= 0) "なし" else "${BigDecimal(ms).divide(BigDecimal(1_000)).stripTrailingZeros().toPlainString()}秒"
+
+/** SC-09's row for SC-11 (slice 5 spec §6). */
+fun recordingRowValue(settings: Settings): String = "上限 ${settings.recordLimitSeconds}秒 · 合図 ${cueLabel(settings.startCueMs)}"
 
 // SC-12: how a kept recording is described, in Japan time.
 private val RECORDED_AT = DateTimeFormatter.ofPattern("M/d HH:mm:ss").withZone(ZoneId.of("Asia/Tokyo"))

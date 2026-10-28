@@ -1,7 +1,6 @@
 package com.touringproject.v2.ask
 
 import com.touringproject.v2.api.AskResult
-import com.touringproject.v2.api.HeadingSample
 import com.touringproject.v2.location.Fix
 import java.time.OffsetDateTime
 
@@ -11,8 +10,9 @@ import java.time.OffsetDateTime
 /** OFFLINE: the ask never reached the Backend (US-C-09); only when and where it was is kept. */
 enum class AskOutcome { ANSWERED, FAILED, OFFLINE }
 
-/** Slice 2 asks only by voice; text asks come in slice 4. */
+/** How an ask was put (07b): by voice, or typed on Home (slice 5 spec §5). The Backend's inputType audio is voice. */
 const val ASK_INPUT_VOICE = "voice"
+const val ASK_INPUT_TEXT = "text"
 
 const val TIMEOUT_FAILURE = "timeout"
 
@@ -39,8 +39,6 @@ data class AskRecord(
   val rideId: String?,
   /** The conversation's memo (US-D-04.001). The ask loop never sets it; only SC-08 does, through AskEdits. */
   val memo: String? = null,
-  /** The older point the Backend takes an unreached ask's heading from (slice 4 spec §4.2); null for the other asks. */
-  val sample: HeadingSample? = null,
   /** When an unreached ask last changed: the version the Backend compares. null for the asks the Backend made. */
   val updatedAt: Long? = null,
   /** False until an unreached ask has reached the Backend; the asks the Backend made are there from the start. */
@@ -48,10 +46,10 @@ data class AskRecord(
 )
 
 /**
- * An ask that never reached the Backend (slice 4 spec §4): when the recording ended, where, and the sample for the
- * heading. Its id is the device's; nothing it said is kept, and it joins no conversation.
+ * An ask that never reached the Backend (slice 4 spec §4): when the recording ended, where, and the heading the device
+ * worked out there (slice 5 spec §4.4). Its id is the device's; nothing it said is kept, and it joins no conversation.
  */
-fun unreachedAsk(askId: String, at: Long, here: Fix?, sample: HeadingSample?, rideId: String) = AskRecord(
+fun unreachedAsk(askId: String, at: Long, here: Fix?, headingDegrees: Double?, rideId: String) = AskRecord(
   askId = askId,
   askedAt = at,
   answeredAt = null,
@@ -60,19 +58,18 @@ fun unreachedAsk(askId: String, at: Long, here: Fix?, sample: HeadingSample?, ri
   latitude = here?.latitude,
   longitude = here?.longitude,
   address = null,
-  headingDegrees = null,
+  headingDegrees = headingDegrees,
   input = ASK_INPUT_VOICE,
   conversationId = null,
   newConversation = false,
   outcome = AskOutcome.OFFLINE,
   failure = null,
   rideId = rideId,
-  sample = sample,
   updatedAt = at,
   sent = false,
 )
 
-/** What the loop knows once the Backend has taken the ask in. */
+/** What the loop knows once the Backend has taken the ask in. question is what a text ask typed. */
 data class SentAsk(
   val askId: String,
   val conversationId: String,
@@ -80,6 +77,8 @@ data class SentAsk(
   val sentAt: Long,
   val here: Fix?,
   val rideId: String?,
+  val input: String = ASK_INPUT_VOICE,
+  val question: String? = null,
 )
 
 /** An answer the rider can hear: a completed one, or text whose speech the Backend failed to make. */
@@ -92,13 +91,14 @@ fun askRecord(sent: SentAsk, result: AskResult?, now: Long): AskRecord {
     askId = sent.askId,
     askedAt = result?.askedAt?.let { runCatching { OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() } ?: sent.sentAt,
     answeredAt = if (answered) now else null,
-    transcript = result?.transcript,
+    // A text ask's question is what was typed (slice 5 spec §5.4), also when no result came.
+    transcript = result?.transcript ?: sent.question,
     answer = result?.answer,
     latitude = sent.here?.latitude,
     longitude = sent.here?.longitude,
     address = result?.address,
     headingDegrees = result?.headingDegrees,
-    input = ASK_INPUT_VOICE,
+    input = sent.input,
     conversationId = sent.conversationId,
     newConversation = sent.newConversation,
     outcome = if (answered) AskOutcome.ANSWERED else AskOutcome.FAILED,

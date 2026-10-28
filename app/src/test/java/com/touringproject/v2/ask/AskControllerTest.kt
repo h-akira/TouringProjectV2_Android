@@ -7,7 +7,6 @@ import com.touringproject.v2.api.AskApi
 import com.touringproject.v2.api.AskBody
 import com.touringproject.v2.api.AskResult
 import com.touringproject.v2.api.AudioClip
-import com.touringproject.v2.api.HeadingSample
 import com.touringproject.v2.api.Point
 import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.audio.MediaVolume
@@ -15,6 +14,7 @@ import com.touringproject.v2.location.Fix
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.newRide
 import com.touringproject.v2.ride.pause
+import com.touringproject.v2.settings.DEFAULT_RECORD_LIMIT_MS
 import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.ReturnTiming
 import com.touringproject.v2.settings.Settings
@@ -42,13 +42,14 @@ private fun done(
 ) = AskResult("a1", status, transcript, answer, audio, error)
 private val PROCESSING = done(status = "processing")
 private val HERE = Fix(35.6812, 139.7671, 100_000, 5.0)
-private val BEHIND = Fix(35.6806, 139.7671, 90_000, 5.0)
 
 /** A fake world around the controller that records what it was asked to do, in order. */
 private class Harness(
   val scope: TestScope,
   var apiKey: String? = "key",
   val settings: Settings = SETTINGS,
+  /** Read at every use, so a test can change the settings between asks. */
+  val settingsOf: () -> Settings = { settings },
   var post: suspend () -> AskAccepted = { ACCEPTED },
   answers: List<Any> = listOf(done()),
   val routeOk: Boolean = true,
@@ -64,12 +65,24 @@ private class Harness(
   var ride: RideNow = RideNow.Recording("r1"),
   /** Whether the device has a network when the recording ends (slice 4 spec §4.1). */
   var online: Boolean = true,
+  /** What the ride's route gives as the heading (slice 5 spec §4). */
+  var heading: Double? = 12.5,
+  /** The device's last known fix, where a text ask is (slice 5 spec §4.1). */
+  var latest: Fix? = HERE,
 ) {
+  /** What each text ask told the sheet. */
+  val outcomes = mutableListOf<TextAskOutcome>()
+  /** Where and when the heading was asked for. */
+  val headingAsked = mutableListOf<Pair<Fix?, Long>>()
+  /** How long each start cue was asked to sound. */
+  val startCues = mutableListOf<Int>()
   val log = mutableListOf<String>()
   val states = mutableListOf<FlowState>()
   val bodies = mutableListOf<AskBody>()
+  /** The recordings SC-12 keeps now: saved and not discarded again. */
   val metas = mutableListOf<RecordingMeta>()
   val keptPcm = mutableListOf<ByteArray>()
+  val discarded = mutableListOf<String>()
   val transcripts = mutableListOf<Pair<String, String>>()
   val kept = mutableListOf<AskRecord>()
   private val results = answers.toMutableList()
@@ -97,7 +110,7 @@ private class Harness(
       delay(ms)
       if (stopAfterMs != null && controller.state.phase == Phase.RECORDING && now() >= stopAfterMs) controller.stopRecording()
     },
-    settings = { settings },
+    settings = settingsOf,
     apiKey = { apiKey },
     micAllowed = { micAllowed },
     mediaVolume = { log += "vol:read"; MediaVolume(2, 25) },
@@ -115,6 +128,11 @@ private class Harness(
     },
     recordings = object : RecordingSink {
       override fun saved(meta: RecordingMeta, pcm: ByteArray) { metas += meta; keptPcm += pcm }
+      override fun discarded(name: String) {
+        discarded += name
+        val at = metas.indexOfFirst { it.name == name }
+        if (at >= 0) { metas.removeAt(at); keptPcm.removeAt(at) }
+      }
       override fun transcribed(name: String, transcript: String) { transcripts += name to transcript }
     },
     asks = { kept += it },
@@ -123,8 +141,10 @@ private class Harness(
     ride = { ride },
     location = object : Positions {
       override fun begin() { log += "loc:begin" }
-      override fun end() = HERE to listOf(BEHIND, HERE)
+      override fun end() = HERE
+      override suspend fun latest(): Fix? { log += "loc:latest"; return latest }
     },
+    heading = { here, at -> headingAsked += here to at; heading },
     service = object : KeepAlive {
       override fun start() { log += "svc:start"; serviceError?.let { throw it } }
       override fun stop() { log += "svc:stop" }
@@ -133,7 +153,7 @@ private class Harness(
       override suspend fun returnTo(packageName: String): Boolean { log += "return:$packageName"; return true }
     },
     cues = object : Cues {
-      override fun start() { log += "cue:start" }
+      override fun start(durationMs: Int) { log += "cue:start"; startCues += durationMs }
       override fun sent() { log += "cue:sent" }
       override fun waiting() { log += "cue:waiting" }
       override fun failure() { log += "cue:failure" }
@@ -155,6 +175,8 @@ private class Harness(
   }
 
   val phase get() = controller.state.phase
+
+  suspend fun askText(text: String) = controller.runText(text) { outcomes += it }
 
   /** Advances virtual time in small steps until the condition holds. */
   fun until(condition: () -> Boolean) {
@@ -184,12 +206,14 @@ class AskControllerTest {
         volumeDb = 6,
         audio = "AQID",
         location = Point(35.6812, 139.7671),
-        headingSample = HeadingSample(35.6806, 139.7671, "1970-01-01T00:01:30Z"),
+        headingDegrees = 12.5,
         conversationId = null,
         rideId = "r1",
       ),
       h.bodies[0],
     )
+    // Slice 5 spec §4.1: the heading is taken where and when the recording ended.
+    assertEquals(listOf<Pair<Fix?, Long>>(HERE to 3_000L), h.headingAsked)
     assertEquals(Phase.IDLE, h.phase)
     assertEquals(listOf(Phase.RECORDING, Phase.SENDING, Phase.WAITING, Phase.SPEAKING, Phase.IDLE), h.states.map { it.phase })
   }
@@ -214,7 +238,28 @@ class AskControllerTest {
     val h = Harness(this, stopAfterMs = null)
     h.controller.run(Source.HANDSFREE)
     assertTrue("post" in h.log)
-    assertTrue(h.now() >= RECORD_LIMIT_MS)
+    assertTrue(h.now() >= DEFAULT_RECORD_LIMIT_MS)
+    assertEquals(listOf(1_500), h.startCues)
+    assertEquals(DEFAULT_RECORD_LIMIT_MS, h.states.first().recordLimitMs)
+  }
+
+  // Slice 5 spec §6: SC-11's limit and start cue as they are when the ask starts; SC-03 counts down from that limit.
+  @Test
+  fun the_recording_limit_and_start_cue_come_from_sc_11() = runTest {
+    var settings = SETTINGS.copy(recordLimitSeconds = 10, startCueMs = 0)
+    val h = Harness(this, stopAfterMs = null, settingsOf = { settings })
+    // How long each ask recorded: from its start to its SENDING.
+    fun recorded() = h.states.filter { it.phase == Phase.RECORDING || it.phase == Phase.SENDING }
+      .zipWithNext { a, b -> if (a.phase == Phase.RECORDING && b.phase == Phase.SENDING) b.phaseStartedAt - a.phaseStartedAt else null }
+      .filterNotNull()
+    h.controller.run(Source.HANDSFREE)
+    assertEquals(listOf(10_000L), recorded())
+    assertEquals(listOf(0), h.startCues)
+    assertEquals(10_000L, h.states.first().recordLimitMs)
+    settings = SETTINGS.copy(recordLimitSeconds = 45, startCueMs = 3_000)
+    h.controller.run(Source.HANDSFREE)
+    assertEquals(listOf(10_000L, 45_000L), recorded())
+    assertEquals(listOf(0, 3_000), h.startCues)
   }
 
   @Test
@@ -300,7 +345,7 @@ class AskControllerTest {
     h.until { "rec:start" in h.log }
     h.controller.press()
     running.join()
-    assertTrue(h.now() < RECORD_LIMIT_MS)
+    assertTrue(h.now() < DEFAULT_RECORD_LIMIT_MS)
   }
 
   @Test
@@ -603,7 +648,7 @@ class AskControllerTest {
     assertEquals(1_000L, kept.askedAt)
     assertEquals(1_000L, kept.updatedAt)
     assertEquals(HERE.latitude, kept.latitude!!, 0.0)
-    assertEquals(HeadingSample(BEHIND.latitude, BEHIND.longitude, "1970-01-01T00:01:30Z"), kept.sample)
+    assertEquals(12.5, kept.headingDegrees!!, 0.0)
     assertEquals(null, kept.conversationId)
     assertFalse(kept.newConversation)
     assertFalse(kept.sent)
@@ -643,6 +688,25 @@ class AskControllerTest {
     h.controller.run(Source.HANDSFREE)
     assertTrue(h.kept.isEmpty())
     assertEquals(1, h.metas.size)
+  }
+
+  // Android #68: the recording is kept before the POST and its retries, so a process that dies meanwhile does not lose
+  // the recording of an ask the Backend took; one whose send failed on the network goes again.
+  @Test
+  fun the_recording_is_kept_before_the_post_and_goes_again_when_the_network_fails() = runTest {
+    var keptAtPost = -1
+    lateinit var h: Harness
+    h = Harness(this, stopAfterMs = 1_000, post = { keptAtPost = h.metas.size; ACCEPTED })
+    h.controller.run(Source.HANDSFREE)
+    assertEquals(1, keptAtPost)
+    assertEquals(1, h.metas.size)
+    assertTrue(h.discarded.isEmpty())
+    val failed = Harness(this, stopAfterMs = 1_000)
+    failed.post = { keptAtPost = failed.metas.size; throw ApiError(ApiErrorKind.NETWORK) }
+    failed.controller.run(Source.HANDSFREE)
+    assertEquals(1, keptAtPost)
+    assertEquals(listOf("rec-0.pcm"), failed.discarded)
+    assertTrue(failed.metas.isEmpty())
   }
 
   // The rider cancelled while the ask was being sent: they let it go, so it is not kept even when the send fails.
@@ -706,6 +770,143 @@ class AskControllerTest {
     assertEquals(listOf("vol:read", "cue:failure", "say:一時停止中は質問できません。再開すると質問できます。", "return:maps"), h.log)
     assertTrue(h.states.any { it.phase == Phase.FAILED && it.failure == FailureReason.PAUSED })
   }
+
+  // Android #48: from the screen (normally its button cannot be pressed then), a refused ask shows why on SC-03 and stays
+  // in this app.
+  @Test
+  fun a_screen_ask_without_a_recording_ride_is_refused_on_screen_and_stays_here() = runTest {
+    for ((ride, reason) in listOf(RideNow.NotRecording to FailureReason.NOT_RECORDING, RideNow.Paused to FailureReason.PAUSED)) {
+      val h = Harness(this, ride = ride)
+      h.controller.run(Source.SCREEN)
+      assertTrue(h.states.any { it.phase == Phase.FAILED && it.failure == reason && it.source == Source.SCREEN })
+      assertFalse(h.log.any { it.startsWith("return:") || it == "svc:start" || it == "rec:start" })
+      assertTrue(h.kept.isEmpty())
+    }
+  }
+}
+
+// Slice 5 spec §5: asking by text from Home.
+class TextAskTest {
+  // §5.3: no recording; it starts as it is sent, waits for the answer, reads it out, and never goes back to the nav app.
+  @Test
+  fun a_text_ask_starts_at_sending_and_is_read_out_without_returning() = runTest {
+    val h = Harness(this, answers = listOf(done(transcript = null)))
+    h.askText("右手に見える山は何？")
+    assertEquals(listOf("svc:start", "loc:latest", "post", "cue:sent", "get", "play:https://audio/1.mp3", "svc:stop"), h.log)
+    assertEquals(
+      AskBody(volumeDb = 6, text = "右手に見える山は何？", location = Point(35.6812, 139.7671), headingDegrees = 12.5, conversationId = null, rideId = "r1"),
+      h.bodies.single(),
+    )
+    assertEquals(listOf<Pair<Fix?, Long>>(HERE to 0L), h.headingAsked)
+    assertEquals(listOf(Phase.SENDING, Phase.WAITING, Phase.SPEAKING, Phase.IDLE), h.states.map { it.phase })
+    assertEquals(Source.SCREEN, h.states.first().source)
+    assertEquals(listOf(TextAskOutcome.SENT), h.outcomes)
+    // §5.4: kept as a text ask, with what was typed as its question.
+    val kept = h.kept.single()
+    assertEquals(ASK_INPUT_TEXT, kept.input)
+    assertEquals("右手に見える山は何？", kept.transcript)
+    assertEquals(AskOutcome.ANSWERED, kept.outcome)
+    assertTrue(h.metas.isEmpty())
+  }
+
+  // The conversation goes on across voice and text asks alike.
+  @Test
+  fun a_text_ask_carries_the_conversation_on() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000)
+    h.controller.run(Source.HANDSFREE)
+    h.askText("その山の高さは？")
+    assertEquals(listOf(null, "c1"), h.bodies.map { it.conversationId })
+  }
+
+  // §5.3: without a network nothing is sent, nothing is kept (no unreached ask) and SC-03 shows no failure.
+  @Test
+  fun without_a_network_a_text_ask_keeps_nothing_and_tells_the_sheet() = runTest {
+    val h = Harness(this, online = false)
+    h.askText("右手に見える山は何？")
+    assertEquals(listOf(TextAskOutcome.OFFLINE), h.outcomes)
+    assertFalse("post" in h.log)
+    assertTrue(h.kept.isEmpty())
+    assertTrue(h.states.none { it.phase == Phase.FAILED })
+    assertFalse(h.log.any { it.startsWith("say:") || it == "cue:failure" })
+    assertEquals(Phase.IDLE, h.phase)
+  }
+
+  // A network failure on the way is the same: the Backend never took it.
+  @Test
+  fun a_network_failure_on_send_keeps_nothing_and_tells_the_sheet() = runTest {
+    val h = Harness(this, post = { throw ApiError(ApiErrorKind.SERVER, "HTTP 503") })
+    h.askText("右手に見える山は何？")
+    assertEquals(listOf(TextAskOutcome.OFFLINE), h.outcomes)
+    assertTrue(h.kept.isEmpty())
+    assertTrue(h.states.none { it.phase == Phase.FAILED })
+    assertEquals(listOf("svc:start", "loc:latest", "post", "svc:stop"), h.log)
+  }
+
+  // Refusals show why on SC-03 (US-B-06.004), and the sheet keeps the text.
+  @Test
+  fun a_refused_text_ask_says_why_on_screen_and_the_sheet_keeps_the_text() = runTest {
+    val cases = listOf(
+      Harness(this, ride = RideNow.NotRecording) to FailureReason.NOT_RECORDING,
+      Harness(this, ride = RideNow.Paused) to FailureReason.PAUSED,
+      Harness(this, apiKey = null) to FailureReason.NO_KEY,
+      Harness(this, post = { throw ApiError(ApiErrorKind.INVALID_KEY) }) to FailureReason.INVALID_KEY,
+      Harness(this, post = { throw ApiError(ApiErrorKind.BAD_REQUEST) }) to FailureReason.AGENT_FAILED,
+      Harness(this, serviceError = IllegalStateException("background")) to FailureReason.SERVICE,
+    )
+    for ((h, reason) in cases) {
+      h.askText("右手に見える山は何？")
+      assertEquals(listOf(TextAskOutcome.NOT_TAKEN), h.outcomes)
+      assertTrue("$reason", h.states.any { it.phase == Phase.FAILED && it.failure == reason })
+      assertFalse(h.log.any { it.startsWith("return:") })
+      assertTrue(h.kept.isEmpty())
+    }
+  }
+
+  // §5.3: cancelled while waiting for the answer, it is kept nowhere, as a voice ask.
+  @Test
+  fun a_text_ask_cancelled_while_waiting_is_not_kept() = runTest {
+    val h = Harness(this, answers = listOf(PROCESSING, PROCESSING, PROCESSING))
+    val running = launch { h.askText("右手に見える山は何？") }
+    h.until { h.phase == Phase.WAITING }
+    h.controller.cancel()
+    running.join()
+    advanceUntilIdle()
+    assertEquals(listOf(TextAskOutcome.SENT), h.outcomes)
+    assertTrue(h.kept.isEmpty())
+  }
+
+  // §4.1: without a fresh position, the text ask goes without a place, and the heading is asked without one.
+  @Test
+  fun without_a_position_a_text_ask_goes_without_a_place() = runTest {
+    val h = Harness(this, latest = null, heading = null)
+    h.askText("右手に見える山は何？")
+    assertEquals(null, h.bodies.single().location)
+    assertEquals(null, h.bodies.single().headingDegrees)
+    assertEquals(listOf<Pair<Fix?, Long>>(null to 0L), h.headingAsked)
+  }
+
+  @Test
+  fun nothing_starts_while_an_ask_runs() = runTest {
+    val h = Harness(this, stopAfterMs = null)
+    launch { h.controller.run(Source.HANDSFREE) }
+    h.until { h.phase == Phase.RECORDING }
+    h.controller.askText("右手に見える山は何？") { h.outcomes += it }
+    assertEquals(listOf(TextAskOutcome.NOT_TAKEN), h.outcomes)
+    h.controller.cancel()
+    advanceUntilIdle()
+    assertTrue(h.bodies.isEmpty())
+  }
+
+  @Test
+  fun the_sheet_takes_500_characters_and_no_blank_question() {
+    assertEquals(500, TEXT_ASK_MAX)
+    assertEquals(500, cutTextAsk("あ".repeat(600)).length)
+    val emoji = "😀".repeat(501)
+    assertEquals(500, cutTextAsk(emoji).codePointCount(0, cutTextAsk(emoji).length))
+    assertEquals(497, textAskLeft("山は何"))
+    assertEquals(null, textQuestion(" \n "))
+    assertEquals("山は何？", textQuestion("  山は何？ \n"))
+  }
 }
 
 class AskRecordTest {
@@ -728,6 +929,14 @@ class AskRecordTest {
     assertEquals(AskOutcome.FAILED, failed.outcome)
     assertEquals("agent_failed", failed.failure)
   }
+
+  // Slice 5 spec §5.4: a text ask keeps what was typed, also when it timed out without a result.
+  @Test
+  fun a_text_ask_is_kept_as_text_with_what_was_typed() {
+    val text = sent.copy(input = ASK_INPUT_TEXT, question = "山は何？")
+    assertEquals(ASK_INPUT_TEXT to "山は何？", askRecord(text, null, 9_000).let { it.input to it.transcript })
+    assertEquals(ASK_INPUT_VOICE, askRecord(sent, null, 9_000).input)
+  }
 }
 
 class RideNowTest {
@@ -738,5 +947,12 @@ class RideNowTest {
     assertEquals(RideNow.Recording("r1"), rideNow(ride))
     assertEquals(RideNow.Paused, rideNow(ride.pause(5_000)))
     assertEquals(RideNow.NotRecording, rideNow(null))
+  }
+
+  @Test
+  fun only_a_recording_ride_has_no_refusal() {
+    assertEquals(null, refusal(RideNow.Recording("r1")))
+    assertEquals(FailureReason.PAUSED, refusal(RideNow.Paused))
+    assertEquals(FailureReason.NOT_RECORDING, refusal(RideNow.NotRecording))
   }
 }

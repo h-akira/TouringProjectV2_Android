@@ -1,7 +1,10 @@
 package com.touringproject.v2.ui
 
+import com.touringproject.v2.ask.rideNow
+import com.touringproject.v2.ride.EndReason
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.Pauses
+import com.touringproject.v2.ride.end
 import com.touringproject.v2.ride.newRide
 import com.touringproject.v2.ride.pause
 import com.touringproject.v2.ride.resume
@@ -15,13 +18,14 @@ private val TOKYO = ZoneId.of("Asia/Tokyo")
 private fun at(day: Int, hour: Int, minute: Int) = ZonedDateTime.of(2026, 10, day, hour, minute, 0, 0, TOKYO).toInstant().toEpochMilli()
 
 class RideLabelsTest {
-  // Slice 2 spec §4.7, §7.2
+  // Slice 2 spec §4.7, §7.2; Android #48: the hint follows the ask loop's own refusal.
   @Test
   fun the_hint_says_how_to_ask_unless_a_ride_records() {
     val ride = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS)
-    assertEquals(null, askHint(ride))
-    assertEquals("再開すると、インカムのボタンで話せます", askHint(ride.pause(5_000)))
-    assertEquals("走行を開始すると、インカムのボタンで話せます", askHint(null))
+    assertEquals(null, askHint(rideNow(ride)))
+    assertEquals("再開すると、インカムのボタンで話せます", askHint(rideNow(ride.pause(5_000))))
+    assertEquals("走行を開始すると、インカムのボタンで話せます", askHint(rideNow(null)))
+    assertEquals("走行を開始すると、インカムのボタンで話せます", askHint(rideNow(ride.end(9_000, EndReason.MANUAL, 9_000))))
   }
 
   @Test

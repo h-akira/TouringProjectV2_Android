@@ -20,10 +20,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +37,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.touringproject.v2.audio.MediaVolume
+import com.touringproject.v2.audio.MediaVolumeWatch
 import kotlinx.coroutines.delay
 
 /** askHint is set while no ask can start (no ride recording: slice 2 spec §4.7); it says how to make one possible. */
@@ -46,18 +47,18 @@ const val VOLUME_CHECK_MS = 2_000L
 
 /**
  * The media volume, read every 2 s while the caller is on screen and the app is in front (slice 1 spec §5.6).
- * Reading stops while an ask holds the intercom route; a withheld reading keeps the last good one.
+ * Reading stops while an ask holds the intercom route. The watch keeps the last good reading for the process, so a
+ * Home made anew starts from it (Android #9).
  */
 @Composable
-fun rememberMediaVolume(readable: Boolean, read: () -> MediaVolume?): MediaVolume? {
-  var volume by remember { mutableStateOf<MediaVolume?>(null) }
-  val currentRead by rememberUpdatedState(read)
+fun rememberMediaVolume(readable: Boolean, watch: MediaVolumeWatch): MediaVolume? {
+  val volume by watch.volume.collectAsState()
   val lifecycle = LocalLifecycleOwner.current.lifecycle
-  LaunchedEffect(readable, lifecycle) {
+  LaunchedEffect(readable, lifecycle, watch) {
     if (!readable) return@LaunchedEffect
     lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
       while (true) {
-        volume = nextVolume(volume, runCatching { currentRead() }.getOrNull())
+        watch.refresh()
         delay(VOLUME_CHECK_MS)
       }
     }
@@ -98,13 +99,22 @@ fun HomeScreen(
   ride: @Composable () -> Unit = {},
   onDismissAskFailure: () -> Unit = {},
   onNote: (() -> Unit)? = null,
+  onTextAsk: () -> Unit = {},
 ) {
   var confirming by remember { mutableStateOf(false) }
   Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
       Text(ui.userName, Modifier.clickable(onClick = onUser), fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-      // Settings is a tab now (slice 2 spec §7.1).
-      OutlinedButton(onClick = onTapToTalk, Modifier.testTag("tapToTalk"), enabled = ui.askHint == null) { Text("🎤 押して話す") }
+      // Settings is a tab now (slice 2 spec §7.1). Both asks from the screen are quiet buttons for tests and stops
+      // (US-B-05.006), taken only while a ride records (slice 5 spec §5.1).
+      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedButton(onClick = onTapToTalk, Modifier.testTag("tapToTalk"), enabled = ui.askHint == null, contentPadding = PaddingValues(horizontal = 10.dp)) {
+          Text("🎤 押して話す")
+        }
+        OutlinedButton(onClick = onTextAsk, Modifier.testTag("textAsk"), enabled = ui.askHint == null, contentPadding = PaddingValues(horizontal = 10.dp)) {
+          Text("⌨ 文字で質問")
+        }
+      }
     }
     ui.banner?.let { banner ->
       val close = when (banner) {

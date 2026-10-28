@@ -88,6 +88,22 @@ class RecordingStoreTest {
     assertEquals(before + 3, store.changes.value)
   }
 
+  // Android #68: the recording of an ask that never reached the Backend goes again, after its save.
+  @Test
+  fun a_recording_saved_then_discarded_is_gone_with_its_json() = runTest {
+    val keeper = RecordingKeeper(RecordingStore(dir, io = StandardTestDispatcher(testScheduler)), this) { _, _ -> }
+    keeper.saved(meta(100), byteArrayOf(1))
+    keeper.saved(meta(200), byteArrayOf(2))
+    keeper.discarded("rec-100.pcm")
+    testScheduler.advanceUntilIdle()
+    assertEquals(listOf("rec-200.json", "rec-200.pcm"), dir.list()!!.sorted())
+    // One already gone, or a name that is no recording, changes nothing.
+    val store = RecordingStore(dir)
+    store.delete("rec-100.pcm")
+    store.delete("../rec-200.pcm")
+    assertEquals(listOf(meta(200)), store.list())
+  }
+
   @Test
   fun the_keeper_never_lets_a_store_failure_reach_the_ask() = runTest {
     // A file where the directory should be: every write fails.

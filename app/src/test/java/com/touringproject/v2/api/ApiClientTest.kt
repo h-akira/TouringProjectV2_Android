@@ -307,6 +307,22 @@ class ApiClientTest {
     assertEquals("r1", sent["rideId"]!!.jsonPrimitive.content)
     assertEquals(JsonNull, sent["location"])
     assertEquals(JsonNull, sent["headingSample"])
+    // No heading is left out, which the Backend takes as none.
+    assertEquals(null, sent["headingDegrees"])
+  }
+
+  // Slice 5 spec §4.4: the heading the device worked out goes as degrees, with an ask and with an unreached one.
+  @Test
+  fun the_devices_heading_goes_as_degrees() = runTest {
+    server.enqueue(json(202, """{"askId":"a1","conversationId":"c1","conversationExpiresAt":"2999-01-01T00:00:00Z"}"""))
+    server.enqueue(json(200, """{"askId":"u1","applied":true}"""))
+    client().postAsk(AskBody(text = "q", headingDegrees = 271.5))
+    client().putOfflineAsk("u1", OfflineAskBody("2026-10-22T01:24:00Z", null, null, "r1", "2026-10-22T01:24:00Z", 33.0))
+    val asked = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+    assertEquals(271.5, asked["headingDegrees"]!!.jsonPrimitive.content.toDouble(), 0.0)
+    assertEquals(null, asked["headingSample"])
+    val unreached = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+    assertEquals(33.0, unreached["headingDegrees"]!!.jsonPrimitive.content.toDouble(), 0.0)
   }
 
   // 409: the id is an ask the Backend took in; it is not retried.

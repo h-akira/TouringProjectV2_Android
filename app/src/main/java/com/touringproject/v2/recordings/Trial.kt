@@ -1,11 +1,12 @@
 package com.touringproject.v2.recordings
 
-import com.touringproject.v2.ask.RECORD_LIMIT_MS
 import com.touringproject.v2.ask.Recorder
 import com.touringproject.v2.ask.RouteControl
 import com.touringproject.v2.ask.Source
 import com.touringproject.v2.ask.TICK_MS
 import com.touringproject.v2.audio.InputDevice
+import com.touringproject.v2.settings.DEFAULT_RECORD_LIMIT_MS
+import com.touringproject.v2.settings.DEFAULT_START_CUE_MS
 import kotlinx.coroutines.CancellationException
 
 // The trial recording on SC-12 (slice 1 spec §5.5): recorded over the same route as a question from the screen,
@@ -31,15 +32,18 @@ interface PcmPlayback {
   fun stop()
 }
 
+/** recordLimitMs and startCueMs are SC-11's, as for a question (US-E-03.001); cueStart sounds the start cue that long. */
 class TrialDeps(
   val now: () -> Long,
   val sleep: suspend (Long) -> Unit,
   val micAllowed: () -> Boolean,
   val route: RouteControl,
   val recorder: Recorder,
-  val cueStart: () -> Unit,
+  val cueStart: (durationMs: Int) -> Unit,
   val player: PcmPlayback,
   val onState: (TrialState) -> Unit,
+  val recordLimitMs: () -> Long = { DEFAULT_RECORD_LIMIT_MS },
+  val startCueMs: () -> Int = { DEFAULT_START_CUE_MS },
 )
 
 /** Call it from one thread only (the main thread in the app), like the ask loop. */
@@ -120,9 +124,10 @@ class TrialController(private val deps: TrialDeps) {
       d.route.stop()
       return
     }
-    d.cueStart()
+    d.cueStart(d.startCueMs())
     val startedAt = d.now()
-    while (isCurrent(session) && !stopRequested && d.now() - startedAt < RECORD_LIMIT_MS) d.sleep(TICK_MS)
+    val limitMs = d.recordLimitMs()
+    while (isCurrent(session) && !stopRequested && d.now() - startedAt < limitMs) d.sleep(TICK_MS)
     if (!isCurrent(session)) {
       d.recorder.cancel()
       d.route.stop()

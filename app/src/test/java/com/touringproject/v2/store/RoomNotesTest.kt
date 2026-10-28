@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.touringproject.v2.location.Fix
 import com.touringproject.v2.records.NoteDraft
 import com.touringproject.v2.records.NoteRecord
 import com.touringproject.v2.ride.EndReason
@@ -31,7 +32,11 @@ class RoomNotesTest {
   private var now = 5_000L
   private var changes = 0
   private val errors = mutableListOf<String>()
-  private val notes = RoomNotes(db.notes(), db.rides(), { now }, { "n1" }, { changes += 1 }) { message, _ -> errors += message }
+  private val headingAsked = mutableListOf<Pair<Fix?, Long>>()
+  private val notes = RoomNotes(
+    db.notes(), db.rides(), { now }, { "n1" }, { changes += 1 },
+    heading = { here, at -> headingAsked += here to at; 271.5 },
+  ) { message, _ -> errors += message }
   private val records = RoomRecords(db.rides(), db.asks(), db.notes())
   private val ride = newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS)
 
@@ -42,26 +47,28 @@ class RoomNotesTest {
     buildList { while (c.moveToNext()) add(DeletionEntity(c.getString(0), c.getString(1), c.getString(2), c.getLong(3))) }
   }
 
-  private val draft = NoteDraft("n1", "r1", 4_000, 35.02, 139.0, 35.0, 139.0, 3_000)
+  private val draft = NoteDraft("n1", "r1", 4_000, 35.02, 139.0, 90.0)
 
-  // Slice 3 spec §4.3: the memo opened now is at the ride's newest point; nothing is written until it is saved.
+  // Slice 3 spec §4.3: the memo opened now is at the ride's newest point; nothing is written until it is saved. Slice 5
+  // spec §4.1: its heading is the route's, at that point, as of when it was opened.
   @Test
-  fun a_draft_is_at_the_rides_newest_point_and_writes_nothing() = runBlocking {
+  fun a_draft_is_at_the_rides_newest_point_with_the_routes_heading_and_writes_nothing() = runBlocking {
     rides.save(ride)
     rides.addPoint("r1", RoutePoint(0, 2_000, 35.0, 139.0, 5.0), 0.0, 2_000)
     rides.addPoint("r1", RoutePoint(0, 3_000, 35.01, 139.0, 5.0), 0.0, 3_000)
-    assertEquals(NoteDraft("n1", "r1", 5_000, 35.01, 139.0, 35.0, 139.0, 2_000), notes.draft("r1"))
+    assertEquals(NoteDraft("n1", "r1", 5_000, 35.01, 139.0, 271.5), notes.draft("r1"))
+    assertEquals(listOf<Pair<Fix?, Long>>(Fix(35.01, 139.0, 3_000, 5.0) to 5_000L), headingAsked)
     assertEquals(emptyList<NoteRecord>(), records.notes("r1").first())
   }
 
   @Test
-  fun a_saved_memo_keeps_its_place_and_time_and_is_something_to_send() = runBlocking {
+  fun a_saved_memo_keeps_its_place_time_and_heading_and_is_something_to_send() = runBlocking {
     rides.save(ride)
     assertTrue(notes.create(draft, "展望スペース"))
     val kept = db.notes().note("n1")!!
     assertEquals(listOf(4_000L, 5_000L), listOf(kept.at, kept.updatedAt))
-    assertEquals(listOf(35.02, 139.0, 35.0, 139.0), listOf(kept.latitude, kept.longitude, kept.sampleLatitude, kept.sampleLongitude))
-    assertEquals(3_000L, kept.sampleAt)
+    assertEquals(listOf(35.02, 139.0, 90.0), listOf(kept.latitude, kept.longitude, kept.headingDegrees))
+    assertEquals(listOf(null, null, null), listOf(kept.sampleLatitude, kept.sampleLongitude, kept.sampleAt))
     assertNull(kept.sentUpdatedAt)
     assertEquals(1, changes)
     assertEquals(listOf(NoteRecord("n1", "r1", 4_000, 35.02, 139.0, "展望スペース", null, sent = false)), records.notes("r1").first())
@@ -141,7 +148,7 @@ class RoomNotesTest {
       override suspend fun lastPoints(rideId: String, count: Int): List<RoutePointEntity> = throw IOException("disk")
     }
     val notes = RoomNotes(db.notes(), failing, { now }, { "n1" }, { changes += 1 }) { message, _ -> errors += message }
-    assertEquals(NoteDraft("n1", "r1", 5_000, null, null, null, null, null), notes.draft("r1"))
+    assertEquals(NoteDraft("n1", "r1", 5_000, null, null, null), notes.draft("r1"))
     assertEquals(1, errors.size)
   }
 

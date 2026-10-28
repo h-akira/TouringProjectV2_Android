@@ -17,6 +17,7 @@ import com.touringproject.v2.ask.rideNow
 import com.touringproject.v2.audio.AudioRoute
 import com.touringproject.v2.audio.AudioRouteControl
 import com.touringproject.v2.audio.ExoAnswerPlayer
+import com.touringproject.v2.audio.MediaVolumeWatch
 import com.touringproject.v2.audio.PcmPlayer
 import com.touringproject.v2.audio.PcmRecorder
 import com.touringproject.v2.audio.ToneCues
@@ -25,8 +26,10 @@ import com.touringproject.v2.handsfree.PressGate
 import com.touringproject.v2.handsfree.PressRouter
 import com.touringproject.v2.location.FusedPositionSource
 import com.touringproject.v2.location.FusedRouteSource
+import com.touringproject.v2.location.HeadingParams
 import com.touringproject.v2.location.PositionTracker
 import com.touringproject.v2.location.RouteSource
+import com.touringproject.v2.location.degrees
 import com.touringproject.v2.nav.AppLauncher
 import com.touringproject.v2.net.Connectivity
 import com.touringproject.v2.recordings.RecordingCheck
@@ -43,16 +46,20 @@ import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.RideController
 import com.touringproject.v2.ride.RideDeps
 import com.touringproject.v2.ride.RideStatus
+import com.touringproject.v2.ride.RouteHeading
 import com.touringproject.v2.service.AlarmDeadline
 import com.touringproject.v2.service.ContextServiceLauncher
 import com.touringproject.v2.service.RideNotices
 import com.touringproject.v2.service.ServiceCoordinator
 import com.touringproject.v2.settings.ApiKeyStore
 import com.touringproject.v2.settings.DEFAULT_MAX_RECORDING_HOURS
+import com.touringproject.v2.settings.DEFAULT_START_CUE_MS
 import com.touringproject.v2.settings.DataStoreKeyValueStore
 import com.touringproject.v2.settings.KeystoreCipher
 import com.touringproject.v2.settings.LastSaved
 import com.touringproject.v2.settings.SettingsRepository
+import com.touringproject.v2.settings.headingParams
+import com.touringproject.v2.settings.recordLimitMs
 import com.touringproject.v2.settings.maxRecordingChanges
 import com.touringproject.v2.store.RideDatabase
 import com.touringproject.v2.store.RoomAskEdits
@@ -62,7 +69,9 @@ import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.store.RoomRideStore
 import com.touringproject.v2.store.RoomSyncStore
 import com.touringproject.v2.store.RoomTakeover
+import com.touringproject.v2.store.toPoint
 import com.touringproject.v2.sync.RideSync
+import com.touringproject.v2.ui.TextSheet
 import com.touringproject.v2.sync.Takeover
 import com.touringproject.v2.sync.credentialChanges
 import com.touringproject.v2.sync.reconnections
@@ -153,11 +162,6 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   /** SC-07 and SC-08 change kept asks through here; each change is something new to send (slice 3 spec §5.1). */
   val askEdits = RoomAskEdits(database.asks(), System::currentTimeMillis, sync::request) { message, e -> Log.w("trv2.ask", message, e) }
 
-  /** SC-19 writes point memos through here; each change is something new to send (slice 3 spec §5.1). */
-  val notes = RoomNotes(database.notes(), database.rides(), System::currentTimeMillis, { UUID.randomUUID().toString() }, sync::request) { message, e ->
-    Log.w("trv2.note", message, e)
-  }
-
   val rides = RideController(
     RideDeps(
       now = System::currentTimeMillis,
@@ -175,9 +179,32 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     ),
   )
 
+  /** The heading from the ride's route, with the parameters the rider chose (slice 5 spec §4). */
+  val routeHeading = RouteHeading(
+    ride = { rides.active.value },
+    points = { rideId, segment, count -> database.rides().segmentTail(rideId, segment, count).map { it.toPoint() } },
+    params = { settings.settings.value?.headingParams ?: HeadingParams() },
+    log = { message, e -> Log.w("trv2.ride", message, e) },
+  )
+
+  /** SC-19 writes point memos through here; each change is something new to send (slice 3 spec §5.1). */
+  val notes = RoomNotes(
+    database.notes(), database.rides(), System::currentTimeMillis, { UUID.randomUUID().toString() }, sync::request,
+    heading = { here, now -> routeHeading.find(here, now).degrees },
+  ) { message, e -> Log.w("trv2.note", message, e) }
+
   /** How many asks the device keeps for the ride recording or paused (SC-02, SC-04; Android #35). */
   val activeAskCount: StateFlow<Int> =
     activeAskCount(rides.active.map { it?.id }, database.asks()::countForRide).stateIn(scope, SharingStarted.Eagerly, 0)
+
+  /** The media volume for Home's band and SC-03's (slice 1 spec §5.6). */
+  val mediaVolume = MediaVolumeWatch { audioRoute.mediaVolume() }
+
+  /**
+   * Home's text sheet (slice 5 spec §5.2). Held for the process, not the activity: a text ask's outcome may come after the
+   * activity was recreated (rotated while SC-03 shows), and it must close the sheet that is shown then.
+   */
+  val textSheet = MutableStateFlow(TextSheet())
 
   private val flowState = MutableStateFlow(IDLE)
   val state: StateFlow<FlowState> = flowState.asStateFlow()
@@ -191,7 +218,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       settings = settings::current,
       apiKey = { if (apiBaseUrl.isEmpty()) null else apiKeys.current() },
       micAllowed = micAllowed,
-      mediaVolume = { runCatching { audioRoute.mediaVolume() }.getOrNull() },
+      // Read before the intercom route takes the music stream over; a withheld reading keeps the last good one (Android #9).
+      mediaVolume = mediaVolume::refresh,
       api = { key, user -> ApiClient(apiBaseUrl, key, user, http) },
       conversation = conversation,
       route = AudioRouteControl(audioRoute),
@@ -202,6 +230,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       newId = { UUID.randomUUID().toString() },
       ride = { rideNow(rides.active.value) },
       location = PositionTracker(FusedPositionSource(context)),
+      heading = { here, now -> routeHeading.find(here, now).degrees },
       service = serviceCoordinator.keepAlive,
       nav = launcher,
       cues = cues,
@@ -230,6 +259,9 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       cueStart = cues::start,
       player = PcmPlayer(),
       onState = { trialFlow.value = it },
+      // SC-11's values, as a question takes them (US-E-03.001).
+      recordLimitMs = { settings.current().recordLimitMs },
+      startCueMs = { settings.current().startCueMs },
     ),
   )
 
@@ -255,7 +287,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       },
       route = AudioRouteControl(audioRoute),
       recorder = PcmRecorder(),
-      cueStart = cues::start,
+      // Not a question: SC-11 does not change SC-19's voice input (slice 5 spec §6).
+      cueStart = { cues.start(DEFAULT_START_CUE_MS) },
       cueFailure = cues::failure,
       onState = { voiceFlow.value = it },
       log = { event, data -> Log.i("trv2.note", "$event $data") },
@@ -263,13 +296,6 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     scope,
   )
 
-  // The media volume at which the rider closed the low-volume band; kept until the process ends (slice 1 spec §5.6).
-  private val volumeDismissed = MutableStateFlow<Int?>(null)
-  val volumeDismissedAt: StateFlow<Int?> = volumeDismissed.asStateFlow()
-
-  fun dismissVolumeWarning(level: Int) {
-    volumeDismissed.value = level
-  }
 
   private val router = PressRouter(
     trialActive = { trial.active },

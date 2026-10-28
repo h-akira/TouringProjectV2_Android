@@ -50,7 +50,7 @@ class NoteRoutesTest {
   private val records = RoomRecords(db.rides(), db.asks(), db.notes())
   private val notes = RoomNotes(db.notes(), db.rides(), { 5_000 }, { "n1" }, {}) { _, _ -> }
   private var closed = 0
-  private val draft = NoteDraft("n1", "r1", 4_000, 35.3, 138.9, null, null, null)
+  private val draft = NoteDraft("n1", "r1", 4_000, 35.3, 138.9, null)
 
   @After
   fun close() = db.close()
