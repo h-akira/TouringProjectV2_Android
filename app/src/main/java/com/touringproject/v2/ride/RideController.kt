@@ -220,6 +220,12 @@ class RideController(private val deps: RideDeps) {
    * ride is not kept, or the new name could not be written now (it is written again with the next call; Android #46).
    * The active ride stays as it is but for its name.
    */
+  /**
+   * Writes again a ride's change that waits (every call does it first). With no ride running nothing else would, so
+   * SC-18 calls this when it opens.
+   */
+  suspend fun retrySave() = locked {}
+
   suspend fun rename(rideId: String, name: String): Boolean = locked {
     val clean = rideName(name) ?: return@locked false
     val now = deps.now()

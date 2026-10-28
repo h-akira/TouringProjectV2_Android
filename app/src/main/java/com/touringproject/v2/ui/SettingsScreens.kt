@@ -362,6 +362,9 @@ fun ConnectionScreen(
 enum class UserBlock(val message: String) {
   RIDE("走行を終えてから変えられます"),
   UNSENT("未送信の記録があります。先に「データの保存」で送ってください"),
+
+  /** A ride's change waits to be written to the device (RideController.waitingToSave); sending does not help. */
+  WAITING("走行の変更を端末に書き込めていません。端末の空き容量を確かめてください"),
 }
 
 /**

@@ -346,11 +346,14 @@ fun AppUi(graph: AppGraph) {
                 val take by graph.takeover.state.collectAsStateWithLifecycle()
                 val waitingToSave by graph.rides.waitingToSave.collectAsStateWithLifecycle()
                 DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
+                // A ride's change waiting to be written has nothing else to write it while no ride runs.
+                LaunchedEffect(Unit) { graph.rides.retrySave() }
                 // The write checks again in its own transaction (US-E-06.008); a ride's change still waiting to be
                 // written counts (Android #76).
                 val block = when {
                   ride != null -> UserBlock.RIDE
-                  (summary?.unsent ?: 0) > 0 || waitingToSave -> UserBlock.UNSENT
+                  (summary?.unsent ?: 0) > 0 -> UserBlock.UNSENT
+                  waitingToSave -> UserBlock.WAITING
                   else -> null
                 }
                 UserScreen(

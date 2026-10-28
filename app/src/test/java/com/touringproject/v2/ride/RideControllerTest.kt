@@ -399,6 +399,23 @@ class RideControllerTest {
     assertFalse(w.controller.storeFailed.value)
   }
 
+  // A rename of an ended ride that could not be written waits with no ride running to write it again; SC-18 tries it
+  // again when it opens, so a change of user name is not held back for good (plan 5's final review).
+  @Test
+  fun a_change_waiting_to_be_written_is_written_when_tried_again() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.controller.end("箱根")
+    w.failWrites = true
+    w.controller.rename("r1", "御殿場")
+    assertTrue(w.controller.waitingToSave.value)
+    w.failWrites = false
+    w.controller.retrySave()
+    assertFalse(w.controller.waitingToSave.value)
+    assertEquals("御殿場", w.stored().name)
+  }
+
   @Test
   fun the_warning_stays_while_the_ride_is_still_unsaved() = runTest {
     val w = World()

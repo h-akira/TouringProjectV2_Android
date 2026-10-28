@@ -311,6 +311,15 @@ class SettingsScreensTest {
     rule.onNodeWithTag("userMessage").assertTextEquals("ユーザー名を変えました")
   }
 
+  // A ride's change that cannot be written is not sent from SC-14, so SC-18 does not lead there (plan 5's final review).
+  @Test
+  fun a_change_that_cannot_be_written_is_told_without_the_way_to_sc14() {
+    rule.setContent { UserScreen("rider01", UserBlock.WAITING, false, null, { null }, {}, {}) }
+    rule.onNodeWithTag("changeUser").assertIsNotEnabled()
+    rule.onNodeWithTag("userBlock").assertTextEquals("走行の変更を端末に書き込めていません。端末の空き容量を確かめてください")
+    rule.onNodeWithTag("toData").assertDoesNotExist()
+  }
+
   // Android #75: until what is left to send has been counted, the name cannot change, and nothing is said of why.
   @Test
   fun the_name_cannot_change_before_what_is_left_is_counted() {
