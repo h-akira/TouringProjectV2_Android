@@ -201,16 +201,18 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
 
   /**
    * SC-22's heading, a new one each time the screen shows (slice 5 spec §4.5): the ride's route while it records, and
-   * points gathered the same way otherwise.
+   * points gathered the same way otherwise. A test puts one on fake sources here, to count the watches (Android #85).
    */
-  fun headingCheck() = HeadingCheck(
-    positionSource,
-    routeSource,
-    recording = { rides.active.value?.status == RideStatus.RECORDING },
-    rideHeading = routeHeading::find,
-    params = { settings.settings.value?.headingParams ?: HeadingParams() },
-    gpsNow = gpsClock::now,
-  )
+  var headingCheck: () -> HeadingCheck = {
+    HeadingCheck(
+      positionSource,
+      routeSource,
+      recording = { rides.active.value?.status == RideStatus.RECORDING },
+      rideHeading = routeHeading::find,
+      params = { settings.settings.value?.headingParams ?: HeadingParams() },
+      gpsNow = gpsClock::now,
+    )
+  }
 
   /** SC-19 writes point memos through here; each change is something new to send (slice 3 spec §5.1). */
   val notes = RoomNotes(

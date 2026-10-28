@@ -8,10 +8,19 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.touringproject.v2.MainActivity
 import com.touringproject.v2.TouringApp
 import com.touringproject.v2.ask.TextAskOutcome
+import com.touringproject.v2.location.Fix
+import com.touringproject.v2.location.HeadingCheck
+import com.touringproject.v2.location.HeadingParams
+import com.touringproject.v2.location.HeadingResult
+import com.touringproject.v2.location.NoHeading
+import com.touringproject.v2.location.PositionSource
+import com.touringproject.v2.location.RouteSource
+import com.touringproject.v2.location.Subscription
 import com.touringproject.v2.ride.EndReason
 import com.touringproject.v2.ride.HOUR_MS
 import com.touringproject.v2.ride.end
@@ -87,6 +96,41 @@ class AppUiTest {
     rule.onNodeWithTag("headingDefaults").performScrollTo().performClick()
     rule.waitUntil(5_000) { graph.settings.current().headingReferenceMeters == 15 }
     assertEquals("既定値に戻しました", ShadowToast.getTextOfLatestToast())
+  }
+
+  // Android #85: SC-22's watches run only while it shows: another tab, or the app going to the back, removes both.
+  @Test
+  fun leaving_the_heading_check_removes_its_watches() {
+    val graph = (rule.activity.application as TouringApp).graph
+    var watches = 0
+    var removed = 0
+    val positions = object : PositionSource {
+      override fun now() = 0L
+      override fun elapsed() = 0L
+      override fun lastKnown(onFix: (Fix) -> Unit) = Unit
+      override fun watch(onFix: (Fix) -> Unit): Subscription {
+        watches += 1
+        return Subscription { removed += 1 }
+      }
+    }
+    val route = RouteSource {
+      watches += 1
+      Subscription { removed += 1 }
+    }
+    graph.headingCheck = {
+      HeadingCheck(positions, route, { false }, { HeadingResult.None(NoHeading.NO_POSITION) }, { HeadingParams() }, { 0L })
+    }
+    rule.onNodeWithTag("tab-SETTINGS").performClick()
+    rule.onNodeWithText("位置と方位の確認").performScrollTo().performClick()
+    rule.waitUntil(5_000) { rule.onAllNodesWithTagExists("headingTitle") }
+    rule.waitUntil(5_000) { watches == 2 }
+    rule.onNodeWithTag("tab-HOME").performClick()
+    rule.waitUntil(5_000) { removed == 2 }
+    // Back on the settings tab, SC-22 shows again and watches again; the app going to the back removes them.
+    rule.onNodeWithTag("tab-SETTINGS").performClick()
+    rule.waitUntil(5_000) { watches == 4 }
+    rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
+    rule.waitUntil(5_000) { removed == 4 }
   }
 
   @Test
