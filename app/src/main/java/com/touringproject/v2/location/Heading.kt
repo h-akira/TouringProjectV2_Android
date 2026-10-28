@@ -31,6 +31,13 @@ data class HeadingParams(
   val holdMinutes: Int = DEFAULT_HEADING_HOLD_MINUTES,
 )
 
+/**
+ * How many of the route's last points the heading is worked out from (a ride's segment, or what SC-22 gathers). Points
+ * are 10 m apart at least, so a reference 30 m back is a few points away; the rest only covers points jittering at a
+ * stop.
+ */
+const val HEADING_POINTS = 120
+
 /** Why there is no heading (SC-22 tells the rider). */
 enum class NoHeading { NO_POSITION, POOR_ACCURACY, NOT_MOVED, HELD_TOO_LONG }
 

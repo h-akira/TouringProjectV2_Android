@@ -1,16 +1,11 @@
 package com.touringproject.v2.ride
 
 import com.touringproject.v2.location.Fix
+import com.touringproject.v2.location.HEADING_POINTS
 import com.touringproject.v2.location.HeadingParams
 import com.touringproject.v2.location.HeadingResult
 import com.touringproject.v2.location.findHeading
 import kotlinx.coroutines.CancellationException
-
-/**
- * How many of the segment's last points are read. Points are 10 m apart at least, so a reference 30 m back is a few
- * points away; the rest only covers points jittering at a stop.
- */
-const val HEADING_POINTS = 120
 
 /**
  * The heading of the ride recording or paused (slice 5 spec §4.1): from the points of its last segment only, since a
