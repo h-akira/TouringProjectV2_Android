@@ -17,6 +17,14 @@ const val ROUTE_MAX_ACCURACY_M = 50.0
 /** US-C-02.005: a point less accurate than 50 m is dropped. A point without an accuracy is kept. */
 fun acceptRoutePoint(fix: Fix): Boolean = fix.accuracy == null || fix.accuracy <= ROUTE_MAX_ACCURACY_M
 
+/**
+ * Whether the fix was made after a stretch of route began: Fused may hand over a cached fix from before when a watch
+ * starts. Compared on the time since boot (sinceElapsed) when both sides tell it, so a clock set forward or back
+ * drops nothing (Android #17, #24); otherwise the fix's time against the clock's (sinceClock).
+ */
+fun Fix.isSince(sinceElapsed: Long?, sinceClock: Long): Boolean =
+  if (elapsedMs != null && sinceElapsed != null) elapsedMs >= sinceElapsed else timestamp >= sinceClock
+
 fun interface RouteSource {
   fun watch(onFix: (Fix) -> Unit): Subscription
 }

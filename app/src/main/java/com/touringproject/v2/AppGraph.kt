@@ -3,6 +3,7 @@ package com.touringproject.v2
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.SystemClock
 import android.provider.Settings as SystemSettings
 import android.util.Log
 import com.touringproject.v2.api.ApiClient
@@ -165,6 +166,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val rides = RideController(
     RideDeps(
       now = System::currentTimeMillis,
+      elapsed = SystemClock::elapsedRealtime,
       bootCount = { runCatching { SystemSettings.Global.getInt(context.contentResolver, SystemSettings.Global.BOOT_COUNT) }.getOrNull() },
       newId = { UUID.randomUUID().toString() },
       // Read at each start and resume; before the settings are loaded only the default exists.
