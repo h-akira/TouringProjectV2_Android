@@ -169,6 +169,19 @@ class RoomTakeoverTest {
     assertEquals(1, records.summary.first().memos)
   }
 
+  // Android #77: a ride removed with marks on its ask and point memo too is one record gone.
+  @Test
+  fun a_ride_removed_with_its_childrens_marks_counts_once() = runBlocking {
+    takeover.take(cloud, replace = false, now = NOW)
+    val marks = listOf(
+      CloudDeleted("ask", "a1", "r1", iso(4_000_000)),
+      CloudDeleted("note", "n1", "r1", iso(4_000_000)),
+      CloudDeleted("ride", "r1", null, iso(5_000_000)),
+    )
+    assertEquals(TakeResult.Done(1), takeover.take(marks, replace = false, now = NOW + 1_000))
+    assertEquals(emptyList<Any>(), records.list.first())
+  }
+
   @Test
   fun a_newer_memo_in_the_cloud_replaces_the_devices() = runBlocking {
     takeover.take(listOf(cloudRide(), cloudAsk()), replace = false, now = NOW)

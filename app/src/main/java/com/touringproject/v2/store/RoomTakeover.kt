@@ -36,12 +36,17 @@ class RoomTakeover(private val db: RideDatabase, private val waitingToSave: () -
     TakeResult.Done(merged.count)
   }
 
-  private suspend fun device() = DeviceRecords(
-    rides = takeover.rides().associate { it.id to KeptRide(it.updatedAt, it.points) },
-    notes = takeover.notes().associate { it.id to it.updatedAt },
-    asks = takeover.asks().associate { it.askId to KeptAsk(it.updatedAt, it.memoUpdatedAt) },
-    deletions = rides.deletions().map { it.kind to it.id }.toSet(),
-  )
+  private suspend fun device(): DeviceRecords {
+    val notes = takeover.notes()
+    val asks = takeover.asks()
+    return DeviceRecords(
+      rides = takeover.rides().associate { it.id to KeptRide(it.updatedAt, it.points) },
+      notes = notes.associate { it.id to it.updatedAt },
+      asks = asks.associate { it.askId to KeptAsk(it.updatedAt, it.memoUpdatedAt) },
+      deletions = rides.deletions().map { it.kind to it.id }.toSet(),
+      rideOf = notes.associate { it.id to it.rideId } + asks.mapNotNull { a -> a.rideId?.let { a.askId to it } },
+    )
+  }
 
   // A ride the cloud removed goes with all of it, as a deletion on the device does, but leaves no mark to send.
   private suspend fun write(merged: Merge) {
