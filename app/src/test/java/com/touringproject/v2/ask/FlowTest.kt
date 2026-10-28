@@ -104,4 +104,19 @@ class FlowTest {
     val s = run(FlowEvent.Start(Source.HANDSFREE, 1, MediaVolume(3, 15)), FlowEvent.StopRecording(2))
     assertEquals(MediaVolume(3, 15), s.mediaVolume)
   }
+
+  // Android #81: a text ask carries the volume read at its start, and SC-03 tells a low one while the text is sent and
+  // the answer waited for, as the answer is read out on the media stream; a voice ask tells it only while recording.
+  @Test
+  fun a_text_ask_tells_the_volume_while_it_is_sent_and_waited_for() {
+    val text = run(FlowEvent.StartText(1, MediaVolume(3, 15)))
+    assertEquals(MediaVolume(3, 15), text.mediaVolume)
+    assertTrue(text.tellsVolume)
+    val waiting = reduce(text, FlowEvent.Sent("a1", 2))
+    assertTrue(waiting.tellsVolume)
+    assertFalse(reduce(waiting, FlowEvent.Answered("x", 3)).tellsVolume)
+    val voice = run(FlowEvent.Start(Source.SCREEN, 1, MediaVolume(3, 15)))
+    assertTrue(voice.tellsVolume)
+    assertFalse(reduce(voice, FlowEvent.StopRecording(2)).tellsVolume)
+  }
 }

@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import com.touringproject.v2.ask.FlowState
 import com.touringproject.v2.ask.Phase
 import com.touringproject.v2.ask.spokenMessage
+import com.touringproject.v2.ask.tellsVolume
 import kotlinx.coroutines.delay
 
 data class OverlayText(val title: String, val big: String, val detail: String, val button: String)
@@ -85,7 +86,7 @@ fun AskOverlay(
     }
     // The volume was read when the ask started, before the intercom route took over the music stream.
     val volume = state.mediaVolume
-    if (state.phase == Phase.RECORDING && volume != null && volumeWarning(volume, volumeDismissedAt)) {
+    if (state.tellsVolume && volume != null && volumeWarning(volume, volumeDismissedAt)) {
       WarningBand(Banner.LOW_VOLUME.text, null, { onDismissVolume(volume.current) }, Modifier.testTag("overlayVolume"))
     }
     Column(

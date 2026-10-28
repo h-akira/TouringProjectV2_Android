@@ -792,7 +792,9 @@ class TextAskTest {
   fun a_text_ask_starts_at_sending_and_is_read_out_without_returning() = runTest {
     val h = Harness(this, answers = listOf(done(transcript = null)))
     h.askText("右手に見える山は何？")
-    assertEquals(listOf("svc:start", "loc:latest", "post", "cue:sent", "get", "play:https://audio/1.mp3", "svc:stop"), h.log)
+    assertEquals(listOf("vol:read", "svc:start", "loc:latest", "post", "cue:sent", "get", "play:https://audio/1.mp3", "svc:stop"), h.log)
+    // Android #81: the volume is read as the ask starts, for SC-03's band.
+    assertEquals(MediaVolume(2, 25), h.states.first().mediaVolume)
     assertEquals(
       AskBody(volumeDb = 6, text = "右手に見える山は何？", location = Point(35.6812, 139.7671), headingDegrees = 12.5, conversationId = null, rideId = "r1"),
       h.bodies.single(),
@@ -839,7 +841,7 @@ class TextAskTest {
     assertEquals(listOf(TextAskOutcome.OFFLINE), h.outcomes)
     assertTrue(h.kept.isEmpty())
     assertTrue(h.states.none { it.phase == Phase.FAILED })
-    assertEquals(listOf("svc:start", "loc:latest", "post", "svc:stop"), h.log)
+    assertEquals(listOf("vol:read", "svc:start", "loc:latest", "post", "svc:stop"), h.log)
   }
 
   // Refusals show why on SC-03 (US-B-06.004), and the sheet keeps the text.

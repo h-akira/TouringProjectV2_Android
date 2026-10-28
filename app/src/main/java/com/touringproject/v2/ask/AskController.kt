@@ -186,7 +186,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     val run = Run(++runId, Source.SCREEN, cancelled = { tell(TextAskOutcome.NOT_TAKEN) })
     current = run
     runsStarted += 1
-    dispatch(FlowEvent.StartText(d.now()))
+    dispatch(FlowEvent.StartText(d.now(), d.mediaVolume()))
     try {
       val ride = d.ride()
       refusal(ride)?.let {
