@@ -132,6 +132,17 @@ class RoomTakeoverTest {
     assertEquals(setOf("r0", "r2"), records.list.first().map { it.ride.id }.toSet())
   }
 
+  // Android #72: a ride's change waiting to be written again counts as left to send, checked in the transaction, so
+  // it is not written into another name's records; reading the same name's records again is not held back by it.
+  @Test
+  fun a_rides_change_waiting_to_be_written_keeps_the_name() = runBlocking {
+    val waiting = RoomTakeover(db) { true }
+    sentRide("r0")
+    assertEquals(TakeResult.Blocked(BlockReason.UNSENT), waiting.take(cloud, replace = true, now = NOW))
+    assertEquals(listOf("r0"), records.list.first().map { it.ride.id })
+    assertEquals(TakeResult.Done(4), waiting.take(cloud, replace = false, now = NOW))
+  }
+
   // Slice 4 spec §8: a record that cannot be read fails the whole take, after the device's records were cleared.
   @Test
   fun a_failure_midway_leaves_the_device_as_it_was() = runBlocking {

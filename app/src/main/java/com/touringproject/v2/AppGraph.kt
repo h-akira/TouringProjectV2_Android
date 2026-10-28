@@ -161,7 +161,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       val key = apiKeys.current()
       if (apiBaseUrl.isEmpty() || key == null) null else ApiClient(apiBaseUrl, key, user, http)
     },
-    store = RoomTakeover(database),
+    // Read at the take, long after rides below is built.
+    store = RoomTakeover(database) { rides.waitingToSave.value },
     sync = sync,
     now = System::currentTimeMillis,
     scope = scope,

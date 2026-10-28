@@ -17,9 +17,10 @@ import com.touringproject.v2.sync.merge
 /**
  * Takes the cloud's records in (slice 4 spec §6.3). The device is read, merged with the cloud and written in one
  * transaction, so a write that fails, or a cloud record that cannot be read, leaves the device as it was. What comes in
- * is marked as sent, so it is not sent back.
+ * is marked as sent, so it is not sent back. waitingToSave tells whether a ride's change waits in memory to be written
+ * again (RideController); for a change of user name it counts as left to send (Android #72).
  */
-class RoomTakeover(private val db: RideDatabase) : TakeoverStore {
+class RoomTakeover(private val db: RideDatabase, private val waitingToSave: () -> Boolean = { false }) : TakeoverStore {
   private val takeover = db.takeover()
   private val rides = db.rides()
   private val asks = db.asks()
@@ -27,7 +28,7 @@ class RoomTakeover(private val db: RideDatabase) : TakeoverStore {
   override suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): TakeResult = db.withTransaction {
     if (takeover.activeRides() > 0) return@withTransaction TakeResult.Blocked(BlockReason.RIDE)
     if (replace) {
-      if (rides.summaryNow().unsent > 0) return@withTransaction TakeResult.Blocked(BlockReason.UNSENT)
+      if (rides.summaryNow().unsent > 0 || waitingToSave()) return@withTransaction TakeResult.Blocked(BlockReason.UNSENT)
       takeover.clearAll()
     }
     val merged = merge(device(), cloud, now)
