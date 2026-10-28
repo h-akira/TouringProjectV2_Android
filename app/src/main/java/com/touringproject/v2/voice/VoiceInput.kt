@@ -108,11 +108,14 @@ class VoiceInput(private val deps: VoiceDeps, private val scope: CoroutineScope)
     cancel()
   }
 
-  /** "🎤 声で入力" and the intercom button: start, or stop and send. Nothing while the text is being made. */
+  /**
+   * "🎤 声で入力" and the intercom button: start, or stop and send. While the text is being made a press starts nothing
+   * and gets the failure cue, so the rider knows it was not taken (Android #61).
+   */
   fun press(source: Source) {
     when (state.phase) {
       VoicePhase.RECORDING -> stop()
-      VoicePhase.TRANSCRIBING -> Unit
+      VoicePhase.TRANSCRIBING -> deps.cueFailure()
       VoicePhase.IDLE -> {
         // The run before is still unwinding: the press is told it was not taken.
         if (running) {

@@ -176,6 +176,21 @@ class NoteScreenTest {
     assertEquals(listOf("料金所の手前\n展望スペース"), saved)
   }
 
+  // Android #61: what was heard that did not fit in 2000 characters is told under the field, until the text changes.
+  @Test
+  fun what_was_heard_that_did_not_fit_is_told() {
+    var heard by mutableStateOf<Heard?>(null)
+    rule.setContent {
+      NoteScreen(header, "あ".repeat(1999), { true }, {}, voice = NoteVoiceUi(VoicePhase.IDLE, null, heard, online = true), onHeard = { heard = null })
+    }
+    rule.onNodeWithTag("heardCut").assertDoesNotExist()
+    heard = Heard(1, "展望スペース")
+    rule.waitForIdle()
+    rule.onNodeWithTag("heardCut").assertTextEquals("入りきらなかった分は足せませんでした")
+    rule.onNodeWithTag("memoInput").performTextReplacement("料金所の手前")
+    rule.onNodeWithTag("heardCut").assertDoesNotExist()
+  }
+
   // Android #57: while the memo is being deleted, ✕, Back and a second delete do nothing; the screen closes once.
   @Test
   fun while_the_memo_is_being_deleted_nothing_else_closes_it() {

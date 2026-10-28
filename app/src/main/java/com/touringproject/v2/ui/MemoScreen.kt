@@ -79,10 +79,13 @@ fun MemoEditor(
   val context = LocalContext.current
   val focus = remember { FocusRequester() }
   LaunchedEffect(Unit) { focus.requestFocus() }
+  // What was heard did not all fit; told until the text is changed (Android #61).
+  var heardCut by rememberSaveable { mutableStateOf(false) }
   LaunchedEffect(heard?.seq) {
     val next = heard ?: return@LaunchedEffect
-    val text = appendHeard(field.text, next.text)
-    field = TextFieldValue(text, TextRange(text.length))
+    val appended = appendHeard(field.text, next.text)
+    field = TextFieldValue(appended.text, TextRange(appended.text.length))
+    heardCut = !appended.whole
     onHeard(next.seq)
   }
   val close = {
@@ -113,7 +116,10 @@ fun MemoEditor(
     header()
     OutlinedTextField(
       field,
-      { field = it.copy(text = cutMemo(it.text)) },
+      {
+        if (it.text != field.text) heardCut = false
+        field = it.copy(text = cutMemo(it.text))
+      },
       Modifier.fillMaxWidth().weight(1f).focusRequester(focus).testTag("memoInput"),
       placeholder = { Text(placeholder) },
     )
@@ -123,6 +129,7 @@ fun MemoEditor(
       color = MaterialTheme.colorScheme.onSurfaceVariant,
       fontSize = 13.sp,
     )
+    if (heardCut) Text("入りきらなかった分は足せませんでした", color = MaterialTheme.colorScheme.error, fontSize = 14.sp, modifier = Modifier.testTag("heardCut"))
     footer()
   }
   if (discarding) {
