@@ -15,15 +15,18 @@ const val HEADING_POINTS = 120
 /**
  * The heading of the ride recording or paused (slice 5 spec §4.1): from the points of its last segment only, since a
  * ride may resume far from where it paused (a ferry). Asks, unreached asks and point memos all go through here, so
- * each takes its heading the same way. Without a ride, or when its points cannot be read, there is no route.
+ * each takes its heading the same way, as does SC-22 while the ride records. Without a ride, or when its points cannot
+ * be read, there is no route. now is the present on the points' own time (GpsClock), which the hold is measured
+ * against (Android #17).
  */
 class RouteHeading(
   private val ride: () -> Ride?,
   private val points: suspend (rideId: String, segment: Int, count: Int) -> List<RoutePoint>,
   private val params: () -> HeadingParams,
+  private val now: () -> Long,
   private val log: (String, Throwable) -> Unit,
 ) {
-  suspend fun find(here: Fix?, now: Long): HeadingResult {
+  suspend fun find(here: Fix?): HeadingResult {
     val active = ride()
     val route = if (active == null) {
       emptyList()
@@ -37,6 +40,6 @@ class RouteHeading(
         emptyList()
       }
     }
-    return findHeading(route, here, now, params())
+    return findHeading(route, here, now(), params())
   }
 }

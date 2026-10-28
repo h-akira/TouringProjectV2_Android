@@ -215,7 +215,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       serviceRunning = true
       val here = d.location.latest()
       if (!isCurrent(run)) return
-      val sent = sendText(text, here, d.heading(here, d.now()), rideId, api, run, tell) ?: return
+      val sent = sendText(text, here, d.heading(here), rideId, api, run, tell) ?: return
       val result = waitForAnswer(sent, null, api, run) ?: return
       speak(result, settings, run)
     } finally {
@@ -362,7 +362,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     val endedAt = d.now()
     val meta = RecordingMeta(stopped.name, startedAt, pcmDurationMs(stopped.pcm.size), phoneMic, device, null)
     val here = d.location.end()
-    val heading = d.heading(here, endedAt)
+    val heading = d.heading(here)
     return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, here, heading, endedAt, meta, stopped.pcm)
   }
 

@@ -27,10 +27,13 @@ import com.touringproject.v2.handsfree.PressGate
 import com.touringproject.v2.handsfree.PressRouter
 import com.touringproject.v2.location.FusedPositionSource
 import com.touringproject.v2.location.FusedRouteSource
+import com.touringproject.v2.location.GpsClock
 import com.touringproject.v2.location.HeadingParams
+import com.touringproject.v2.location.PositionSource
 import com.touringproject.v2.location.PositionTracker
 import com.touringproject.v2.location.RouteSource
 import com.touringproject.v2.location.degrees
+import com.touringproject.v2.location.seenBy
 import com.touringproject.v2.nav.AppLauncher
 import com.touringproject.v2.net.Connectivity
 import com.touringproject.v2.recordings.RecordingCheck
@@ -110,7 +113,11 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   private val micAllowed = { context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED }
 
   val serviceCoordinator = ServiceCoordinator(ContextServiceLauncher(context)) { message, e -> Log.w("trv2.ride", message, e) }
-  val routeSource: RouteSource = FusedRouteSource(context)
+  /** The present on the fixes' own time, learnt from every fix the app gets (Android #17). */
+  val gpsClock = GpsClock(SystemClock::elapsedRealtime, System::currentTimeMillis)
+  val routeSource: RouteSource = FusedRouteSource(context).seenBy(gpsClock)
+  /** The 1 s positions of an ask's recording and of SC-22. */
+  val positionSource: PositionSource = FusedPositionSource(context).seenBy(gpsClock)
   private val database = RideDatabase.open(context)
   val rideStore = RoomRideStore(database.rides())
   // sync is made below; it is read only when an unreached ask has been written.
@@ -186,13 +193,14 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     ride = { rides.active.value },
     points = { rideId, segment, count -> database.rides().segmentTail(rideId, segment, count).map { it.toPoint() } },
     params = { settings.settings.value?.headingParams ?: HeadingParams() },
+    now = gpsClock::now,
     log = { message, e -> Log.w("trv2.ride", message, e) },
   )
 
   /** SC-19 writes point memos through here; each change is something new to send (slice 3 spec §5.1). */
   val notes = RoomNotes(
     database.notes(), database.rides(), System::currentTimeMillis, { UUID.randomUUID().toString() }, sync::request,
-    heading = { here, now -> routeHeading.find(here, now).degrees },
+    heading = { here -> routeHeading.find(here).degrees },
   ) { message, e -> Log.w("trv2.note", message, e) }
 
   /** How many asks the device keeps for the ride recording or paused (SC-02, SC-04; Android #35). */
@@ -231,8 +239,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       online = { connectivity.online.value },
       newId = { UUID.randomUUID().toString() },
       ride = { rideNow(rides.active.value) },
-      location = PositionTracker(FusedPositionSource(context)),
-      heading = { here, now -> routeHeading.find(here, now).degrees },
+      location = PositionTracker(positionSource),
+      heading = { here -> routeHeading.find(here).degrees },
       service = serviceCoordinator.keepAlive,
       nav = launcher,
       cues = cues,

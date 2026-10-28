@@ -144,7 +144,7 @@ private class Harness(
       override fun end() = HERE
       override suspend fun latest(): Fix? { log += "loc:latest"; return latest }
     },
-    heading = { here, at -> headingAsked += here to at; heading },
+    heading = { here -> headingAsked += here to now(); heading },
     service = object : KeepAlive {
       override fun start() { log += "svc:start"; serviceError?.let { throw it } }
       override fun stop() { log += "svc:stop" }

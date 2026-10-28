@@ -133,8 +133,11 @@ class AskDeps(
   /** Whether a ride is recording now: an ask starts only then (slice 2 spec §4.7). */
   val ride: () -> RideNow,
   val location: Positions,
-  /** The heading at here, as of now, from the recording ride's route (slice 5 spec §4); null when there is none. */
-  val heading: suspend (here: Fix?, now: Long) -> Double?,
+  /**
+   * The heading at here, as of the moment it is asked, from the recording ride's route (slice 5 spec §4); null when
+   * there is none.
+   */
+  val heading: suspend (here: Fix?) -> Double?,
   val service: KeepAlive,
   val nav: NavReturn,
   val cues: Cues,
