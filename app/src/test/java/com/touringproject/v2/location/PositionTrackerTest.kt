@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PositionTrackerTest {
-  private class FakeSource(var now: Long = 100_000) : PositionSource {
+  private class FakeSource(var now: Long = 100_000, var elapsed: Long = 50_000) : PositionSource {
     var last: Fix? = null
     var onFix: ((Fix) -> Unit)? = null
     var lateLastKnown: ((Fix) -> Unit)? = null
@@ -14,6 +14,7 @@ class PositionTrackerTest {
     var deferLastKnown = false
 
     override fun now() = now
+    override fun elapsed() = elapsed
     override fun lastKnown(onFix: (Fix) -> Unit) {
       if (deferLastKnown) lateLastKnown = onFix else last?.let(onFix)
     }
@@ -90,9 +91,24 @@ class PositionTrackerTest {
     assertEquals(LATEST_WAIT_MS, testScheduler.currentTime)
     val refused = object : PositionSource {
       override fun now() = 100_000L
+      override fun elapsed() = 50_000L
       override fun lastKnown(onFix: (Fix) -> Unit) = throw SecurityException("no permission")
       override fun watch(onFix: (Fix) -> Unit) = Subscription {}
     }
     assertNull(PositionTracker(refused).latest())
+  }
+
+  // Android #17: the device's clock may be minutes off a fix's own (GNSS) time; the time since boot tells its age.
+  @Test
+  fun a_fix_is_as_old_as_the_time_since_boot_says_whatever_the_clock_says() = runTest {
+    val ahead = FakeSource(now = 100_000 + 5 * 60_000, elapsed = 50_000)
+    val tracker = PositionTracker(ahead)
+    tracker.begin()
+    ahead.onFix!!(Fix(35.0, 139.0, 100_000, 5.0, elapsedMs = 45_000))
+    assertEquals(100_000L, tracker.end()?.timestamp)
+    val stale = FakeSource(now = 100_000, elapsed = 50_000).apply {
+      last = Fix(35.0, 139.0, 99_000, 5.0, elapsedMs = 50_000 - MAX_CURRENT_AGE_MS - 1)
+    }
+    assertNull(PositionTracker(stale).latest())
   }
 }

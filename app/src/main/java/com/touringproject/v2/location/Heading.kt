@@ -9,8 +9,12 @@ import kotlin.math.sqrt
 
 // The direction of travel, worked out on the device from the ride's route (slice 5 spec §4, adr/0013).
 
-/** accuracy is the radius in metres the device reports (null when unknown). */
-data class Fix(val latitude: Double, val longitude: Double, val timestamp: Long, val accuracy: Double?)
+/**
+ * accuracy is the radius in metres the device reports (null when unknown). timestamp is the fix's own time (often the
+ * GNSS time), which may be off the device's clock; elapsedMs is the time since boot when the fix was made, which is
+ * what tells how old it is (Android #17). A point read back from the database has none.
+ */
+data class Fix(val latitude: Double, val longitude: Double, val timestamp: Long, val accuracy: Double?, val elapsedMs: Long? = null)
 
 // Slice 5 spec §4.3: the rider changes these (SC-22); the defaults hold the heading through a long red light.
 const val DEFAULT_HEADING_REFERENCE_M = 15

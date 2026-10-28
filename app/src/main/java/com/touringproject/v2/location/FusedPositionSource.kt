@@ -4,13 +4,15 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Location
 import android.os.Looper
+import android.os.SystemClock
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 
-fun Location.toFix() = Fix(latitude, longitude, time, if (hasAccuracy()) accuracy.toDouble() else null)
+fun Location.toFix() =
+  Fix(latitude, longitude, time, if (hasAccuracy()) accuracy.toDouble() else null, elapsedRealtimeNanos / 1_000_000)
 
 // Without the location permission both calls throw SecurityException; PositionTracker then simply has no fixes.
 @SuppressLint("MissingPermission")
@@ -18,6 +20,8 @@ class FusedPositionSource(context: Context) : PositionSource {
   private val client = LocationServices.getFusedLocationProviderClient(context)
 
   override fun now() = System.currentTimeMillis()
+
+  override fun elapsed() = SystemClock.elapsedRealtime()
 
   override fun lastKnown(onFix: (Fix) -> Unit) {
     client.lastLocation.addOnSuccessListener { it?.let { location -> onFix(location.toFix()) } }
