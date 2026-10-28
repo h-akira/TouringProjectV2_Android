@@ -118,7 +118,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val gpsClock = GpsClock(SystemClock::elapsedRealtime, System::currentTimeMillis)
   val routeSource: RouteSource = FusedRouteSource(context).seenBy(gpsClock)
   /** The 1 s positions of an ask's recording and of SC-22. */
-  val positionSource: PositionSource = FusedPositionSource(context).seenBy(gpsClock)
+  val positionSource: PositionSource = FusedPositionSource(context).seenBy(gpsClock).also { gpsClock.learnFrom(it) }
   private val database = RideDatabase.open(context)
   val rideStore = RoomRideStore(database.rides())
   // sync is made below; it is read only when an unreached ask has been written.
