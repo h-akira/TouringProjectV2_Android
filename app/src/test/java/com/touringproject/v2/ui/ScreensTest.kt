@@ -421,6 +421,41 @@ class SettingsScreensTest {
     assertEquals(1, resets)
   }
 
+  // Slice 5 spec §4.5 and §14: SC-22 opens from the row under 「録音の確認」.
+  @Test
+  fun the_settings_list_leads_to_the_heading_check() {
+    var opened = false
+    rule.setContent { SettingsScreen(Settings("rider01"), null, {}, {}, {}, {}, {}, {}, "0.2.0", onHeadingCheck = { opened = true }) }
+    rule.onNodeWithText("位置と方位の確認").performScrollTo().performClick()
+    assertTrue(opened)
+  }
+
+  // SC-22: the card tells the heading of the moment, and each parameter is one of four values.
+  @Test
+  fun the_heading_check_shows_the_heading_and_changes_its_parameters() {
+    var settings by mutableStateOf(Settings("rider01"))
+    var ui by mutableStateOf<HeadingCheckUi?>(null)
+    var resets = 0
+    rule.setContent { HeadingCheckScreen(ui, settings, { settings = it }, { resets++ }) }
+    rule.onNodeWithText("位置を確かめています…").assertExists()
+    ui = HeadingCheckUi("北西へ（315°）", "右手 北東 ／ 左手 南西", "位置の精度 6m · 基準の点 18m 手前（3秒前）", null, "走行のルートから求めています。")
+    rule.onNodeWithTag("headingTitle").assertTextEquals("北西へ（315°）")
+    rule.onNodeWithTag("headingSides").assertTextEquals("右手 北東 ／ 左手 南西")
+    rule.onNodeWithTag("headingReason").assertDoesNotExist()
+    ui = HeadingCheckUi("方位なし", null, "位置の精度 8m", "まだ基準の距離（15m）ほど動いていません", "この画面を開いてから集めた位置で")
+    rule.onNodeWithTag("headingReason").assertTextEquals("まだ基準の距離（15m）ほど動いていません")
+    rule.onNodeWithTag("headingSides").assertDoesNotExist()
+    for (m in listOf(10, 15, 20, 30)) rule.onNodeWithTag("headingReference-$m").assertTextEquals("${m}m")
+    for (m in listOf(10, 20, 30, 50)) rule.onNodeWithTag("headingAccuracy-$m").assertTextEquals("${m}m")
+    for (min in listOf(2, 5, 10, 30)) rule.onNodeWithTag("headingHold-$min").assertTextEquals("${min}分")
+    rule.onNodeWithTag("headingReference-30").performClick()
+    rule.onNodeWithTag("headingAccuracy-50").performScrollTo().performClick()
+    rule.onNodeWithTag("headingHold-2").performScrollTo().performClick()
+    assertEquals(listOf(30, 50, 2), listOf(settings.headingReferenceMeters, settings.headingAccuracyMeters, settings.headingHoldMinutes))
+    rule.onNodeWithTag("headingDefaults").performScrollTo().performClick()
+    assertEquals(1, resets)
+  }
+
   @Test
   fun the_settings_list_shows_the_app_version_as_a_row_that_leads_nowhere() {
     rule.setContent { SettingsScreen(Settings("rider01"), null, {}, {}, {}, {}, {}, {}, "0.2.0") }

@@ -74,6 +74,13 @@ fun Settings.withRecordingDefaults(): Settings = copy(recordLimitSeconds = DEFAU
 
 val Settings.headingParams: HeadingParams get() = HeadingParams(headingReferenceMeters, headingAccuracyMeters, headingHoldMinutes)
 
+/** SC-22's 「既定値に戻す」: its three values, and nothing else. */
+fun Settings.withHeadingDefaults(): Settings = copy(
+  headingReferenceMeters = DEFAULT_HEADING_REFERENCE_M,
+  headingAccuracyMeters = DEFAULT_HEADING_ACCURACY_M,
+  headingHoldMinutes = DEFAULT_HEADING_HOLD_MINUTES,
+)
+
 /**
  * The longest recording time each time the rider changes it, but not the value first loaded (US-C-08.005). AppGraph
  * follows it, so the recording ride's deadline moves even when SC-16 goes away mid-save (Android #33).

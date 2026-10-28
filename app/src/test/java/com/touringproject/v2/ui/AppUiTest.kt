@@ -74,6 +74,21 @@ class AppUiTest {
     rule.onNodeWithText("上限 20秒 · 合図 1.5秒").assertExists()
   }
 
+  // Slice 5 spec §4.5: SC-22 opens from the settings, tells a heading or why there is none, saves each parameter at once
+  // and puts the three back with a toast.
+  @Test
+  fun the_heading_check_saves_at_once_and_goes_back_to_its_defaults() {
+    val graph = (rule.activity.application as TouringApp).graph
+    rule.onNodeWithTag("tab-SETTINGS").performClick()
+    rule.onNodeWithText("位置と方位の確認").performScrollTo().performClick()
+    rule.waitUntil(5_000) { rule.onAllNodesWithTagExists("headingTitle") }
+    rule.onNodeWithTag("headingReference-30").performClick()
+    rule.waitUntil(5_000) { graph.settings.current().headingReferenceMeters == 30 }
+    rule.onNodeWithTag("headingDefaults").performScrollTo().performClick()
+    rule.waitUntil(5_000) { graph.settings.current().headingReferenceMeters == 15 }
+    assertEquals("既定値に戻しました", ShadowToast.getTextOfLatestToast())
+  }
+
   @Test
   fun the_records_tab_lists_the_kept_rides_and_home_keeps_its_place() {
     val graph = (rule.activity.application as TouringApp).graph

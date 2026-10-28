@@ -28,6 +28,7 @@ import com.touringproject.v2.handsfree.PressRouter
 import com.touringproject.v2.location.FusedPositionSource
 import com.touringproject.v2.location.FusedRouteSource
 import com.touringproject.v2.location.GpsClock
+import com.touringproject.v2.location.HeadingCheck
 import com.touringproject.v2.location.HeadingParams
 import com.touringproject.v2.location.PositionSource
 import com.touringproject.v2.location.PositionTracker
@@ -195,6 +196,19 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     params = { settings.settings.value?.headingParams ?: HeadingParams() },
     now = gpsClock::now,
     log = { message, e -> Log.w("trv2.ride", message, e) },
+  )
+
+  /**
+   * SC-22's heading, a new one each time the screen shows (slice 5 spec §4.5): the ride's route while it records, and
+   * points gathered the same way otherwise.
+   */
+  fun headingCheck() = HeadingCheck(
+    positionSource,
+    routeSource,
+    recording = { rides.active.value?.status == RideStatus.RECORDING },
+    rideHeading = routeHeading::find,
+    params = { settings.settings.value?.headingParams ?: HeadingParams() },
+    gpsNow = gpsClock::now,
   )
 
   /** SC-19 writes point memos through here; each change is something new to send (slice 3 spec §5.1). */
