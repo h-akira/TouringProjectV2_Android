@@ -380,6 +380,25 @@ class RideControllerTest {
     assertFalse(w.controller.storeFailed.value)
   }
 
+  // Android #76: only a ride's change waiting to be written again holds SC-18 back; a point that could not be written
+  // shows the band but leaves nothing waiting.
+  @Test
+  fun only_a_change_waiting_to_be_written_again_is_told_as_waiting() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.failWrites = true
+    w.controller.onFix(fix(2_000, 35.0))
+    assertTrue(w.controller.storeFailed.value)
+    assertFalse(w.controller.waitingToSave.value)
+    w.controller.pause()
+    assertTrue(w.controller.waitingToSave.value)
+    w.failWrites = false
+    w.controller.resume()
+    assertFalse(w.controller.waitingToSave.value)
+    assertFalse(w.controller.storeFailed.value)
+  }
+
   @Test
   fun the_warning_stays_while_the_ride_is_still_unsaved() = runTest {
     val w = World()

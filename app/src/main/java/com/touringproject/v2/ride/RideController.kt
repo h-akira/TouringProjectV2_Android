@@ -37,8 +37,18 @@ class RideController(private val deps: RideDeps) {
   // The time since boot when this process began to take the open segment's points (its start or resume, or load()).
   // A fix made before it is not on the segment's route, whatever the clock says (Android #17, #24).
   private var takingSince: Long? = null
+  private val waiting = MutableStateFlow(false)
+  /**
+   * True while a ride's change waits to be written again (Android #76). Unlike storeFailed, a point or a read that
+   * failed leaves nothing waiting; SC-18 holds back a change of user name only for this.
+   */
+  val waitingToSave: StateFlow<Boolean> = waiting.asStateFlow()
   // A ride whose save failed; it is written again first by every later call.
   private var unsaved: Ride? = null
+    set(value) {
+      field = value
+      waiting.value = value != null
+    }
   // False until the ride left over from before this process has been read; until then no new ride may start.
   private var reconciled = false
 
