@@ -43,12 +43,9 @@ class RideController(private val deps: RideDeps) {
    * failed leaves nothing waiting; SC-18 holds back a change of user name only for this.
    */
   val waitingToSave: StateFlow<Boolean> = waiting.asStateFlow()
-  // A ride whose save failed; it is written again first by every later call.
+  // A ride whose save failed; it is written again first by every later call. waitingToSave follows it once a write is
+  // over (told()), so a save that goes through is never seen as waiting while it writes (Android #89).
   private var unsaved: Ride? = null
-    set(value) {
-      field = value
-      waiting.value = value != null
-    }
   // False until the ride left over from before this process has been read; until then no new ride may start.
   private var reconciled = false
 
@@ -119,6 +116,10 @@ class RideController(private val deps: RideDeps) {
     storeFailing.value = true
   }
 
+  private fun told() {
+    waiting.value = unsaved != null
+  }
+
   /** False when the write failed: the ride stays unsaved and the next call writes it again first. */
   private suspend fun save(ride: Ride): Boolean {
     unsaved = ride
@@ -126,6 +127,7 @@ class RideController(private val deps: RideDeps) {
       deps.store.save(ride)
       unsaved = null
     }
+    told()
     if (saved) deps.changed()
     return saved
   }
@@ -272,6 +274,7 @@ class RideController(private val deps: RideDeps) {
   private fun dropUnsavedMemo(waiting: Ride?) {
     unsaved = waiting
     storeFailing.value = unsaved != null
+    told()
   }
 
   /**
@@ -286,6 +289,7 @@ class RideController(private val deps: RideDeps) {
     // Only once the ride is gone: a deletion that failed leaves its waiting change to be written (Android #53).
     if (unsaved?.id == rideId) unsaved = null
     storeFailing.value = unsaved != null
+    told()
     deps.changed()
     true
   }

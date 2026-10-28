@@ -399,6 +399,24 @@ class RideControllerTest {
     assertFalse(w.controller.storeFailed.value)
   }
 
+  // Android #89: a save under way is not a change waiting to be written again, so SC-18 is not held back while it writes.
+  @Test
+  fun a_save_under_way_is_not_told_as_waiting() = runTest {
+    val w = World()
+    w.controller.load()
+    w.controller.start("箱根")
+    w.gate = CompletableDeferred()
+    val pausing = launch { w.controller.pause() }
+    runCurrent()
+    // Read before the save is let go, so a failing check does not leave it waiting for ever.
+    val whileWriting = w.controller.waitingToSave.value
+    w.gate!!.complete(Unit)
+    pausing.join()
+    assertFalse(whileWriting)
+    assertFalse(w.controller.waitingToSave.value)
+    assertEquals(RideStatus.PAUSED, w.stored().status)
+  }
+
   // A rename of an ended ride that could not be written waits with no ride running to write it again; SC-18 tries it
   // again when it opens, so a change of user name is not held back for good (plan 5's final review).
   @Test
