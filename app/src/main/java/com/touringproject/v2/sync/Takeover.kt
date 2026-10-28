@@ -38,7 +38,7 @@ sealed interface TakeResult {
 
 enum class TakeOp { SWITCH, REREAD }
 
-/** running is the read under way; last and result the one before, for the screen that started it to tell. */
+/** running is the read under way; last and result the one that ended, for the screen that started it to tell. */
 data class TakeState(val running: TakeOp? = null, val last: TakeOp? = null, val result: TakeResult? = null)
 
 /** The first page for a user name, read before DL-03 asks (slice 4 spec §6.4); exists picks which of its texts. */
@@ -96,7 +96,8 @@ class Takeover(
 
   private fun start(op: TakeOp, block: suspend () -> TakeResult) {
     if (stateNow.value.running != null) return
-    stateNow.value = stateNow.value.copy(running = op)
+    // The last read's result goes, so the screen does not tell it while this one reads (Android #74).
+    stateNow.value = TakeState(running = op)
     scope.launch {
       val result = try {
         sync.withoutPasses { block() }

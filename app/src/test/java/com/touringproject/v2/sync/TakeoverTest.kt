@@ -175,4 +175,18 @@ class TakeoverTest {
     c.takeover.seen()
     assertEquals(TakeState(), c.takeover.state.value)
   }
+
+  // Android #74: a second read on the same screen does not show the first one's result while it reads.
+  @Test
+  fun a_new_read_starts_without_the_last_result() = runTest {
+    val c = Cloud(this)
+    c.pages["rider01"] = mapOf(null to CloudPage(emptyList(), null))
+    c.takeover.reread("rider01")
+    runCurrent()
+    c.gate = CompletableDeferred()
+    c.takeover.reread("rider01")
+    assertEquals(TakeState(running = TakeOp.REREAD), c.takeover.state.value)
+    c.gate!!.complete(Unit)
+    runCurrent()
+  }
 }
