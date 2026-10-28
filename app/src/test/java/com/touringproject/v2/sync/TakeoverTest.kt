@@ -49,12 +49,12 @@ private class Cloud(val scope: TestScope) {
   var failOn = setOf<String?>()
   var gate: CompletableDeferred<Unit>? = null
   val taken = mutableListOf<Pair<List<CloudRecord>, Boolean>>()
-  var takes: Int? = 2
+  var takes: TakeResult = TakeResult.Done(2)
   val switched = mutableListOf<String>()
   var passes = 0
 
   val store = object : TakeoverStore {
-    override suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): Int? {
+    override suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): TakeResult {
       taken += cloud to replace
       return takes
     }
@@ -123,11 +123,11 @@ class TakeoverTest {
   fun a_blocked_switch_keeps_the_name() = runTest {
     val c = Cloud(this)
     c.pages["taro01"] = mapOf(null to CloudPage(emptyList(), null))
-    c.takes = null
+    c.takes = TakeResult.Blocked(BlockReason.UNSENT)
     c.takeover.switchTo(c.takeover.peek("taro01")!!) { c.switched += it }
     runCurrent()
     assertEquals(emptyList<String>(), c.switched)
-    assertEquals(TakeResult.Blocked, c.takeover.state.value.result)
+    assertEquals(TakeResult.Blocked(BlockReason.UNSENT), c.takeover.state.value.result)
   }
 
   @Test

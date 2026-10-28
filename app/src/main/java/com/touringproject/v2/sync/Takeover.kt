@@ -17,11 +17,20 @@ import kotlinx.coroutines.launch
 interface TakeoverStore {
   /**
    * Merges the cloud's records into the device's (slice 4 spec §6.1) in one transaction; with replace, all the device
-   * keeps goes first (§6.4: another user name). Returns how many records came in or went, or null when nothing was done
-   * because a ride is recording or paused or, with replace, something is left to send (US-E-06.008). A failure throws
-   * and changes nothing.
+   * keeps goes first (§6.4: another user name). Returns Done with how many records came in or went, or Blocked when
+   * nothing was done because a ride is recording or paused or, with replace, something is left to send (US-E-06.008).
+   * A failure throws and changes nothing.
    */
-  suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): Int?
+  suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): TakeResult
+}
+
+/** Why a read of the cloud changed nothing (Android #73). */
+enum class BlockReason {
+  /** A ride is recording or paused. */
+  RIDE,
+
+  /** Something is left to send (a change of user name only). */
+  UNSENT,
 }
 
 /** What a read of the cloud came to. */
@@ -29,8 +38,8 @@ sealed interface TakeResult {
   /** The records are in: count came in or went. A user name changed is saved. */
   data class Done(val count: Int) : TakeResult
 
-  /** Nothing changed: a ride is recording or paused, or something is left to send. */
-  data object Blocked : TakeResult
+  /** Nothing changed, for reason. */
+  data class Blocked(val reason: BlockReason) : TakeResult
 
   /** Nothing changed: the cloud could not be read whole, or what it said could not be written. */
   data object Failed : TakeResult
@@ -84,14 +93,14 @@ class Takeover(
    */
   fun switchTo(peek: Peek, switched: suspend (userName: String) -> Unit) = start(TakeOp.SWITCH) {
     val records = readAll(peek.userName, peek.first)
-    val count = store.take(records, replace = true, now()) ?: return@start TakeResult.Blocked
-    switched(peek.userName)
-    TakeResult.Done(count)
+    val result = store.take(records, replace = true, now())
+    if (result is TakeResult.Done) switched(peek.userName)
+    result
   }
 
   /** SC-14's クラウドから読み直す: the current name's records, merged with the device's. */
   fun reread(userName: String) = start(TakeOp.REREAD) {
-    store.take(readAll(userName, null), replace = false, now())?.let { TakeResult.Done(it) } ?: TakeResult.Blocked
+    store.take(readAll(userName, null), replace = false, now())
   }
 
   private fun start(op: TakeOp, block: suspend () -> TakeResult) {

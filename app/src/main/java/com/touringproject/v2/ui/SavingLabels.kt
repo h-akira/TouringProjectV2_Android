@@ -1,6 +1,7 @@
 package com.touringproject.v2.ui
 
 import com.touringproject.v2.records.SaveSummary
+import com.touringproject.v2.sync.BlockReason
 import com.touringproject.v2.sync.TakeResult
 import java.time.Instant
 import java.time.ZoneId
@@ -33,13 +34,17 @@ fun saveRowValue(summary: SaveSummary): String = if (summary.unsent > 0) "未送
 /** SC-14 after クラウドから読み直す. */
 fun rereadMessage(result: TakeResult): String = when (result) {
   is TakeResult.Done -> if (result.count == 0) "新しい記録はありませんでした" else "${result.count}件の記録を読み込みました"
-  TakeResult.Blocked -> "走行を終えてから読み直せます"
+  // Reading again is held back by a ride only.
+  is TakeResult.Blocked -> "走行を終えてから読み直せます"
   TakeResult.Failed -> "読み込めませんでした"
 }
 
 /** SC-18 after DL-03. */
 fun switchMessage(result: TakeResult): String = when (result) {
   is TakeResult.Done -> "ユーザー名を変えました"
-  TakeResult.Blocked -> "未送信の記録があるため、変えられませんでした"
+  is TakeResult.Blocked -> when (result.reason) {
+    BlockReason.RIDE -> "走行を終えてから変えられます"
+    BlockReason.UNSENT -> "未送信の記録があるため、変えられませんでした"
+  }
   TakeResult.Failed -> "読み込めませんでした。ユーザー名は変えていません"
 }

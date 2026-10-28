@@ -1,6 +1,7 @@
 package com.touringproject.v2.ui
 
 import com.touringproject.v2.records.SaveSummary
+import com.touringproject.v2.sync.BlockReason
 import com.touringproject.v2.sync.TakeResult
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -39,10 +40,12 @@ class SavingLabelsTest {
   fun what_a_read_came_to_is_told_on_its_screen() {
     assertEquals("12件の記録を読み込みました", rereadMessage(TakeResult.Done(12)))
     assertEquals("新しい記録はありませんでした", rereadMessage(TakeResult.Done(0)))
-    assertEquals("走行を終えてから読み直せます", rereadMessage(TakeResult.Blocked))
+    assertEquals("走行を終えてから読み直せます", rereadMessage(TakeResult.Blocked(BlockReason.RIDE)))
     assertEquals("読み込めませんでした", rereadMessage(TakeResult.Failed))
     assertEquals("ユーザー名を変えました", switchMessage(TakeResult.Done(0)))
-    assertEquals("未送信の記録があるため、変えられませんでした", switchMessage(TakeResult.Blocked))
+    // Android #73: a ride that began after DL-03 is told as the ride, not as something left to send.
+    assertEquals("走行を終えてから変えられます", switchMessage(TakeResult.Blocked(BlockReason.RIDE)))
+    assertEquals("未送信の記録があるため、変えられませんでした", switchMessage(TakeResult.Blocked(BlockReason.UNSENT)))
     assertEquals("読み込めませんでした。ユーザー名は変えていません", switchMessage(TakeResult.Failed))
   }
 }

@@ -22,7 +22,9 @@ import com.touringproject.v2.ride.RoutePoint
 import com.touringproject.v2.ride.end
 import com.touringproject.v2.ride.newRide
 import com.touringproject.v2.ride.withMemo
+import com.touringproject.v2.sync.BlockReason
 import com.touringproject.v2.sync.ChunkRange
+import com.touringproject.v2.sync.TakeResult
 import com.touringproject.v2.sync.epochMs
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.first
@@ -87,7 +89,7 @@ class RoomTakeoverTest {
   // Slice 4 spec §6.1: what comes in is marked as sent, so none of it is sent back.
   @Test
   fun the_clouds_records_come_in_and_are_not_sent_back() = runBlocking {
-    assertEquals(4, takeover.take(cloud, replace = false, now = NOW))
+    assertEquals(TakeResult.Done(4), takeover.take(cloud, replace = false, now = NOW))
     assertEquals(0, records.summary.first().unsent)
     assertEquals(SaveState.SAVED, records.list.first().single().saveState)
     assertEquals(emptyList<String>(), sync.unsent().map { it.ride.id })
@@ -112,20 +114,21 @@ class RoomTakeoverTest {
   fun replacing_removes_the_devices_records_first() = runBlocking {
     sentRide("r0")
     log.save(deviceAsk("a0", "r0"))
-    assertEquals(4, takeover.take(cloud, replace = true, now = NOW))
+    assertEquals(TakeResult.Done(4), takeover.take(cloud, replace = true, now = NOW))
     assertEquals(listOf("r1"), records.list.first().map { it.ride.id })
     assertEquals(emptyList<AskRecord>(), records.asks("r0").first())
     assertEquals(2, records.summary.first().asks)
   }
 
-  // US-E-06.008: with something left to send, or a ride recording, nothing changes.
+  // US-E-06.008: with something left to send, or a ride recording, nothing changes; the ride is told first (Android #73).
   @Test
   fun nothing_changes_while_something_is_left_to_send_or_a_ride_records() = runBlocking {
     rides.save(newRide("r0", "御殿場", 1_000, 7, 24 * HOUR_MS).end(4_000, EndReason.MANUAL, 4_000))
-    assertNull(takeover.take(cloud, replace = true, now = NOW))
+    assertEquals(TakeResult.Blocked(BlockReason.UNSENT), takeover.take(cloud, replace = true, now = NOW))
     assertEquals(listOf("r0"), records.list.first().map { it.ride.id })
     rides.save(newRide("r2", "伊豆", 5_000, 7, 24 * HOUR_MS))
-    assertNull(takeover.take(cloud, replace = false, now = NOW))
+    assertEquals(TakeResult.Blocked(BlockReason.RIDE), takeover.take(cloud, replace = false, now = NOW))
+    assertEquals(TakeResult.Blocked(BlockReason.RIDE), takeover.take(cloud, replace = true, now = NOW))
     assertEquals(setOf("r0", "r2"), records.list.first().map { it.ride.id }.toSet())
   }
 
@@ -147,7 +150,7 @@ class RoomTakeoverTest {
     rides.save(kept.withMemo("端末のメモ", NOW))
     db.asks().writeMemo("a1", "端末の会話メモ", NOW)
     val again = listOf(cloudRide(), cloudRoute(), cloudAsk(memoUpdated = 1_500_000), CloudDeleted("note", "n1", "r1", iso(5_000_000)))
-    assertEquals(1, takeover.take(again, replace = false, now = NOW + 1_000))
+    assertEquals(TakeResult.Done(1), takeover.take(again, replace = false, now = NOW + 1_000))
     assertEquals("端末のメモ", records.ride("r1").first()!!.memo)
     assertEquals("端末の会話メモ", records.asks("r1").first().first { it.askId == "a1" }.memo)
     assertEquals(emptyList<Any>(), records.notes("r1").first())
