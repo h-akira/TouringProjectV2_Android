@@ -12,6 +12,7 @@ import com.touringproject.v2.ask.AskDeps
 import com.touringproject.v2.ask.ConversationState
 import com.touringproject.v2.ask.FlowState
 import com.touringproject.v2.ask.IDLE
+import com.touringproject.v2.ask.TextSheet
 import com.touringproject.v2.audio.Source
 import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.ask.rideNow
@@ -77,7 +78,6 @@ import com.touringproject.v2.store.RoomSyncStore
 import com.touringproject.v2.store.RoomTakeover
 import com.touringproject.v2.store.toPoint
 import com.touringproject.v2.sync.RideSync
-import com.touringproject.v2.ui.TextSheet
 import com.touringproject.v2.sync.Takeover
 import com.touringproject.v2.sync.credentialChanges
 import com.touringproject.v2.sync.reconnections

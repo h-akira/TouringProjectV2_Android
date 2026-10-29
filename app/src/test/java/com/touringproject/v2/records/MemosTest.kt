@@ -1,5 +1,6 @@
 package com.touringproject.v2.records
 
+import com.touringproject.v2.ride.memoFits
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

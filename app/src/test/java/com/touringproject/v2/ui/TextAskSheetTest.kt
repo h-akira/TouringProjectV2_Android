@@ -12,7 +12,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.touringproject.v2.ask.TEXT_ASK_OFFLINE_MESSAGE
 import com.touringproject.v2.ask.TextAskOutcome
+import com.touringproject.v2.ask.TextSheet
+import com.touringproject.v2.ask.after
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test

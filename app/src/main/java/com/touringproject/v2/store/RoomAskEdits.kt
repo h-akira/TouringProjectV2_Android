@@ -1,7 +1,7 @@
 package com.touringproject.v2.store
 
 import com.touringproject.v2.records.AskEdits
-import com.touringproject.v2.records.memoFits
+import com.touringproject.v2.ride.memoFits
 import kotlinx.coroutines.CancellationException
 
 /**

@@ -3,9 +3,9 @@ package com.touringproject.v2.store
 import com.touringproject.v2.location.Fix
 import com.touringproject.v2.records.NoteDraft
 import com.touringproject.v2.records.NoteEdits
-import com.touringproject.v2.records.memoFits
 import com.touringproject.v2.records.noteDraft
 import com.touringproject.v2.records.toFix
+import com.touringproject.v2.ride.memoFits
 import kotlinx.coroutines.CancellationException
 
 /**

@@ -21,25 +21,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.touringproject.v2.ask.TextAskOutcome
+import com.touringproject.v2.ask.TextSheet
 import com.touringproject.v2.ask.cutTextAsk
 import com.touringproject.v2.ask.textAskLeft
 import com.touringproject.v2.ask.textQuestion
-
-const val TEXT_ASK_OFFLINE_MESSAGE = "通信できません"
-
-/**
- * Home's text sheet (slice 5 spec §5.2): whether it is open, what is typed, what it says, and whether a send is under
- * way. AppGraph holds it for the process, so the text stays while SC-03 covers the screen and the sheet comes back with
- * it, and an outcome after the activity was recreated still reaches it.
- */
-data class TextSheet(val open: Boolean = false, val text: String = "", val message: String? = null, val sending: Boolean = false)
-
-/** What the sheet becomes once the ask loop has told what became of the text (TextAskOutcome). */
-fun TextSheet.after(outcome: TextAskOutcome): TextSheet = when (outcome) {
-  TextAskOutcome.SENT -> TextSheet()
-  TextAskOutcome.OFFLINE -> copy(sending = false, message = TEXT_ASK_OFFLINE_MESSAGE)
-  TextAskOutcome.NOT_TAKEN -> copy(sending = false, message = null)
-}
 
 /**
  * SC-02's 「⌨ 文字で質問」 sheet (slice 5 spec §5.2): up to 500 characters with what is left, 「質問する」 only for a
