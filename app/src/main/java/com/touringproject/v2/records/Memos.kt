@@ -1,10 +1,9 @@
 package com.touringproject.v2.records
 
+import com.touringproject.v2.ride.MEMO_MAX
+
 // Memos on rides and asks (US-D-04, SC-08). Characters are counted as code points, as the Backend counts them, so an
 // emoji is never cut in half (Backend #16).
-
-/** US-D-04.003. */
-const val MEMO_MAX = 2000
 
 private fun String.characters() = codePointCount(0, length)
 
@@ -50,9 +49,6 @@ private fun characterEnd(s: String, end: Int): Int {
   }
   return e
 }
-
-/** True when memo can be kept: none, or up to MEMO_MAX characters. */
-fun memoFits(memo: String?): Boolean = memo == null || memo.characters() <= MEMO_MAX
 
 /**
  * When a memo changes: now, but always after the change before it, so the Backend, which keeps only a newer version,

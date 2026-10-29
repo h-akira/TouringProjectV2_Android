@@ -23,7 +23,15 @@ interface TakeoverStore {
    * nothing was done because a ride is recording or paused or, with replace, something is left to send (US-E-06.008).
    * A failure throws and changes nothing.
    */
-  suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): TakeResult
+  suspend fun take(cloud: CloudRecords, replace: Boolean): TakeResult
+}
+
+/**
+ * What the cloud holds, as the store takes it in: it merges it into the device's records inside its transaction, so the
+ * store needs none of the cloud's types (slice 4 spec §6.1).
+ */
+class CloudRecords(val records: List<CloudRecord>, val now: Long) {
+  fun mergeInto(device: DeviceRecords): Merge = merge(device, records, now)
 }
 
 /** Why a read of the cloud changed nothing (Android #73). */
@@ -109,7 +117,7 @@ class Takeover(
       withContext(NonCancellable) {
         save(peek.userName)
         val result = try {
-          store.take(records, replace = true, now())
+          store.take(CloudRecords(records, now()), replace = true)
         } catch (e: Exception) {
           if (!putBack(from, save)) return@withContext TakeResult.Mismatched
           throw e
@@ -131,7 +139,7 @@ class Takeover(
 
   /** SC-14's クラウドから読み直す: the current name's records, merged with the device's. */
   fun reread(userName: String) = start(TakeOp.REREAD) {
-    store.take(readAll(userName, null), replace = false, now())
+    store.take(CloudRecords(readAll(userName, null), now()), replace = false)
   }
 
   private fun start(op: TakeOp, block: suspend () -> TakeResult) {

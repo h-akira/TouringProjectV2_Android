@@ -30,7 +30,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.touringproject.v2.ask.RecordingMeta
+import com.touringproject.v2.recordings.RecordingMeta
 import com.touringproject.v2.recordings.TrialPhase
 import com.touringproject.v2.recordings.TrialState
 

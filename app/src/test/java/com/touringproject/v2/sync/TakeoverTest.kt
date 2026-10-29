@@ -66,10 +66,10 @@ private class Cloud(val scope: TestScope, val runIn: CoroutineScope = scope) {
   var passes = 0
 
   val store = object : TakeoverStore {
-    override suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): TakeResult {
+    override suspend fun take(cloud: CloudRecords, replace: Boolean): TakeResult {
       takeGate?.await()
       if (failTake) throw IOException("disk full")
-      taken += cloud to replace
+      taken += cloud.records to replace
       return takes
     }
   }

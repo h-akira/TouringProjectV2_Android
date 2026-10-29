@@ -1,6 +1,5 @@
 package com.touringproject.v2.location
 
-import com.touringproject.v2.ask.Positions
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume

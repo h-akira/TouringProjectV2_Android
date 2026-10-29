@@ -36,10 +36,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.touringproject.v2.records.MEMO_MAX
 import com.touringproject.v2.records.appendHeard
 import com.touringproject.v2.records.cutMemo
 import com.touringproject.v2.records.memoText
+import com.touringproject.v2.ride.MEMO_MAX
 import com.touringproject.v2.voice.Heard
 import kotlinx.coroutines.launch
 

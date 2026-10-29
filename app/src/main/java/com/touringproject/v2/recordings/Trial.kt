@@ -1,9 +1,10 @@
 package com.touringproject.v2.recordings
 
-import com.touringproject.v2.ask.Recorder
-import com.touringproject.v2.ask.RouteControl
-import com.touringproject.v2.ask.Source
-import com.touringproject.v2.ask.TICK_MS
+import com.touringproject.v2.audio.PcmPlayback
+import com.touringproject.v2.audio.Recorder
+import com.touringproject.v2.audio.RouteControl
+import com.touringproject.v2.audio.Source
+import com.touringproject.v2.audio.TICK_MS
 import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.settings.DEFAULT_RECORD_LIMIT_MS
 import com.touringproject.v2.settings.DEFAULT_START_CUE_MS
@@ -25,12 +26,6 @@ val TRIAL_IDLE = TrialState()
 const val TRIAL_MIC_MESSAGE = "マイクの使用が許可されていません。"
 const val TRIAL_RECORD_MESSAGE = "録音できませんでした。"
 const val TRIAL_PLAY_MESSAGE = "再生できませんでした。"
-
-/** Plays recorded PCM; returns when it has been heard or stopped, throws when it cannot be played. */
-interface PcmPlayback {
-  suspend fun play(pcm: ByteArray)
-  fun stop()
-}
 
 /** recordLimitMs and startCueMs are SC-11's, as for a question (US-E-03.001); cueStart sounds the start cue that long. */
 class TrialDeps(

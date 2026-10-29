@@ -38,8 +38,9 @@ import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.touringproject.v2.AppGraph
 import com.touringproject.v2.BuildConfig
-import com.touringproject.v2.api.ApiClient
 import com.touringproject.v2.ask.Phase
+import com.touringproject.v2.ask.TextSheet
+import com.touringproject.v2.ask.after
 import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.ask.rideNow
 import com.touringproject.v2.location.HeadingView
@@ -335,8 +336,8 @@ fun AppUi(graph: AppGraph) {
               entry<ConnectionKey> {
                 ConnectionScreen(
                   apiKey = apiKey,
-                  urlMissing = graph.apiBaseUrl.isEmpty(),
-                  check = { key -> ApiClient(graph.apiBaseUrl, key, current.userName, graph.http).checkKey() },
+                  urlMissing = graph.backend.urlMissing,
+                  check = { key -> graph.backend.clientFor(key, current.userName).checkKey() },
                   save = { graph.apiKeys.save(it) },
                   modifier = Modifier.safeDrawingPadding(),
                 )

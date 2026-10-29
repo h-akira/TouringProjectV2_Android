@@ -13,6 +13,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.touringproject.v2.MainActivity
 import com.touringproject.v2.TouringApp
 import com.touringproject.v2.ask.TextAskOutcome
+import com.touringproject.v2.ask.after
 import com.touringproject.v2.location.Fix
 import com.touringproject.v2.location.HeadingCheck
 import com.touringproject.v2.location.HeadingParams

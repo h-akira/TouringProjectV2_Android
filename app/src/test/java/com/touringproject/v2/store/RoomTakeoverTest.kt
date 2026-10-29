@@ -8,6 +8,7 @@ import com.touringproject.v2.api.CloudAsk
 import com.touringproject.v2.api.CloudDeleted
 import com.touringproject.v2.api.CloudNote
 import com.touringproject.v2.api.CloudRide
+import com.touringproject.v2.api.CloudRecord
 import com.touringproject.v2.api.CloudRoute
 import com.touringproject.v2.api.Point
 import com.touringproject.v2.api.PointBody
@@ -24,6 +25,7 @@ import com.touringproject.v2.ride.newRide
 import com.touringproject.v2.ride.withMemo
 import com.touringproject.v2.sync.BlockReason
 import com.touringproject.v2.sync.ChunkRange
+import com.touringproject.v2.sync.CloudRecords
 import com.touringproject.v2.sync.TakeResult
 import com.touringproject.v2.sync.epochMs
 import kotlinx.coroutines.MainScope
@@ -35,6 +37,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+
+// The calls below give the cloud's records and the time apart, as the store was once called.
+private suspend fun RoomTakeover.take(cloud: List<CloudRecord>, replace: Boolean, now: Long) = take(CloudRecords(cloud, now), replace)
 
 private const val T0 = "2026-10-22T01:00:00Z"
 private val T0_MS = epochMs(T0)

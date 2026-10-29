@@ -3,7 +3,6 @@ package com.touringproject.v2.ride
 import com.touringproject.v2.location.Fix
 import com.touringproject.v2.location.acceptRoutePoint
 import com.touringproject.v2.location.isSince
-import com.touringproject.v2.records.memoFits
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable

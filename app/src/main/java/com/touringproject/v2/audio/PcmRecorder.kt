@@ -4,8 +4,6 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import com.touringproject.v2.ask.Recorded
-import com.touringproject.v2.ask.Recorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream

@@ -6,7 +6,13 @@ import com.touringproject.v2.api.AskApi
 import com.touringproject.v2.api.AskBody
 import com.touringproject.v2.api.AskResult
 import com.touringproject.v2.api.Point
+import com.touringproject.v2.api.PollOutcome
+import com.touringproject.v2.api.pollUntilDone
+import com.touringproject.v2.audio.Source
+import com.touringproject.v2.audio.TICK_MS
+import com.touringproject.v2.audio.pcmDurationMs
 import com.touringproject.v2.location.Fix
+import com.touringproject.v2.recordings.RecordingMeta
 import com.touringproject.v2.settings.ReturnTiming
 import com.touringproject.v2.settings.Settings
 import com.touringproject.v2.settings.recordLimitMs
@@ -17,12 +23,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.util.Base64
 
-const val TICK_MS = 250L
 const val WAITING_CUE_MS = 5_000L
 const val FAILED_SCREEN_MS = 5_000L
-
-/** 16 kHz mono 16-bit PCM: 32 bytes per millisecond. */
-fun pcmDurationMs(bytes: Int): Long = bytes / 32L
 
 private fun reasonFor(error: Throwable): FailureReason = when ((error as? ApiError)?.kind) {
   ApiErrorKind.INVALID_KEY -> FailureReason.INVALID_KEY

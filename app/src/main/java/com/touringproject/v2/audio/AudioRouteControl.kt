@@ -1,8 +1,6 @@
 package com.touringproject.v2.audio
 
 import android.util.Log
-import com.touringproject.v2.ask.RouteControl
-import com.touringproject.v2.ask.Source
 
 private const val VR_TIMEOUT_MS = 4_000L
 private const val SCO_TIMEOUT_MS = 3_000L
