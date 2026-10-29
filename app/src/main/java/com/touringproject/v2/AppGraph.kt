@@ -6,7 +6,7 @@ import android.content.pm.PackageManager
 import android.os.SystemClock
 import android.provider.Settings as SystemSettings
 import android.util.Log
-import com.touringproject.v2.api.ApiClient
+import com.touringproject.v2.api.BackendAccess
 import com.touringproject.v2.ask.AskController
 import com.touringproject.v2.ask.AskDeps
 import com.touringproject.v2.ask.ConversationState
@@ -103,10 +103,12 @@ import java.util.UUID
 class AppGraph(private val context: Context, val scope: CoroutineScope = MainScope()) {
   val apiBaseUrl: String = BuildConfig.API_BASE_URL
   /** The one HTTP client of the app: every ApiClient shares its connections and threads (Android #12). */
-  val http = OkHttpClient()
+  private val http = OkHttpClient()
   private val store = DataStoreKeyValueStore(context)
   val settings = SettingsRepository(store)
   val apiKeys = ApiKeyStore(store, KeystoreCipher())
+  /** The one place a Backend client is made, from the URL, the connection key and the user name (slice 6 plan 2a). */
+  val backend = BackendAccess(apiBaseUrl, http, apiKeys::current) { settings.settings.value?.userName }
   val launcher = AppLauncher(context)
   val audioRoute = AudioRoute(context)
   val conversation = ConversationState()
@@ -143,11 +145,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   /** Sends rides, routes, memos, point memos, unreached asks and deletions; a pass runs on each trigger (slice 2 spec §5.3). */
   val sync = RideSync(
     RoomSyncStore(database.rides(), database.asks(), database.notes()),
-    api = {
-      val key = apiKeys.current()
-      val user = settings.settings.value?.userName
-      if (apiBaseUrl.isEmpty() || key == null || user == null) null else ApiClient(apiBaseUrl, key, user, http)
-    },
+    api = { backend.client() },
     online = { connectivity.online.value },
     saved = { lastSaved.mark(System.currentTimeMillis()) },
     log = { event, data -> Log.i("trv2.sync", "$event $data") },
@@ -158,10 +156,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
 
   /** Reads the user's records in from the cloud: SC-18's change of user name and SC-14's read again (slice 4 spec §6). */
   val takeover = Takeover(
-    api = { user ->
-      val key = apiKeys.current()
-      if (apiBaseUrl.isEmpty() || key == null) null else ApiClient(apiBaseUrl, key, user, http)
-    },
+    api = { user -> backend.client(user) },
     // Read at the take, long after rides below is built.
     store = RoomTakeover(database) { rides.waitingToSave.value },
     sync = sync,
@@ -244,11 +239,11 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       now = System::currentTimeMillis,
       sleep = { delay(it) },
       settings = settings::current,
-      apiKey = { if (apiBaseUrl.isEmpty()) null else apiKeys.current() },
+      apiKey = backend::apiKey,
       micAllowed = micAllowed,
       // Read before the intercom route takes the music stream over; a withheld reading keeps the last good one (Android #9).
       mediaVolume = mediaVolume::refresh,
-      api = { key, user -> ApiClient(apiBaseUrl, key, user, http) },
+      api = backend::clientFor,
       conversation = conversation,
       route = AudioRouteControl(audioRoute),
       recorder = PcmRecorder(),
@@ -308,11 +303,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       sleep = { delay(it) },
       micAllowed = micAllowed,
       online = { connectivity.online.value },
-      api = {
-        val key = apiKeys.current()
-        val user = settings.settings.value?.userName
-        if (apiBaseUrl.isEmpty() || key == null || user == null) null else ApiClient(apiBaseUrl, key, user, http)
-      },
+      api = { backend.client() },
       route = AudioRouteControl(audioRoute),
       recorder = PcmRecorder(),
       // Not a question: SC-11 does not change SC-19's voice input (slice 5 spec §6).
