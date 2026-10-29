@@ -3,6 +3,8 @@ package com.touringproject.v2.ui
 import android.app.Application
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertTextEquals
+import androidx.lifecycle.Lifecycle
+import com.touringproject.v2.handsfree.PressRouter
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -117,6 +119,51 @@ class NoteRoutesTest {
     shown = false
     rule.waitForIdle()
     assertFalse(input.attached)
+  }
+
+  // Review R3-01: the voice input is attached only while SC-19 is in front. An Activity that is stopped (home, app
+  // switch, screen off) gives the intercom button back to the ask; coming back to the front attaches it again.
+  @Test
+  fun sc19_gives_the_intercom_button_back_while_the_app_is_in_the_background() {
+    keepRide()
+    var shown by mutableStateOf(true)
+    rule.setContent {
+      if (shown) NewNoteRoute(records, notes, draft, onClose = {}, voice = NoteVoice(input, MutableStateFlow(VOICE_IDLE), MutableStateFlow(true)))
+    }
+    waitFor("voice")
+    assertTrue(input.attached)
+    rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
+    rule.waitUntil(5_000) { !input.attached }
+    rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+    rule.waitUntil(5_000) { input.attached }
+    // Leave the screen before the database closes: the records are read again once it is back in front.
+    shown = false
+    rule.waitForIdle()
+    assertFalse(input.attached)
+  }
+
+  // Review R3-01: a press while SC-19 is behind the navigation app starts an ask, not a voice input.
+  @Test
+  fun an_intercom_press_while_sc19_is_in_the_background_starts_an_ask() {
+    keepRide()
+    var asks = 0
+    var voicePresses = 0
+    val router = PressRouter(
+      trialActive = { false }, trialBusy = { false }, stopTrial = {}, stopCheckPlayback = {},
+      askPress = { asks++ }, askStopRecording = {}, askTap = {},
+      voiceAttached = { input.attached }, voicePress = { voicePresses++ },
+    )
+    rule.setContent {
+      NewNoteRoute(records, notes, draft, onClose = {}, voice = NoteVoice(input, MutableStateFlow(VOICE_IDLE), MutableStateFlow(true)))
+    }
+    waitFor("voice")
+    router.press()
+    assertEquals(1, voicePresses)
+    rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
+    rule.waitUntil(5_000) { !input.attached }
+    router.press()
+    assertEquals(1, asks)
+    assertEquals(1, voicePresses)
   }
 
   // Android #57: a memo or ride that is not found says so, and the screen can still be closed.

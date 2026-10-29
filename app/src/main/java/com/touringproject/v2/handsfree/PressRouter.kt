@@ -2,7 +2,7 @@ package com.touringproject.v2.handsfree
 
 /**
  * Where an intercom press goes. A running trial recording takes it (US-E-03.002: no question starts). While SC-19 is
- * shown, its voice input takes it, unless an ask is already under way (slice 3 spec §7.3). Otherwise a kept recording
+ * in front, its voice input takes it, unless an ask is already under way (slice 3 spec §7.3). Otherwise a kept recording
  * playing on SC-12 is stopped first, since the microphone would pick it up, and the ask loop gets it. A voice input
  * left on SC-19 that still unwinds holds the route like a left trial: presses start no ask until it has.
  * While a trial that was left is still unwinding (up to the 3 s SCO setup), presses start nothing: the old trial may

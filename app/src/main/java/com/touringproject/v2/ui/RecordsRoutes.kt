@@ -1,13 +1,13 @@
 package com.touringproject.v2.ui
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.touringproject.v2.ask.AskRecord
 import com.touringproject.v2.map.LatLon
@@ -157,15 +157,17 @@ fun AskMemoRoute(records: RoomRecords, edits: AskEdits, rideId: String, askId: S
 class NoteVoice(val input: VoiceInput, val state: StateFlow<VoiceState>, val online: StateFlow<Boolean>)
 
 /**
- * The voice input while SC-19 is shown: attached, the intercom button goes to it (slice 3 spec §7.3); leaving SC-19
- * detaches it and drops whatever it was doing.
+ * The voice input while SC-19 is in front: attached, the intercom button goes to it (slice 3 spec §7.3). Going to the
+ * back (home, app switch, screen off) or leaving SC-19 detaches it and drops whatever it was doing, so a ride's
+ * intercom press while the navigation app is in front starts an ask (review R3-01). The pause, not the stop, is the
+ * edge: an intercom press arrives in onNewIntent, which an onResume always follows.
  */
 @Composable
 private fun voiceUi(voice: NoteVoice?): NoteVoiceUi? {
   voice ?: return null
-  DisposableEffect(voice) {
+  LifecycleResumeEffect(voice) {
     val token = voice.input.attach()
-    onDispose { voice.input.detach(token) }
+    onPauseOrDispose { voice.input.detach(token) }
   }
   val state by voice.state.collectAsStateWithLifecycle()
   val online by voice.online.collectAsStateWithLifecycle()
