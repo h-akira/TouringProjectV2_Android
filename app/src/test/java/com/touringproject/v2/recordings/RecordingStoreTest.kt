@@ -1,6 +1,5 @@
 package com.touringproject.v2.recordings
 
-import com.touringproject.v2.ask.RecordingMeta
 import com.touringproject.v2.audio.InputDevice
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest

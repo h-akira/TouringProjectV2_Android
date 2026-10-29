@@ -1,13 +1,12 @@
 package com.touringproject.v2.ask
 
 import com.touringproject.v2.audio.MediaVolume
+import com.touringproject.v2.audio.Source
 import com.touringproject.v2.settings.DEFAULT_RECORD_LIMIT_MS
 import com.touringproject.v2.settings.ReturnTiming
 import com.touringproject.v2.settings.Settings
 
 // The ask loop as a pure state machine (slice 1 spec §5.2). Screens, cues and returning to the nav app read this state.
-enum class Source { HANDSFREE, SCREEN }
-
 enum class Phase { IDLE, RECORDING, SENDING, WAITING, SPEAKING, FAILED }
 
 /** NOT_RECORDING and PAUSED: the ask was not taken, as only a recording ride takes asks (slice 2 spec §4.7). */

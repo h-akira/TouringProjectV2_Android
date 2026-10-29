@@ -21,7 +21,7 @@ import com.touringproject.v2.api.CloudDeleted
 import com.touringproject.v2.api.CloudPage
 import com.touringproject.v2.ask.FlowState
 import com.touringproject.v2.ask.Phase
-import com.touringproject.v2.ask.RecordingMeta
+import com.touringproject.v2.recordings.RecordingMeta
 import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.audio.MediaVolume
 import com.touringproject.v2.audio.MediaVolumeWatch

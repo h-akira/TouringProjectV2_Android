@@ -3,7 +3,6 @@ package com.touringproject.v2.audio
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import com.touringproject.v2.ask.Speech
 import kotlinx.coroutines.CompletableDeferred
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap

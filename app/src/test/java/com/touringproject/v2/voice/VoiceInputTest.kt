@@ -6,10 +6,10 @@ import com.touringproject.v2.api.TranscriptionAccepted
 import com.touringproject.v2.api.TranscriptionApi
 import com.touringproject.v2.api.TranscriptionBody
 import com.touringproject.v2.api.TranscriptionResult
-import com.touringproject.v2.ask.Recorded
-import com.touringproject.v2.ask.Recorder
-import com.touringproject.v2.ask.RouteControl
-import com.touringproject.v2.ask.Source
+import com.touringproject.v2.audio.Recorded
+import com.touringproject.v2.audio.Recorder
+import com.touringproject.v2.audio.RouteControl
+import com.touringproject.v2.audio.Source
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.TestScope

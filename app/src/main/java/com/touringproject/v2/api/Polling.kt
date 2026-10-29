@@ -1,8 +1,5 @@
-package com.touringproject.v2.ask
+package com.touringproject.v2.api
 
-import com.touringproject.v2.api.ApiError
-import com.touringproject.v2.api.ApiErrorKind
-import com.touringproject.v2.api.AskResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 

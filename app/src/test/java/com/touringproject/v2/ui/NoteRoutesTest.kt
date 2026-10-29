@@ -19,10 +19,10 @@ import com.touringproject.v2.store.RideDatabase
 import com.touringproject.v2.store.RoomNotes
 import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.store.RoomRideStore
-import com.touringproject.v2.ask.Recorded
-import com.touringproject.v2.ask.Recorder
-import com.touringproject.v2.ask.RouteControl
-import com.touringproject.v2.ask.Source
+import com.touringproject.v2.audio.Recorded
+import com.touringproject.v2.audio.Recorder
+import com.touringproject.v2.audio.RouteControl
+import com.touringproject.v2.audio.Source
 import com.touringproject.v2.voice.VOICE_IDLE
 import com.touringproject.v2.voice.VoiceDeps
 import com.touringproject.v2.voice.VoicePhase

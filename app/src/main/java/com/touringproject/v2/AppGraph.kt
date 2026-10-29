@@ -12,7 +12,7 @@ import com.touringproject.v2.ask.AskDeps
 import com.touringproject.v2.ask.ConversationState
 import com.touringproject.v2.ask.FlowState
 import com.touringproject.v2.ask.IDLE
-import com.touringproject.v2.ask.Source
+import com.touringproject.v2.audio.Source
 import com.touringproject.v2.ask.isBusy
 import com.touringproject.v2.ask.rideNow
 import com.touringproject.v2.audio.AudioRoute

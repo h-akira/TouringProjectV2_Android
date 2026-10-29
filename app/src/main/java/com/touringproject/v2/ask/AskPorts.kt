@@ -1,9 +1,15 @@
 package com.touringproject.v2.ask
 
+import com.touringproject.v2.audio.AnswerPlayer
+import com.touringproject.v2.audio.Cues
+import com.touringproject.v2.audio.Recorder
+import com.touringproject.v2.audio.RouteControl
+import com.touringproject.v2.audio.Speech
+import com.touringproject.v2.location.Positions
+import com.touringproject.v2.recordings.RecordingSink
 import com.touringproject.v2.ride.Ride
 import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.api.AskApi
-import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.audio.MediaVolume
 import com.touringproject.v2.location.Fix
 import com.touringproject.v2.settings.Settings
@@ -11,54 +17,9 @@ import kotlinx.serialization.Serializable
 
 // Everything the ask loop does to the outside world comes in through these interfaces, so the loop is testable on the JVM.
 
-interface RouteControl {
-  /** Brings up the intercom microphone; false means the phone's own microphone will be used. */
-  suspend fun start(source: Source): Boolean
-  suspend fun stop()
-  /** The microphone of the recording that is running right now (only visible while it runs). */
-  fun inputDevice(): InputDevice?
-}
-
-data class Recorded(val pcm: ByteArray, val name: String)
-
-interface Recorder {
-  suspend fun start()
-  suspend fun stop(): Recorded
-  suspend fun cancel()
-}
-
-/** What SC-12 shows about each kept recording (slice 1 spec §5.4). Saved as JSON beside the PCM. */
-@Serializable
-data class RecordingMeta(
-  val name: String,
-  val recordedAt: Long,
-  val durationMs: Long,
-  val phoneMic: Boolean,
-  val device: InputDevice?,
-  val transcript: String?,
-)
-
-/** Fire and forget: a failure here must not end the ask. Each call is carried out after the ones before it. */
-interface RecordingSink {
-  fun saved(meta: RecordingMeta, pcm: ByteArray)
-  fun transcribed(name: String, transcript: String)
-  /** The recording saved goes again: its ask never reached the Backend (US-C-09.001). */
-  fun discarded(name: String)
-  /** The recording saved stays (its ask was taken or refused): only the newest ones are kept now (Android #80). */
-  fun kept()
-}
-
 /** Fire and forget: a failure to keep an ask must not end it. */
 fun interface AskLog {
   fun keep(record: AskRecord)
-}
-
-interface Positions {
-  fun begin()
-  /** Where the ask is: the newest fix since begin(), unless it is older than 30 s. */
-  fun end(): Fix?
-  /** Where a text ask is (slice 5 spec §4.1): the device's last known fix, unless it is older than 30 s. */
-  suspend fun latest(): Fix?
 }
 
 interface KeepAlive {
@@ -69,26 +30,6 @@ interface KeepAlive {
 
 interface NavReturn {
   suspend fun returnTo(packageName: String): Boolean
-}
-
-interface Cues {
-  /** The start cue, durationMs long (SC-11); 0 sounds none. */
-  fun start(durationMs: Int)
-  fun sent()
-  fun waiting()
-  fun failure()
-}
-
-interface AnswerPlayer {
-  /** Plays the clips in order; throws when a clip fails or stalls. */
-  suspend fun play(urls: List<String>)
-  fun stop()
-}
-
-interface Speech {
-  /** Returns when the text has been said, stopped, or failed. */
-  suspend fun say(text: String)
-  fun stop()
 }
 
 /** Where the rider's ride stands when an ask is asked for (slice 2 spec §4.7). */
