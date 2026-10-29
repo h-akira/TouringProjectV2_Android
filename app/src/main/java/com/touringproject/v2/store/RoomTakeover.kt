@@ -1,10 +1,10 @@
 package com.touringproject.v2.store
 
 import androidx.room.withTransaction
-import com.touringproject.v2.api.CloudRecord
 import com.touringproject.v2.ride.RoutePoint
 import com.touringproject.v2.ride.stepMeters
 import com.touringproject.v2.sync.BlockReason
+import com.touringproject.v2.sync.CloudRecords
 import com.touringproject.v2.sync.DeviceRecords
 import com.touringproject.v2.sync.KeptAsk
 import com.touringproject.v2.sync.KeptRide
@@ -12,7 +12,6 @@ import com.touringproject.v2.sync.Merge
 import com.touringproject.v2.sync.TakeResult
 import com.touringproject.v2.sync.TakenAsk
 import com.touringproject.v2.sync.TakeoverStore
-import com.touringproject.v2.sync.merge
 
 /**
  * Takes the cloud's records in (slice 4 spec §6.3). The device is read, merged with the cloud and written in one
@@ -25,13 +24,13 @@ class RoomTakeover(private val db: RideDatabase, private val waitingToSave: () -
   private val rides = db.rides()
   private val asks = db.asks()
 
-  override suspend fun take(cloud: List<CloudRecord>, replace: Boolean, now: Long): TakeResult = db.withTransaction {
+  override suspend fun take(cloud: CloudRecords, replace: Boolean): TakeResult = db.withTransaction {
     if (takeover.activeRides() > 0) return@withTransaction TakeResult.Blocked(BlockReason.RIDE)
     if (replace) {
       if (rides.summaryNow().unsent > 0 || waitingToSave()) return@withTransaction TakeResult.Blocked(BlockReason.UNSENT)
       takeover.clearAll()
     }
-    val merged = merge(device(), cloud, now)
+    val merged = cloud.mergeInto(device())
     write(merged)
     TakeResult.Done(merged.count)
   }
