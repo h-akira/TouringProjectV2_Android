@@ -8,25 +8,26 @@ TouringProjectV2 の Android アプリ（Kotlin・Jetpack Compose）。
 
 | 場所 | 中身 |
 |---|---|
-| `app/src/main/java/com/touringproject/v2/ask/` | 一巡の状態機械（`Flow.kt`）・司令塔（`AskController.kt`）・外との窓口（`AskPorts.kt`）・質問の記録の組み立て（`AskRecord.kt`）・ポーリング・会話・失敗の読み上げ文 |
-| `.../api/` | Backend の API（`docs-parent/07a_openapi.yaml`）。`GET /records` で読み戻す記録の型は `Records.kt` |
-| `.../audio/` | インカムの経路・録音・再生・端末の音声・合図 |
-| `.../location/` | 質問の位置の監視（`PositionTracker.kt`）・方位の求め方（`Heading.kt`、純粋）・走行のルートの位置の頼み方と点のふるい分け（`Route.kt`）・位置の時刻で数える今（`GpsClock.kt`）・SC-22 の方位（`HeadingCheck.kt`） |
-| `.../ride/` | 走行の型と計算（`Ride.kt`、純粋）・司令塔（`RideController.kt`）・外との窓口（`RidePorts.kt`） |
-| `.../store/` | 端末の DB（Room）・質問の置き場（`RoomAskLog.kt`）・質問のメモと削除（`RoomAskEdits.kt`）・地点メモ（`RoomNotes.kt`）・送信の置き場（`RoomSyncStore.kt`）・記録の画面の読み出しと未送信の数（`RoomRecords.kt`）・クラウドの記録を1つのトランザクションで入れる係（`RoomTakeover.kt`）。スキーマは `app/schemas/` に版ごとに残す |
+| `app/src/main/java/com/touringproject/v2/ask/` | 一巡の状態機械（`Flow.kt`）・司令塔（`AskController.kt`）・外との窓口（`AskPorts.kt`）・質問の記録の組み立て（`AskRecord.kt`）・文字の質問のシートの状態（`TextAsk.kt`）・会話・失敗の読み上げ文 |
+| `.../api/` | Backend の API（`docs-parent/07a_openapi.yaml`）。`GET /records` で読み戻す記録の型は `Records.kt`。回答を取りに行く処理（ポーリング、`Polling.kt`）・Backend を呼ぶ口（`BackendAccess.kt`） |
+| `.../audio/` | インカムの経路・録音・再生・端末の音声・合図。質問・試し録り・声の入力が使う窓口は `AudioPorts.kt` |
+| `.../location/` | 質問の位置の監視（`PositionTracker.kt`）・方位の求め方（`Heading.kt`、純粋）・走行のルートの位置の頼み方と点のふるい分け（`Route.kt`）・位置の時刻で数える今（`GpsClock.kt`）・SC-22 の方位（`HeadingCheck.kt`）・質問の位置の窓口（`Positions.kt`） |
+| `.../ride/` | 走行の型と計算（`Ride.kt`、純粋）・司令塔（`RideController.kt`）・外との窓口（`RidePorts.kt`）・メモの長さの決まり（`MemoLimit.kt`） |
+| `.../store/` | 端末の DB（Room）・質問の置き場（`RoomAskLog.kt`）・質問のメモと削除（`RoomAskEdits.kt`）・地点メモ（`RoomNotes.kt`）・送信の置き場（`RoomSyncStore.kt`）・記録の画面の読み出しと未送信の数（`RoomRecords.kt`）・クラウドの記録を1つのトランザクションで入れる係（`RoomTakeover.kt`）。Entity・DAO・移行は `Entities.kt`・`AskDao.kt`・`NoteDao.kt`・`RideDao.kt`・`TakeoverDao.kt`・`Migrations.kt`、`@Database` は `RideDatabase.kt`。スキーマは `app/schemas/` に版ごとに残す |
 | `.../records/` | 記録一覧の並べ方と保存の状態（`Records.kt`、純粋）・SC-14 の数（`Saving.kt`）・メモの決まり（`Memos.kt`、純粋）・地点メモの型と位置の選び方（`Notes.kt`、純粋）・質問と地点メモを変える窓口（`AskEdits.kt`・`NoteEdits.kt`） |
 | `.../map/` | 地図（MapLibre と国土地理院の淡色地図）。描くデータの組み立ては `MapData.kt`（純粋）、地図の部品は `RouteMap.kt`、スタイルは `app/src/main/assets/map/gsi-pale.json` |
 | `.../sync/` | 走行・ルート・地点メモ・質問できなかった地点・メモ・削除の送信。何を送るかの判断（`SyncPlan.kt`、純粋）と送信の係（`RideSync.kt`）。クラウドの記録の読み込み: 突き合わせの決まり（`Merge.kt`、純粋）と読み込みの係（`Takeover.kt`） |
 | `.../handsfree/` | 押下の重複・古い合図の除外・押下の行き先（試し録り中は試し録りへ、SC-19 を前面に表示しているあいだは声の入力へ） |
 | `.../voice/` | SC-19 の声の入力（`VoiceInput.kt`）。録音・文字起こしの依頼・取りに行く処理・失敗の理由 |
 | `.../net/` | 端末が通信できるか（`Connectivity.kt`。SC-19 の声の入力・質問の一巡・送信が使う） |
-| `.../recordings/` | 録音の置き場（直近10件と付随情報）・試し録りの司令塔・録音の確認（SC-12）の状態 |
+| `.../recordings/` | 録音の置き場（直近10件と付随情報）・試し録りの司令塔・録音の確認（SC-12）の状態・録音を残す窓口（`RecordingPorts.kt`） |
 | `.../service/`・`.../nav/` | 前面サービス（走行の記録と一巡で1つ。種類の取りまとめは `ServiceCoordinator.kt`）・締め切りのアラームと自動終了の通知（`RideAlarms.kt`）・ナビを開く |
 | `.../settings/` | 設定（DataStore）と接続キー（Keystore で暗号化）・最後に保存した時刻（`LastSaved.kt`） |
 | `.../ui/` | 画面（Compose）。タブとバックスタックの組は `Tabs.kt`（Compose に依存しない）、タブの帯は `TabBar.kt`。記録の画面は `RecordsScreens.kt`（地図は差し替えられる枠で受ける）、その表示の組み立ては `RecordLabels.kt`（純粋）、読み出しとのつなぎは `RecordsRoutes.kt`。メモの編集（SC-08）は `MemoScreen.kt`（SC-19 と共通の編集部品 `MemoEditor` を含む）、地点メモ（SC-19）は `NoteScreen.kt`、削除の確認（DL-01）は `DeleteDialog.kt`、位置と方位の確認（SC-22）は `HeadingCheckScreen.kt`、その文言は `HeadingLabels.kt`（純粋） |
 
 ## 大事な決まり
 
+- パッケージは、窓口を使う側に置く。質問・試し録り・声の入力が共有する窓口は `audio`・`recordings`・`location`・`api` にあり、`ask` が他へ向かう（逆はしない）。パッケージの2つ組の循環は `python3 scripts/package-cycles.py` で数える（今は `(root)↔service` と `(root)↔ui` の2組だけ）。
 - 走行の記録中と一巡のあいだは、前面サービスを動かす（無いと、画面を消したあと位置・通信・再生が止まる）。種類は、記録中は `location`、一巡のあいだは `microphone|mediaPlayback` を足す。Android 14 以降、この2つはアプリが前面にあるときにしか始められず、足せない（理由は親の `adr/0006`）。
 - minSdk は 29。Android 12 より前は、画面から始めた質問を本体のマイクで録る（通信の機器を選ぶ API が 12 以降のため。インカムのボタンの経路は試す）。minSdk を上げるなら、親の spec を直す。
 - 押下は、Activity の復元（プロセスが死んだ後）と「最近使ったアプリ」からの再表示では数えない。
