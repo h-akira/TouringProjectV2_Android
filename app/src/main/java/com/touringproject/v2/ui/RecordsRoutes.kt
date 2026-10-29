@@ -1,12 +1,14 @@
 package com.touringproject.v2.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.touringproject.v2.ask.AskRecord
@@ -26,6 +28,7 @@ import com.touringproject.v2.settings.Settings
 import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.ask.Source
 import com.touringproject.v2.voice.VoiceInput
+import com.touringproject.v2.voice.VoicePhase
 import com.touringproject.v2.voice.VoiceState
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.Dispatchers
@@ -171,6 +174,13 @@ private fun voiceUi(voice: NoteVoice?): NoteVoiceUi? {
   }
   val state by voice.state.collectAsStateWithLifecycle()
   val online by voice.online.collectAsStateWithLifecycle()
+  // The screen going off pauses the activity, which drops the recording: keep it on while the voice input works.
+  val view = LocalView.current
+  val working = state.phase != VoicePhase.IDLE
+  DisposableEffect(view, working) {
+    view.keepScreenOn = working
+    onDispose { view.keepScreenOn = false }
+  }
   return NoteVoiceUi(state.phase, state.failure?.message, state.heard, online)
 }
 

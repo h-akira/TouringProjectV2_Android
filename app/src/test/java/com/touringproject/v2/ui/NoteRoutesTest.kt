@@ -25,6 +25,8 @@ import com.touringproject.v2.ask.RouteControl
 import com.touringproject.v2.ask.Source
 import com.touringproject.v2.voice.VOICE_IDLE
 import com.touringproject.v2.voice.VoiceDeps
+import com.touringproject.v2.voice.VoicePhase
+import com.touringproject.v2.voice.VoiceState
 import com.touringproject.v2.voice.VoiceInput
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -164,6 +166,28 @@ class NoteRoutesTest {
     router.press()
     assertEquals(1, asks)
     assertEquals(1, voicePresses)
+  }
+
+  // Final review of slice 6 plan 1: pausing drops a recording, so the screen must not time out while the voice input
+  // is recording or making the text (the rider's hands are on the bike, not on the screen).
+  @Test
+  fun the_screen_stays_on_while_the_voice_input_is_working() {
+    keepRide()
+    val state = MutableStateFlow(VOICE_IDLE)
+    lateinit var view: android.view.View
+    rule.setContent {
+      view = androidx.compose.ui.platform.LocalView.current
+      NewNoteRoute(records, notes, draft, onClose = {}, voice = NoteVoice(input, state, MutableStateFlow(true)))
+    }
+    waitFor("voice")
+    assertFalse(view.keepScreenOn)
+    state.value = VoiceState(phase = VoicePhase.RECORDING)
+    rule.waitUntil(5_000) { view.keepScreenOn }
+    state.value = VoiceState(phase = VoicePhase.TRANSCRIBING)
+    rule.waitForIdle()
+    assertTrue(view.keepScreenOn)
+    state.value = VOICE_IDLE
+    rule.waitUntil(5_000) { !view.keepScreenOn }
   }
 
   // Android #57: a memo or ride that is not found says so, and the screen can still be closed.
