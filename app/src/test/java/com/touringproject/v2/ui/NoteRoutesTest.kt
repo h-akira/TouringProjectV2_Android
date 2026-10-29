@@ -3,6 +3,8 @@ package com.touringproject.v2.ui
 import android.app.Application
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertTextEquals
+import androidx.lifecycle.Lifecycle
+import com.touringproject.v2.handsfree.PressRouter
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -23,6 +25,8 @@ import com.touringproject.v2.ask.RouteControl
 import com.touringproject.v2.ask.Source
 import com.touringproject.v2.voice.VOICE_IDLE
 import com.touringproject.v2.voice.VoiceDeps
+import com.touringproject.v2.voice.VoicePhase
+import com.touringproject.v2.voice.VoiceState
 import com.touringproject.v2.voice.VoiceInput
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -117,6 +121,73 @@ class NoteRoutesTest {
     shown = false
     rule.waitForIdle()
     assertFalse(input.attached)
+  }
+
+  // Review R3-01: the voice input is attached only while SC-19 is in front. An Activity that is stopped (home, app
+  // switch, screen off) gives the intercom button back to the ask; coming back to the front attaches it again.
+  @Test
+  fun sc19_gives_the_intercom_button_back_while_the_app_is_in_the_background() {
+    keepRide()
+    var shown by mutableStateOf(true)
+    rule.setContent {
+      if (shown) NewNoteRoute(records, notes, draft, onClose = {}, voice = NoteVoice(input, MutableStateFlow(VOICE_IDLE), MutableStateFlow(true)))
+    }
+    waitFor("voice")
+    assertTrue(input.attached)
+    rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
+    rule.waitUntil(5_000) { !input.attached }
+    rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+    rule.waitUntil(5_000) { input.attached }
+    // Leave the screen before the database closes: the records are read again once it is back in front.
+    shown = false
+    rule.waitForIdle()
+    assertFalse(input.attached)
+  }
+
+  // Review R3-01: a press while SC-19 is behind the navigation app starts an ask, not a voice input.
+  @Test
+  fun an_intercom_press_while_sc19_is_in_the_background_starts_an_ask() {
+    keepRide()
+    var asks = 0
+    var voicePresses = 0
+    val router = PressRouter(
+      trialActive = { false }, trialBusy = { false }, stopTrial = {}, stopCheckPlayback = {},
+      askPress = { asks++ }, askStopRecording = {}, askTap = {},
+      voiceAttached = { input.attached }, voicePress = { voicePresses++ },
+    )
+    rule.setContent {
+      NewNoteRoute(records, notes, draft, onClose = {}, voice = NoteVoice(input, MutableStateFlow(VOICE_IDLE), MutableStateFlow(true)))
+    }
+    waitFor("voice")
+    router.press()
+    assertEquals(1, voicePresses)
+    rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
+    rule.waitUntil(5_000) { !input.attached }
+    router.press()
+    assertEquals(1, asks)
+    assertEquals(1, voicePresses)
+  }
+
+  // Final review of slice 6 plan 1: pausing drops a recording, so the screen must not time out while the voice input
+  // is recording or making the text (the rider's hands are on the bike, not on the screen).
+  @Test
+  fun the_screen_stays_on_while_the_voice_input_is_working() {
+    keepRide()
+    val state = MutableStateFlow(VOICE_IDLE)
+    lateinit var view: android.view.View
+    rule.setContent {
+      view = androidx.compose.ui.platform.LocalView.current
+      NewNoteRoute(records, notes, draft, onClose = {}, voice = NoteVoice(input, state, MutableStateFlow(true)))
+    }
+    waitFor("voice")
+    assertFalse(view.keepScreenOn)
+    state.value = VoiceState(phase = VoicePhase.RECORDING)
+    rule.waitUntil(5_000) { view.keepScreenOn }
+    state.value = VoiceState(phase = VoicePhase.TRANSCRIBING)
+    rule.waitForIdle()
+    assertTrue(view.keepScreenOn)
+    state.value = VOICE_IDLE
+    rule.waitUntil(5_000) { !view.keepScreenOn }
   }
 
   // Android #57: a memo or ride that is not found says so, and the screen can still be closed.
