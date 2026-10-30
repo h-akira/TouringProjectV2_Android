@@ -129,6 +129,8 @@ data class DataUi(
   val message: String?,
   /** The recordings kept on the device for SC-12. */
   val recordings: Int,
+  /** Told when the records are not sent for the owner's sake (adr/0015); null when nothing is wrong. */
+  val ownerNotice: String? = null,
 )
 
 @Composable
@@ -145,6 +147,7 @@ fun DataScreen(ui: DataUi, onSave: () -> Unit, onUser: () -> Unit, onReread: () 
   val muted = Color(0xFF666666)
   val summary = ui.summary
   Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    ui.ownerNotice?.let { Text(it, color = Red, modifier = Modifier.testTag("ownerNotice")) }
     if (summary != null) Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(0xFFCCCCCC))) {
       Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (summary.unsent == 0) {
@@ -376,6 +379,7 @@ fun UserScreen(
   onData: () -> Unit,
   modifier: Modifier = Modifier,
   counted: Boolean = true,
+  ownerNotice: String? = null,
 ) {
   val scope = rememberCoroutineScope()
   // Saveable, so a name being typed survives a trip to another tab (Android #34).
@@ -386,6 +390,7 @@ fun UserScreen(
   Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
     Text("今のユーザー名", color = Color(0xFF666666), fontSize = 16.sp)
     Text(userName, fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+    ownerNotice?.let { Text(it, color = Red, modifier = Modifier.testTag("ownerNotice")) }
     Text("記録はユーザー名ごとに分かれます。別の端末で同じユーザー名を設定すると、記録を引き継げます。控えておいてください。", color = Color(0xFF666666), fontSize = 14.sp)
     OutlinedTextField(input, { input = it }, Modifier.fillMaxWidth().testTag("userInput"), placeholder = { Text("新しいユーザー名") }, singleLine = true)
     error?.let { Text(it, color = Red, modifier = Modifier.testTag("userError")) }

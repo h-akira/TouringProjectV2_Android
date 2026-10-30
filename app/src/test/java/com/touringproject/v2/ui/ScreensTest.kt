@@ -291,6 +291,29 @@ class SettingsScreensTest {
     assertEquals(listOf("taro01"), changed.map { it.userName })
   }
 
+  // A mismatch is told on SC-18, and the change stays possible: it is how the rider mends it (adr/0015).
+  @Test
+  fun the_notice_of_a_mismatch_is_shown_and_the_change_is_still_possible() {
+    rule.setContent {
+      UserScreen("rider01", null, false, null, { null }, {}, {}, ownerNotice = "ユーザー名と端末の記録が合っていません。記録は送られていません")
+    }
+    rule.onNodeWithTag("ownerNotice").assertExists()
+    rule.onNodeWithTag("userInput").performTextInput("taro01")
+    rule.onNodeWithTag("changeUser").assertIsEnabled()
+  }
+
+  @Test
+  fun no_notice_is_shown_when_the_name_matches() {
+    rule.setContent { UserScreen("rider01", null, false, null, { null }, {}, {}) }
+    rule.onNodeWithTag("ownerNotice").assertDoesNotExist()
+  }
+
+  @Test
+  fun sc14_shows_the_notice_of_a_mismatch() {
+    rule.setContent { DataScreen(data.copy(ownerNotice = "ユーザー名を確かめられていません。記録は送られていません"), {}, {}, {}) }
+    rule.onNodeWithTag("ownerNotice").assertExists()
+  }
+
   @Test
   fun a_name_that_cannot_be_read_is_not_changed_to() {
     rule.setContent { UserScreen("rider01", null, false, null, { null }, {}, {}) }

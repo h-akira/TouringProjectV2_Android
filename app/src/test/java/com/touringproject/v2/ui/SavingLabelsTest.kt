@@ -2,8 +2,10 @@ package com.touringproject.v2.ui
 
 import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.sync.BlockReason
+import com.touringproject.v2.sync.OwnerState
 import com.touringproject.v2.sync.TakeResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -13,6 +15,14 @@ private val TOKYO = ZoneId.of("Asia/Tokyo")
 private fun ms(day: Int, hour: Int, minute: Int) = ZonedDateTime.of(2026, 10, day, hour, minute, 0, 0, TOKYO).toInstant().toEpochMilli()
 
 class SavingLabelsTest {
+  @Test
+  fun a_mismatch_and_an_unconfirmed_name_are_told_and_the_rest_are_not() {
+    assertEquals("ユーザー名と端末の記録が合っていません。記録は送られていません", ownerNotice(OwnerState.MISMATCH))
+    assertEquals("ユーザー名を確かめられていません。記録は送られていません", ownerNotice(OwnerState.UNCONFIRMED))
+    assertNull(ownerNotice(OwnerState.MATCH))
+    assertNull(ownerNotice(OwnerState.UNKNOWN))
+  }
+
   // Slice 4 spec §7.1 (the breakdown settled in plan 3): only the kinds with any, in one line.
   @Test
   fun the_breakdown_names_the_kinds_left_to_send() {

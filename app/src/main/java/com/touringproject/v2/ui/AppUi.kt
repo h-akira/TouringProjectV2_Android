@@ -50,6 +50,7 @@ import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.headingParams
 import com.touringproject.v2.settings.withHeadingDefaults
 import com.touringproject.v2.settings.withRecordingDefaults
+import com.touringproject.v2.sync.OwnerState
 import com.touringproject.v2.sync.TakeOp
 import com.touringproject.v2.sync.nameChangeBlock
 import kotlinx.coroutines.delay
@@ -291,7 +292,10 @@ fun AppUi(graph: AppGraph) {
                 val sending by graph.sync.sending.collectAsStateWithLifecycle()
                 val take by graph.takeover.state.collectAsStateWithLifecycle()
                 val recordings by graph.recordingCheck.items.collectAsStateWithLifecycle()
+                val ownerState by graph.owner.state.collectAsStateWithLifecycle()
                 DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
+                // A pass checks the owner first, so the notice is fresh when SC-14 opens.
+                LaunchedEffect(Unit) { graph.sync.request() }
                 DataScreen(
                   DataUi(
                     summary = summary,
@@ -303,6 +307,7 @@ fun AppUi(graph: AppGraph) {
                     userName = current.userName,
                     message = take.result?.takeIf { take.last == TakeOp.REREAD }?.let(::rereadMessage),
                     recordings = recordings.size,
+                    ownerNotice = ownerNotice(ownerState),
                   ),
                   onSave = graph.sync::request,
                   onUser = { tabs.push(UserKey) },
@@ -347,12 +352,20 @@ fun AppUi(graph: AppGraph) {
                 val summary by graph.saveSummary.collectAsStateWithLifecycle()
                 val take by graph.takeover.state.collectAsStateWithLifecycle()
                 val waitingToSave by graph.rides.waitingToSave.collectAsStateWithLifecycle()
+                val ownerState by graph.owner.state.collectAsStateWithLifecycle()
                 DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
+                // A pass checks the owner first, so the notice is fresh when SC-18 opens.
+                LaunchedEffect(Unit) { graph.sync.request() }
                 // A ride's change waiting to be written has nothing else to write it while no ride runs.
                 LaunchedEffect(Unit) { graph.rides.retrySave() }
                 // The write checks again in its own transaction (US-E-06.008); a ride's change still waiting to be
                 // written counts (Android #76).
-                val block = nameChangeBlock(ride != null, summary?.unsent ?: 0, waitingToSave)
+                // While the records mismatch, the unsent ones are not counted: they are the owner's and stay if the name goes back.
+                val block = nameChangeBlock(
+                  ride != null,
+                  unsent = if (ownerState == OwnerState.MISMATCH) 0 else summary?.unsent ?: 0,
+                  waitingToSave = waitingToSave,
+                )
                 UserScreen(
                   current.userName, block,
                   reading = take.running != null,
@@ -362,6 +375,7 @@ fun AppUi(graph: AppGraph) {
                   onData = { tabs.push(DataKey) },
                   modifier = Modifier.safeDrawingPadding(),
                   counted = summary != null,
+                  ownerNotice = ownerNotice(ownerState),
                 )
               }
               entry<ReturnAppKey> {
