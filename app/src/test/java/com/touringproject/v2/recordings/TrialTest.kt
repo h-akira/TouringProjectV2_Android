@@ -3,7 +3,8 @@ package com.touringproject.v2.recordings
 import com.touringproject.v2.audio.PcmPlayback
 import com.touringproject.v2.audio.Recorded
 import com.touringproject.v2.audio.Recorder
-import com.touringproject.v2.audio.RouteControl
+import com.touringproject.v2.audio.RouteDriver
+import com.touringproject.v2.audio.RouteLeases
 import com.touringproject.v2.audio.Source
 import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.settings.DEFAULT_RECORD_LIMIT_MS
@@ -43,7 +44,7 @@ private class TrialHarness(
       now = { scope.testScheduler.currentTime },
       sleep = { delay(it) },
       micAllowed = { micAllowed },
-      route = object : RouteControl {
+      route = RouteLeases(object : RouteDriver {
         override suspend fun start(source: Source): Boolean {
           log += "route:${source.name.lowercase()}"
           routeGate?.await()
@@ -51,7 +52,7 @@ private class TrialHarness(
         }
         override suspend fun stop() { log += "route:stop" }
         override fun inputDevice() = INTERCOM
-      },
+      }),
       recorder = object : Recorder {
         override suspend fun start() { log += "rec:start"; recorderError?.let { throw it } }
         override suspend fun stop(): Recorded { log += "rec:stop"; return Recorded(pcm, "trial.pcm") }
@@ -142,25 +143,21 @@ class TrialTest {
     h.trial.cancel()
     assertEquals(TRIAL_IDLE, h.trial.state)
     h.trial.start() // still unwinding: ignored rather than sharing the recorder
-    gate.complete(Unit)
     job.join()
-    assertEquals(listOf("route:screen", "play:stop", "route:stop"), h.log)
+    // The setup was called off, so nothing was brought up and there is nothing to let go of (Android R1-03).
+    assertEquals(listOf("route:screen", "play:stop"), h.log)
     assertEquals(TRIAL_IDLE, h.trial.state)
   }
 
   @Test
-  fun a_trial_left_during_route_setup_stays_busy_until_it_has_unwound() = runTest {
-    // An ask must not take the route while the old trial can still set up or release SCO under it.
-    val gate = CompletableDeferred<Unit>()
-    val h = TrialHarness(this, routeGate = gate)
+  fun a_trial_left_during_route_setup_ends_at_once_without_waiting_for_the_route() = runTest {
+    val h = TrialHarness(this, routeGate = CompletableDeferred())
     val job = h.launchStart()
     h.until { "route:screen" in h.log }
     h.trial.cancel()
     assertFalse(h.trial.active)
-    assertTrue(h.trial.busy)
-    gate.complete(Unit)
     job.join()
-    assertFalse(h.trial.busy)
+    assertTrue(job.isCompleted)
   }
 
   @Test

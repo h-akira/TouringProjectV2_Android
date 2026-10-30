@@ -6,7 +6,7 @@ private const val VR_TIMEOUT_MS = 4_000L
 private const val SCO_TIMEOUT_MS = 3_000L
 
 // The intercom button arrives as a voice-recognition request from the headset; the screen button opens a virtual call.
-class AudioRouteControl(private val route: AudioRoute) : RouteControl {
+class AudioRouteControl(private val route: AudioRoute) : RouteDriver {
   private var source: Source? = null
 
   override suspend fun start(source: Source): Boolean {

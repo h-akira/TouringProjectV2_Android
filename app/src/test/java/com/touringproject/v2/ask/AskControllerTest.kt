@@ -14,7 +14,8 @@ import com.touringproject.v2.audio.InputDevice
 import com.touringproject.v2.audio.MediaVolume
 import com.touringproject.v2.audio.Recorded
 import com.touringproject.v2.audio.Recorder
-import com.touringproject.v2.audio.RouteControl
+import com.touringproject.v2.audio.RouteDriver
+import com.touringproject.v2.audio.RouteLeases
 import com.touringproject.v2.audio.Source
 import com.touringproject.v2.audio.Speech
 import com.touringproject.v2.location.Fix
@@ -79,6 +80,8 @@ private class Harness(
   var heading: Double? = 12.5,
   /** The device's last known fix, where a text ask is (slice 5 spec §4.1). */
   var latest: Fix? = HERE,
+  /** A real tracker, to see what the cleanup of one ask does to the next. */
+  val positions: Positions? = null,
 ) {
   /** What each text ask told the sheet. */
   val outcomes = mutableListOf<TextAskOutcome>()
@@ -128,11 +131,11 @@ private class Harness(
     mediaVolume = { log += "vol:read"; MediaVolume(2, 25) },
     api = { _, _ -> api },
     conversation = ConversationState(),
-    route = object : RouteControl {
+    route = RouteLeases(object : RouteDriver {
       override suspend fun start(source: Source): Boolean { log += "route:${source.name.lowercase()}"; return routeStart?.invoke() ?: routeOk }
       override suspend fun stop() { log += "route:stop" }
       override fun inputDevice() = device
-    },
+    }),
     recorder = object : Recorder {
       override suspend fun start() { log += "rec:start" }
       override suspend fun stop(): Recorded { log += "rec:stop"; return Recorded(pcm, "rec-0.pcm") }
@@ -152,9 +155,9 @@ private class Harness(
     online = { online },
     newId = { "u1" },
     ride = { ride },
-    location = object : Positions {
-      override fun begin() { log += "loc:begin" }
-      override fun end() = HERE
+    location = positions ?: object : Positions {
+      override fun begin(): Int { log += "loc:begin"; return 1 }
+      override fun end(token: Int) = HERE
       override suspend fun latest(): Fix? { log += "loc:latest"; return latest }
     },
     heading = { here -> headingAsked += here to now(); heading },
@@ -203,6 +206,36 @@ private class Harness(
 }
 
 class AskControllerTest {
+  // Android R1-02: the device voice may never say it is done; the ask must not stay SPEAKING for good.
+  @Test
+  fun a_speech_that_never_returns_is_cut_off_and_the_ask_ends() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000, play = { throw IllegalStateException("cannot play") }, sayGate = CompletableDeferred())
+    val running = launch { h.controller.run(Source.SCREEN) }
+    h.until { "say:愛鷹山です。" in h.log }
+    testScheduler.advanceTimeBy(sayLimitMs("愛鷹山です。") - 1)
+    testScheduler.runCurrent()
+    assertEquals(Phase.SPEAKING, h.phase)
+    testScheduler.advanceTimeBy(2)
+    testScheduler.runCurrent()
+    assertEquals(Phase.IDLE, h.phase)
+    assertTrue("say:stop" in h.log)
+    running.join()
+  }
+
+  // The same limit holds for the notice said while an ask is under way: the answer must not wait for it for good.
+  @Test
+  fun a_busy_notice_that_never_returns_does_not_hold_the_answer() = runTest {
+    val gate = CompletableDeferred<Unit>()
+    val h = Harness(this, stopAfterMs = 1_000, answers = listOf(PROCESSING, PROCESSING, PROCESSING, done()), sayGate = gate)
+    val running = launch { h.controller.run(Source.HANDSFREE) }
+    h.until { h.phase == Phase.WAITING }
+    h.controller.press()
+    h.until { BUSY in h.log }
+    running.join()
+    assertEquals(Phase.IDLE, h.phase)
+    assertTrue("play:https://audio/1.mp3" in h.log)
+  }
+
   @Test
   fun handsfree_happy_path_returns_to_nav_right_after_sending() = runTest {
     val h = Harness(this)
@@ -583,11 +616,58 @@ class AskControllerTest {
     val running = launch { h.controller.run(Source.SCREEN) }
     h.until { "route:screen" in h.log }
     h.controller.cancel()
-    gate.complete(true)
     running.join()
     assertFalse("rec:start" in h.log)
     assertFalse("cue:start" in h.log)
-    assertTrue("route:stop" in h.log)
+    // The setup is called off with the ask (Android R1-03), so nothing was brought up and nothing is let go of.
+    assertFalse("route:stop" in h.log)
+    assertEquals(Phase.IDLE, h.phase)
+  }
+
+  // Android R1-01: an ask that starts right after a cancel waits for the route, and the cancelled ask's cleanup takes
+  // neither its route nor its position.
+  @Test
+  fun an_ask_started_after_a_cancel_during_route_setup_is_recorded_with_its_position() = runTest {
+    val source = object : com.touringproject.v2.location.PositionSource {
+      override fun now() = 100_000L
+      override fun elapsed() = 50_000L
+      override fun lastKnown(onFix: (Fix) -> Unit) = onFix(HERE)
+      override fun watch(onFix: (Fix) -> Unit) = com.touringproject.v2.location.Subscription {}
+    }
+    var starts = 0
+    val h = Harness(
+      this,
+      stopAfterMs = 1_000,
+      routeStart = { if (++starts == 1) CompletableDeferred<Boolean>().await() else true },
+      positions = com.touringproject.v2.location.PositionTracker(source),
+    )
+    val first = launch { h.controller.run(Source.HANDSFREE) }
+    h.until { starts == 1 }
+    h.controller.cancel()
+    val second = launch { h.controller.run(Source.HANDSFREE) }
+    second.join()
+    first.join()
+    assertEquals(2, starts)
+    assertEquals(Point(HERE.latitude, HERE.longitude), h.bodies.single().location)
+    assertEquals(1, h.log.count { it == "route:stop" })
+  }
+
+  // Android R10-01: the ask after a cancelled one in its recording waits until the first has let go of the route.
+  @Test
+  fun an_ask_waits_for_the_one_before_to_let_go_of_the_route() = runTest {
+    val h = Harness(this, stopAfterMs = null)
+    val first = launch { h.controller.run(Source.HANDSFREE) }
+    h.until { "rec:start" in h.log }
+    h.controller.cancel()
+    val second = launch { h.controller.run(Source.HANDSFREE) }
+    h.until { h.log.count { it == "rec:start" } == 2 }
+    // The first one let go (rec:cancel, route:stop) before the second brought the route up again.
+    val firstStop = h.log.indexOf("route:stop")
+    val secondStart = h.log.lastIndexOf("route:handsfree")
+    assertTrue(firstStop in 0 until secondStart)
+    h.controller.cancel()
+    first.join()
+    second.join()
   }
 
   @Test

@@ -39,7 +39,12 @@ class TtsSpeech(context: Context) : Speech {
     val done = CompletableDeferred<Unit>()
     pending[id] = done
     if (tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) != TextToSpeech.SUCCESS) settle(id)
-    done.await()
+    try {
+      done.await()
+    } finally {
+      // Cut short (the caller gave up waiting): nothing may stay in the table for an utterance nobody waits for.
+      pending.remove(id)
+    }
   }
 
   override fun stop() {

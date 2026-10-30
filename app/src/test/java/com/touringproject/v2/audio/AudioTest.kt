@@ -12,8 +12,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import android.media.AudioDeviceInfo
+import android.os.Looper
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
+import org.robolectric.shadows.AudioDeviceInfoBuilder
+import org.robolectric.shadows.ShadowAudioManager
+import org.robolectric.shadow.api.Shadow
+import java.time.Duration
 
 class StallWatchTest {
   @Test
@@ -158,5 +172,68 @@ class TtsSpeechTest {
     val second = async(kotlinx.coroutines.Dispatchers.Default) { speech.say("録音できませんでした。") }
     kotlinx.coroutines.withTimeout(5_000) { first.await() }
     second.cancel()
+  }
+}
+
+/** An audio manager whose call route never comes up by itself: the request is taken, the device is not set. */
+@Implements(value = AudioManager::class, isInAndroidSdk = false)
+class PendingScoAudioManager : ShadowAudioManager() {
+  var requested = 0
+  var cleared = 0
+
+  @Implementation
+  override fun setCommunicationDevice(device: AudioDeviceInfo): Boolean {
+    requested += 1
+    return true
+  }
+
+  @Implementation
+  override fun clearCommunicationDevice() {
+    cleared += 1
+    super.clearCommunicationDevice()
+  }
+}
+
+// Android R1-03: a route's setup that is called off is undone at once, not left to run on inside AudioRoute.
+@RunWith(AndroidJUnit4::class)
+@Config(sdk = [31], shadows = [PendingScoAudioManager::class])
+class AudioRouteCancelTest {
+  private val context = ApplicationProvider.getApplicationContext<Context>()
+  private val audioManager = context.getSystemService(AudioManager::class.java)
+  private val shadow = Shadow.extract<PendingScoAudioManager>(audioManager)
+  private val scope = CoroutineScope(Dispatchers.Default)
+
+  private fun idle(ms: Long = 0) {
+    val looper = shadowOf(Looper.getMainLooper())
+    if (ms > 0) looper.idleFor(Duration.ofMillis(ms)) else looper.idle()
+  }
+
+  /** The main looper is paused, so the test thread runs it while the coroutine waits on its own thread. */
+  private fun pumpUntil(condition: () -> Boolean) {
+    repeat(400) {
+      if (condition()) return
+      idle()
+      Thread.sleep(5)
+    }
+    check(condition()) { "condition never became true" }
+  }
+
+  @Test
+  fun a_screen_route_setup_that_is_called_off_clears_the_call_route_at_once_and_leaves_nothing_for_the_timeout() {
+    val sco = AudioDeviceInfoBuilder.newBuilder().setType(AudioDeviceInfo.TYPE_BLUETOOTH_SCO).build()
+    shadow.setAvailableCommunicationDevices(listOf(sco))
+    val route = AudioRoute(context)
+    val job = scope.launch { route.acquireSco(3_000) }
+    pumpUntil { shadow.requested == 1 }
+    assertEquals(0, shadow.cleared)
+    runBlocking {
+      scope.launch { job.cancelAndJoin() }
+      pumpUntil { job.isCompleted }
+    }
+    assertEquals(1, shadow.cleared)
+    assertEquals(AudioManager.MODE_NORMAL, audioManager.mode)
+    // The 3 s timeout must not come back to clear the route of whoever has it by then.
+    idle(5_000)
+    assertEquals(1, shadow.cleared)
   }
 }

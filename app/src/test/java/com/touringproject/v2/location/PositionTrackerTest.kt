@@ -30,9 +30,23 @@ class PositionTrackerTest {
   fun end_removes_the_watch() {
     val source = FakeSource()
     val tracker = PositionTracker(source)
-    tracker.begin()
-    tracker.end()
+    val token = tracker.begin()
+    tracker.end(token)
     assertEquals(1, source.removed)
+  }
+
+  // Android R1-01: the cleanup of an ask that was cancelled can run after the next ask has begun.
+  @Test
+  fun an_end_with_an_earlier_token_changes_nothing_of_the_newer_watch() {
+    val source = FakeSource()
+    val tracker = PositionTracker(source)
+    val older = tracker.begin()
+    val newer = tracker.begin()
+    source.onFix!!(fix(99_500))
+    assertNull(tracker.end(older))
+    assertEquals(1, source.removed)
+    assertEquals(fix(99_500), tracker.end(newer))
+    assertEquals(2, source.removed)
   }
 
   @Test
@@ -41,39 +55,36 @@ class PositionTrackerTest {
     val tracker = PositionTracker(source)
     tracker.begin()
     val oldCallback = source.onFix!!
-    tracker.begin()
+    val token = tracker.begin()
     source.onFix!!(fix(99_500))
     oldCallback(fix(99_900))
-    assertEquals(fix(99_500), tracker.end())
+    assertEquals(fix(99_500), tracker.end(token))
   }
 
   @Test
   fun a_last_known_point_that_arrives_after_end_is_ignored() {
     val source = FakeSource().apply { deferLastKnown = true }
     val tracker = PositionTracker(source)
-    tracker.begin()
-    tracker.end()
+    tracker.end(tracker.begin())
     source.lateLastKnown!!(fix(99_000))
-    tracker.begin()
-    assertNull(tracker.end())
+    assertNull(tracker.end(tracker.begin()))
   }
 
   @Test
   fun a_stale_last_known_point_is_not_the_current_position() {
     val source = FakeSource().apply { last = fix(100_000 - MAX_CURRENT_AGE_MS - 1) }
     val tracker = PositionTracker(source)
-    tracker.begin()
-    assertNull(tracker.end())
+    assertNull(tracker.end(tracker.begin()))
   }
 
   @Test
   fun the_newest_fresh_fix_is_the_current_position() {
     val source = FakeSource().apply { last = fix(90_000) }
     val tracker = PositionTracker(source)
-    tracker.begin()
+    val token = tracker.begin()
     source.onFix!!(fix(99_000))
     source.onFix!!(fix(98_000))
-    assertEquals(fix(99_000), tracker.end())
+    assertEquals(fix(99_000), tracker.end(token))
   }
 
   // Slice 5 spec §4.1: a text ask is where the device last was, within 30 s; none without a fresh fix.
@@ -103,9 +114,9 @@ class PositionTrackerTest {
   fun a_fix_is_as_old_as_the_time_since_boot_says_whatever_the_clock_says() = runTest {
     val ahead = FakeSource(now = 100_000 + 5 * 60_000, elapsed = 50_000)
     val tracker = PositionTracker(ahead)
-    tracker.begin()
+    val token = tracker.begin()
     ahead.onFix!!(Fix(35.0, 139.0, 100_000, 5.0, elapsedMs = 45_000))
-    assertEquals(100_000L, tracker.end()?.timestamp)
+    assertEquals(100_000L, tracker.end(token)?.timestamp)
     val stale = FakeSource(now = 100_000, elapsed = 50_000).apply {
       last = Fix(35.0, 139.0, 99_000, 5.0, elapsedMs = 50_000 - MAX_CURRENT_AGE_MS - 1)
     }

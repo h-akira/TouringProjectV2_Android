@@ -22,6 +22,7 @@ import com.touringproject.v2.audio.ExoAnswerPlayer
 import com.touringproject.v2.audio.MediaVolumeWatch
 import com.touringproject.v2.audio.PcmPlayer
 import com.touringproject.v2.audio.PcmRecorder
+import com.touringproject.v2.audio.RouteLeases
 import com.touringproject.v2.audio.ToneCues
 import com.touringproject.v2.audio.TtsSpeech
 import com.touringproject.v2.handsfree.PressGate
@@ -111,6 +112,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   val backend = BackendAccess(apiBaseUrl, http, apiKeys::current) { settings.settings.value?.userName }
   val launcher = AppLauncher(context)
   val audioRoute = AudioRoute(context)
+  // The one audio route, handed to the ask loop, SC-12's trial and SC-19's voice input one at a time.
+  private val routes = RouteLeases(AudioRouteControl(audioRoute))
   val conversation = ConversationState()
   val recordingStore = RecordingStore(File(context.filesDir, "recordings"))
   private val cues = ToneCues()
@@ -245,7 +248,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       mediaVolume = mediaVolume::refresh,
       api = backend::clientFor,
       conversation = conversation,
-      route = AudioRouteControl(audioRoute),
+      route = routes,
       recorder = PcmRecorder(),
       recordings = RecordingKeeper(recordingStore, scope) { message, e -> Log.w("trv2.recordings", message, e) },
       asks = askLog,
@@ -271,13 +274,13 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   private val trialFlow = MutableStateFlow(TRIAL_IDLE)
   val trialState: StateFlow<TrialState> = trialFlow.asStateFlow()
 
-  // SC-12: its own route control, recorder and players, so nothing it does is shared with the ask loop.
+  // SC-12: its own recorder and players; the audio route is the app's one, taken one user at a time.
   val trial = TrialController(
     TrialDeps(
       now = System::currentTimeMillis,
       sleep = { delay(it) },
       micAllowed = micAllowed,
-      route = AudioRouteControl(audioRoute),
+      route = routes,
       recorder = PcmRecorder(),
       cueStart = cues::start,
       player = PcmPlayer(),
@@ -295,8 +298,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   private val voiceFlow = MutableStateFlow(VOICE_IDLE)
   val voiceState: StateFlow<VoiceState> = voiceFlow.asStateFlow()
 
-  // SC-19's voice input: its own route control and recorder, like SC-12's trial. The audio route underneath is the
-  // app's one, so the press router keeps asks off it while a voice input unwinds.
+  // SC-19's voice input: its own recorder, like SC-12's trial. The audio route is the app's one, taken one user at a time.
   val voice = VoiceInput(
     VoiceDeps(
       now = System::currentTimeMillis,
@@ -304,7 +306,7 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
       micAllowed = micAllowed,
       online = { connectivity.online.value },
       api = { backend.client() },
-      route = AudioRouteControl(audioRoute),
+      route = routes,
       recorder = PcmRecorder(),
       // Not a question: SC-11 does not change SC-19's voice input (slice 5 spec §6).
       cueStart = { cues.start(DEFAULT_START_CUE_MS) },
@@ -318,7 +320,6 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
 
   private val router = PressRouter(
     trialActive = { trial.active },
-    trialBusy = { trial.busy },
     stopTrial = trial::stop,
     stopCheckPlayback = recordingCheck::stopPlaying,
     askPress = controller::press,
@@ -329,7 +330,6 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     voicePress = { voice.press(Source.HANDSFREE) },
     voiceRecording = { voice.recording },
     voiceStop = voice::stop,
-    voiceBusy = { voice.busy },
   )
 
   /** The screen's "押して話す", routed like an intercom press so it waits for a left trial to unwind. */

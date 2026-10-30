@@ -8,7 +8,8 @@ import com.touringproject.v2.api.TranscriptionBody
 import com.touringproject.v2.api.TranscriptionResult
 import com.touringproject.v2.audio.Recorded
 import com.touringproject.v2.audio.Recorder
-import com.touringproject.v2.audio.RouteControl
+import com.touringproject.v2.audio.RouteDriver
+import com.touringproject.v2.audio.RouteLeases
 import com.touringproject.v2.audio.Source
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
@@ -37,7 +38,7 @@ private class VoiceHarness(
   /** What each GET answers, in turn; the last one repeats. */
   val results: MutableList<TranscriptionResult> = mutableListOf(TranscriptionResult("t1", "done", "展望スペース")),
   var getGate: CompletableDeferred<Unit>? = null,
-  /** Holds the route's setup without letting a cancel through, as the headset's voice recognition does (up to 4 s). */
+  /** Holds the route's setup (up to 4 s on the headset); a cancel ends the wait, as AudioRoute now undoes a called-off setup. */
   var routeGate: CompletableDeferred<Unit>? = null,
 ) {
   val log = mutableListOf<String>()
@@ -61,15 +62,15 @@ private class VoiceHarness(
       micAllowed = { micAllowed },
       online = { online },
       api = { if (hasKey) api else null },
-      route = object : RouteControl {
+      route = RouteLeases(object : RouteDriver {
         override suspend fun start(source: Source): Boolean {
           log += "route:${source.name.lowercase()}"
-          routeGate?.let { gate -> kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { gate.await() } }
+          routeGate?.await()
           return true
         }
         override suspend fun stop() { log += "route:stop" }
         override fun inputDevice() = null
-      },
+      }),
       recorder = object : Recorder {
         override suspend fun start() { log += "rec:start"; recorderError?.let { throw it } }
         override suspend fun stop(): Recorded { log += "rec:stop"; return Recorded(pcm, "voice.pcm") }
@@ -286,8 +287,8 @@ class VoiceInputTest {
     assertEquals(2, h.log.count { it == "rec:start" })
   }
 
-  // Final review I-1, I-2: a run that cannot be cut short (the route's setup) is still unwinding: a press gets the
-  // failure cue rather than nothing, and the run lets go of the route when it ends.
+  // Final review I-1, I-2: a run that is still unwinding is busy for a moment: a press gets the failure cue rather than
+  // nothing. The route's setup is called off with the run (Android R1-03), so there is nothing to let go of.
   @Test
   fun a_press_while_the_run_before_still_unwinds_gets_the_failure_cue() = runTest {
     val h = VoiceHarness(this, routeGate = CompletableDeferred())
@@ -295,15 +296,31 @@ class VoiceInputTest {
     h.voice.press(Source.HANDSFREE)
     runCurrent()
     h.voice.detach(left)
-    runCurrent()
     assertTrue(h.voice.busy)
     h.voice.attach()
     h.voice.press(Source.HANDSFREE)
     assertEquals("cue:failure", h.log.last())
-    h.routeGate!!.complete(Unit)
     advanceUntilIdle()
     assertEquals(false, h.voice.busy)
-    assertEquals("route:stop", h.log.last())
+    assertEquals(listOf("route:handsfree", "cue:failure"), h.log)
     assertEquals(VOICE_IDLE, h.voice.state)
+  }
+
+  // Android R1-03: leaving SC-19 while the route comes up ends the run at once; the next press starts as usual.
+  @Test
+  fun leaving_during_the_route_setup_lets_the_next_press_start_at_once() = runTest {
+    val h = VoiceHarness(this, routeGate = CompletableDeferred())
+    val left = h.voice.attach()
+    h.voice.press(Source.HANDSFREE)
+    runCurrent()
+    h.voice.detach(left)
+    runCurrent()
+    assertEquals(false, h.voice.busy)
+    h.routeGate = null
+    h.voice.attach()
+    h.voice.press(Source.HANDSFREE)
+    runCurrent()
+    assertEquals(VoicePhase.RECORDING, h.voice.state.phase)
+    assertEquals(listOf("route:handsfree", "route:handsfree", "rec:start", "cue:start"), h.log)
   }
 }

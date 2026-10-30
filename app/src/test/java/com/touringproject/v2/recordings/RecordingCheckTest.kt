@@ -3,7 +3,8 @@ package com.touringproject.v2.recordings
 import com.touringproject.v2.audio.PcmPlayback
 import com.touringproject.v2.audio.Recorded
 import com.touringproject.v2.audio.Recorder
-import com.touringproject.v2.audio.RouteControl
+import com.touringproject.v2.audio.RouteDriver
+import com.touringproject.v2.audio.RouteLeases
 import com.touringproject.v2.audio.Source
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -46,14 +47,14 @@ class RecordingCheckTest {
         now = { scope.testScheduler.currentTime },
         sleep = { delay(it) },
         micAllowed = { true },
-        route = object : RouteControl {
+        route = RouteLeases(object : RouteDriver {
           override suspend fun start(source: Source): Boolean {
             if (routeMs > 0) delay(routeMs)
             return true
           }
           override suspend fun stop() { log += "route:stop" }
           override fun inputDevice() = null
-        },
+        }),
         recorder = object : Recorder {
           override suspend fun start() { log += "rec:start" }
           override suspend fun stop() = Recorded(byteArrayOf(9), "trial.pcm")
@@ -195,8 +196,8 @@ class RecordingCheckTest {
     w.check.toggleTrial()
     w.check.leave()
     testScheduler.advanceUntilIdle()
-    // The cancel stops the trial's player, and the route set up meanwhile is given back.
-    assertEquals(listOf("trial:stop", "route:stop"), w.log)
+    // The cancel stops the trial's player and calls off the route's setup: nothing was brought up to give back.
+    assertEquals(listOf("trial:stop"), w.log)
     assertEquals(TrialPhase.IDLE, w.trial.state.phase)
   }
 }

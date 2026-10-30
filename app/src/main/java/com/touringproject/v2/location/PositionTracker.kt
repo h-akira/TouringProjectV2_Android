@@ -36,7 +36,7 @@ class PositionTracker(private val source: PositionSource) : Positions {
   private var generation = 0
 
   @Synchronized
-  override fun begin() {
+  override fun begin(): Int {
     subscription?.remove()
     subscription = null
     fixes.clear()
@@ -44,10 +44,12 @@ class PositionTracker(private val source: PositionSource) : Positions {
     val add: (Fix) -> Unit = { fix -> synchronized(this) { if (gen == generation) fixes.add(fix) } }
     runCatching { source.lastKnown(add) }
     subscription = runCatching { source.watch(add) }.getOrNull()
+    return gen
   }
 
   @Synchronized
-  override fun end(): Fix? {
+  override fun end(token: Int): Fix? {
+    if (token != generation) return null
     generation += 1
     subscription?.remove()
     subscription = null

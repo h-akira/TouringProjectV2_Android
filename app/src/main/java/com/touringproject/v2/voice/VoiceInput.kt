@@ -8,6 +8,7 @@ import com.touringproject.v2.api.TranscriptionResult
 import com.touringproject.v2.api.PollOutcome
 import com.touringproject.v2.audio.Recorder
 import com.touringproject.v2.audio.RouteControl
+import com.touringproject.v2.audio.RouteLease
 import com.touringproject.v2.audio.Source
 import com.touringproject.v2.audio.TICK_MS
 import com.touringproject.v2.audio.pcmDurationMs
@@ -66,8 +67,8 @@ class VoiceDeps(
 /**
  * Call it from one thread only (the main thread in the app), like the ask loop. SC-19 attaches it while it is shown:
  * the intercom button then goes here instead of starting an ask (spec §7.3). Leaving SC-19 drops whatever is going on:
- * the run is cancelled and lets go of the recorder and the route at once, except for a route still being set up, which
- * cannot be cut short; until then the run is busy.
+ * the run is cancelled and lets go of the recorder and the route at once, also while the route is still coming up; the
+ * run is busy only for the moment that takes.
  */
 class VoiceInput(private val deps: VoiceDeps, private val scope: CoroutineScope) {
   var state: VoiceState = VOICE_IDLE
@@ -86,14 +87,11 @@ class VoiceInput(private val deps: VoiceDeps, private val scope: CoroutineScope)
   private var running = false
   private var job: Job? = null
   // What the run holds, so a cancelled run lets go of it.
-  private var routeUp = false
+  private var lease: RouteLease? = null
   private var recorderUp = false
   private var shown = 0
 
-  /**
-   * Also true while a run left on SC-19 still unwinds: it may still set up or release the intercom route, so no ask
-   * may take the route yet (like SC-12's trial).
-   */
+  /** Also true while a run left on SC-19 still unwinds; a press then gets the failure cue. */
   val busy: Boolean get() = running
 
   /** SC-19 is shown. The token pairs it with its detach, so the screen being left cannot detach the one shown. */
@@ -165,9 +163,8 @@ class VoiceInput(private val deps: VoiceDeps, private val scope: CoroutineScope)
     stopRequested = false
     set(VoiceState(VoicePhase.RECORDING))
     if (!d.micAllowed()) return fail(s, VoiceFailure.MIC)
-    routeUp = true
     try {
-      d.route.start(source)
+      lease = d.route.lease(source)
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
@@ -235,9 +232,9 @@ class VoiceInput(private val deps: VoiceDeps, private val scope: CoroutineScope)
   }
 
   private suspend fun stopRoute() {
-    if (!routeUp) return
-    routeUp = false
-    deps.route.stop()
+    val held = lease ?: return
+    lease = null
+    held.release()
   }
 
   private suspend fun cancelRecorder() {
