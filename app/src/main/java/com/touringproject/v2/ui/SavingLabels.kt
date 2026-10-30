@@ -60,9 +60,14 @@ fun switchMessage(result: TakeResult): String = when (result) {
   TakeResult.Mismatched -> "ユーザー名は変わりましたが、記録を入れられませんでした。端末の記録は前の名前のままです"
 }
 
-/** What SC-14 and SC-18 tell when the records are not sent for the owner's sake (adr/0015); null when nothing is wrong. */
-fun ownerNotice(state: OwnerState): String? = when (state) {
-  OwnerState.MISMATCH -> "ユーザー名と端末の記録が合っていません。記録は送られていません"
+/**
+ * What SC-14 and SC-18 tell when the records are not sent for the owner's sake (adr/0015); null when nothing is wrong. A
+ * mismatch names the owner (ownerName, when known), so the rider can choose that name again in SC-18.
+ */
+fun ownerNotice(state: OwnerState, ownerName: String?): String? = when (state) {
+  OwnerState.MISMATCH ->
+    if (ownerName == null) "ユーザー名と端末の記録が合っていません。記録は送られていません"
+    else "ユーザー名と端末の記録が合っていません（端末の記録の名前: $ownerName）。記録は送られていません"
   OwnerState.UNCONFIRMED -> "ユーザー名を確かめられていません。記録は送られていません"
   OwnerState.MATCH, OwnerState.UNKNOWN -> null
 }

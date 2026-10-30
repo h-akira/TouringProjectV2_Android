@@ -33,17 +33,23 @@ class RecordOwner(
   private val now = MutableStateFlow(OwnerState.UNKNOWN)
   val state: StateFlow<OwnerState> = now.asStateFlow()
 
+  private val ownerNow = MutableStateFlow<String?>(null)
+
+  /** The owner's user name as the last check found it, for the rider to choose again in SC-18; null when unknown or none. */
+  val ownerName: StateFlow<String?> = ownerNow.asStateFlow()
+
   suspend fun check(): Boolean {
     val name = name()
+    var found: String? = null
     val result = when {
       name == null -> OwnerState.UNKNOWN
       !confirmed() -> OwnerState.UNCONFIRMED
       else -> try {
         val owner = store.owner()
         when {
-          owner == null -> { store.adopt(name); OwnerState.MATCH }
-          owner == name -> OwnerState.MATCH
-          else -> OwnerState.MISMATCH
+          owner == null -> { store.adopt(name); found = name; OwnerState.MATCH }
+          owner == name -> { found = owner; OwnerState.MATCH }
+          else -> { found = owner; OwnerState.MISMATCH }
         }
       } catch (e: CancellationException) {
         throw e
@@ -52,6 +58,7 @@ class RecordOwner(
         OwnerState.UNKNOWN
       }
     }
+    ownerNow.value = found
     now.value = result
     return result == OwnerState.MATCH
   }

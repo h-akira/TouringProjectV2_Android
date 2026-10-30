@@ -17,10 +17,14 @@ private fun ms(day: Int, hour: Int, minute: Int) = ZonedDateTime.of(2026, 10, da
 class SavingLabelsTest {
   @Test
   fun a_mismatch_and_an_unconfirmed_name_are_told_and_the_rest_are_not() {
-    assertEquals("ユーザー名と端末の記録が合っていません。記録は送られていません", ownerNotice(OwnerState.MISMATCH))
-    assertEquals("ユーザー名を確かめられていません。記録は送られていません", ownerNotice(OwnerState.UNCONFIRMED))
-    assertNull(ownerNotice(OwnerState.MATCH))
-    assertNull(ownerNotice(OwnerState.UNKNOWN))
+    assertEquals(
+      "ユーザー名と端末の記録が合っていません（端末の記録の名前: taro01）。記録は送られていません",
+      ownerNotice(OwnerState.MISMATCH, "taro01"),
+    )
+    assertEquals("ユーザー名と端末の記録が合っていません。記録は送られていません", ownerNotice(OwnerState.MISMATCH, null))
+    assertEquals("ユーザー名を確かめられていません。記録は送られていません", ownerNotice(OwnerState.UNCONFIRMED, null))
+    assertNull(ownerNotice(OwnerState.MATCH, "rider01"))
+    assertNull(ownerNotice(OwnerState.UNKNOWN, null))
   }
 
   // Slice 4 spec §7.1 (the breakdown settled in plan 3): only the kinds with any, in one line.

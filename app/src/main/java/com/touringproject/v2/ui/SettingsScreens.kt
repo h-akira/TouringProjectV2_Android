@@ -155,7 +155,9 @@ fun DataScreen(ui: DataUi, onSave: () -> Unit, onUser: () -> Unit, onReread: () 
           Text(ui.lastSaved, color = muted, fontSize = 14.sp)
         } else {
           Text("● 未送信の記録があります", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("saveState"))
-          Text("${unsentBreakdown(summary)}。通信できるようになると自動で送ります。", color = muted, fontSize = 14.sp, modifier = Modifier.testTag("unsentBreakdown"))
+          // While the owner holds the records back (ownerNotice), nothing goes when the network returns.
+          val breakdown = if (ui.ownerNotice == null) "${unsentBreakdown(summary)}。通信できるようになると自動で送ります。" else unsentBreakdown(summary)
+          Text(breakdown, color = muted, fontSize = 14.sp, modifier = Modifier.testTag("unsentBreakdown"))
           Button(onClick = onSave, enabled = !ui.sending, modifier = Modifier.fillMaxWidth().testTag("saveNow")) {
             Text(if (ui.sending) "送っています…" else "今すぐ保存", fontSize = 16.sp)
           }

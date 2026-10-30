@@ -314,6 +314,14 @@ class SettingsScreensTest {
     rule.onNodeWithTag("ownerNotice").assertExists()
   }
 
+  // While the records are not sent for the owner's sake, SC-14 does not promise to send them when the network returns.
+  @Test
+  fun sc14_does_not_promise_to_send_while_the_owner_holds_the_records() {
+    val unsent = SaveSummary(unsentRides = 2, unreached = 1, rides = 3, asks = 19)
+    rule.setContent { DataScreen(data.copy(summary = unsent, ownerNotice = "ユーザー名を確かめられていません。記録は送られていません"), {}, {}, {}) }
+    rule.onNodeWithTag("unsentBreakdown").assertTextEquals("質問できなかった地点 1件・走行 2本")
+  }
+
   @Test
   fun a_name_that_cannot_be_read_is_not_changed_to() {
     rule.setContent { UserScreen("rider01", null, false, null, { null }, {}, {}) }

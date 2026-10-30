@@ -548,9 +548,12 @@ class RideSyncTest {
   @Test
   fun a_pass_that_may_not_go_asks_for_nothing() = runTest {
     var asked = 0
-    val sync = RideSync(World().store, { asked += 1; null }, mayPass = { false }) { _, _ -> }
+    val events = mutableListOf<String>()
+    val sync = RideSync(World().store, { asked += 1; null }, mayPass = { false }) { event, _ -> events += event }
     sync.pass()
     assertEquals(0, asked)
+    // A held pass is logged once, so a device that sends nothing can be told apart from one with nothing to send.
+    assertEquals(listOf("pass_held"), events)
   }
 
   @Test

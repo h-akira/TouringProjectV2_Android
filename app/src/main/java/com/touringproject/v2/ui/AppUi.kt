@@ -293,6 +293,7 @@ fun AppUi(graph: AppGraph) {
                 val take by graph.takeover.state.collectAsStateWithLifecycle()
                 val recordings by graph.recordingCheck.items.collectAsStateWithLifecycle()
                 val ownerState by graph.owner.state.collectAsStateWithLifecycle()
+                val ownerName by graph.owner.ownerName.collectAsStateWithLifecycle()
                 DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
                 // A pass checks the owner first, so the notice is fresh when SC-14 opens.
                 LaunchedEffect(Unit) { graph.sync.request() }
@@ -307,7 +308,7 @@ fun AppUi(graph: AppGraph) {
                     userName = current.userName,
                     message = take.result?.takeIf { take.last == TakeOp.REREAD }?.let(::rereadMessage),
                     recordings = recordings.size,
-                    ownerNotice = ownerNotice(ownerState),
+                    ownerNotice = ownerNotice(ownerState, ownerName),
                   ),
                   onSave = graph.sync::request,
                   onUser = { tabs.push(UserKey) },
@@ -353,6 +354,7 @@ fun AppUi(graph: AppGraph) {
                 val take by graph.takeover.state.collectAsStateWithLifecycle()
                 val waitingToSave by graph.rides.waitingToSave.collectAsStateWithLifecycle()
                 val ownerState by graph.owner.state.collectAsStateWithLifecycle()
+                val ownerName by graph.owner.ownerName.collectAsStateWithLifecycle()
                 DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
                 // A pass checks the owner first, so the notice is fresh when SC-18 opens.
                 LaunchedEffect(Unit) { graph.sync.request() }
@@ -375,7 +377,7 @@ fun AppUi(graph: AppGraph) {
                   onData = { tabs.push(DataKey) },
                   modifier = Modifier.safeDrawingPadding(),
                   counted = summary != null,
-                  ownerNotice = ownerNotice(ownerState),
+                  ownerNotice = ownerNotice(ownerState, ownerName),
                 )
               }
               entry<ReturnAppKey> {

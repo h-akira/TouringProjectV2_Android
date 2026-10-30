@@ -160,7 +160,10 @@ class RideSync(
   }
 
   suspend fun pass() = passing.withLock {
-    if (!mayPass()) return@withLock
+    if (!mayPass()) {
+      log("pass_held", emptyMap())
+      return@withLock
+    }
     if (!online()) return@withLock
     val client = api() ?: return@withLock
     sendingNow.value = true

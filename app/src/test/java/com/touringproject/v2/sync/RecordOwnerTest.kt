@@ -3,6 +3,7 @@ package com.touringproject.v2.sync
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -45,6 +46,8 @@ class RecordOwnerTest {
     val owner = owner(FakeOwner("taro01"))
     assertFalse(owner.check())
     assertEquals(OwnerState.MISMATCH, owner.state.value)
+    // The rider is told the owner's name, so it can be chosen again in SC-18.
+    assertEquals("taro01", owner.ownerName.value)
   }
 
   // R2-01, Review Focus 2: a name made up because the settings could not be read is neither adopted nor sent under.
@@ -55,6 +58,7 @@ class RecordOwnerTest {
     assertFalse(owner.check())
     assertEquals(OwnerState.UNCONFIRMED, owner.state.value)
     assertEquals(emptyList<String>(), store.adopted)
+    assertNull(owner.ownerName.value)
   }
 
   @Test
@@ -80,5 +84,6 @@ class RecordOwnerTest {
     name = "rider01"
     assertTrue(owner.check())
     assertEquals(OwnerState.MATCH, owner.state.value)
+    assertEquals("rider01", owner.ownerName.value)
   }
 }
