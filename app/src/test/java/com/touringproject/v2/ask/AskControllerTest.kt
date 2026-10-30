@@ -206,6 +206,36 @@ private class Harness(
 }
 
 class AskControllerTest {
+  // Android R1-02: the device voice may never say it is done; the ask must not stay SPEAKING for good.
+  @Test
+  fun a_speech_that_never_returns_is_cut_off_and_the_ask_ends() = runTest {
+    val h = Harness(this, stopAfterMs = 1_000, play = { throw IllegalStateException("cannot play") }, sayGate = CompletableDeferred())
+    val running = launch { h.controller.run(Source.SCREEN) }
+    h.until { "say:愛鷹山です。" in h.log }
+    testScheduler.advanceTimeBy(sayLimitMs("愛鷹山です。") - 1)
+    testScheduler.runCurrent()
+    assertEquals(Phase.SPEAKING, h.phase)
+    testScheduler.advanceTimeBy(2)
+    testScheduler.runCurrent()
+    assertEquals(Phase.IDLE, h.phase)
+    assertTrue("say:stop" in h.log)
+    running.join()
+  }
+
+  // The same limit holds for the notice said while an ask is under way: the answer must not wait for it for good.
+  @Test
+  fun a_busy_notice_that_never_returns_does_not_hold_the_answer() = runTest {
+    val gate = CompletableDeferred<Unit>()
+    val h = Harness(this, stopAfterMs = 1_000, answers = listOf(PROCESSING, PROCESSING, PROCESSING, done()), sayGate = gate)
+    val running = launch { h.controller.run(Source.HANDSFREE) }
+    h.until { h.phase == Phase.WAITING }
+    h.controller.press()
+    h.until { BUSY in h.log }
+    running.join()
+    assertEquals(Phase.IDLE, h.phase)
+    assertTrue("play:https://audio/1.mp3" in h.log)
+  }
+
   @Test
   fun handsfree_happy_path_returns_to_nav_right_after_sending() = runTest {
     val h = Harness(this)

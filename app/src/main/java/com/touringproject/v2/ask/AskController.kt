@@ -23,10 +23,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Base64
 
 const val WAITING_CUE_MS = 5_000L
 const val FAILED_SCREEN_MS = 5_000L
+
+/** The longest the device voice may take to say a text (Android R1-02): the engine may never say it is done. */
+const val SAY_BASE_MS = 5_000L
+const val SAY_PER_CHAR_MS = 300L
+fun sayLimitMs(text: String): Long = SAY_BASE_MS + SAY_PER_CHAR_MS * text.length
 
 private fun reasonFor(error: Throwable): FailureReason = when ((error as? ApiError)?.kind) {
   ApiErrorKind.INVALID_KEY -> FailureReason.INVALID_KEY
@@ -283,6 +289,14 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     return SentAsk(accepted.askId, accepted.conversationId, body.conversationId == null, d.now(), here, rideId, ASK_INPUT_TEXT, text)
   }
 
+  /** Says the text with the device voice; one that outlasts its limit is stopped, so the ask can end (Android R1-02). */
+  private suspend fun say(text: String) {
+    if (withTimeoutOrNull(sayLimitMs(text)) { deps.speech.say(text) } == null) {
+      deps.log("say_timeout", mapOf("chars" to text.length))
+      deps.speech.stop()
+    }
+  }
+
   private fun stopService() {
     if (!serviceRunning) return
     serviceRunning = false
@@ -302,7 +316,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   private fun sayBusy() {
     val d = deps
     val run = current
-    val said = scope.async { d.speech.say(BUSY_MESSAGE) }
+    val said = scope.async { say(BUSY_MESSAGE) }
     busySpeech = said
     scope.launch {
       said.await()
@@ -494,7 +508,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
         d.log("play_failed", mapOf("error" to e.toString()))
       }
     }
-    if (!played && isCurrent(run) && !result.answer.isNullOrEmpty()) d.speech.say(result.answer)
+    if (!played && isCurrent(run) && !result.answer.isNullOrEmpty()) say(result.answer)
     maybeReturn(ReturnTiming.SPOKEN, settings, run)
   }
 
@@ -509,7 +523,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     if (!isCurrent(run)) return
     dispatch(FlowEvent.Fail(reason, d.now()))
     d.cues.failure()
-    d.speech.say(spokenMessage(reason))
+    say(spokenMessage(reason))
     if (!isCurrent(run)) return
     val settings = d.settings()
     if (run.source == Source.HANDSFREE) {
