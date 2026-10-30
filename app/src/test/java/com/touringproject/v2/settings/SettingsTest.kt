@@ -164,6 +164,28 @@ class SettingsTest {
     assertTrue(repo.nameConfirmed)
   }
 
+  // R2-01: putting the made-up name back after a failed change of name neither writes it nor confirms it.
+  @Test
+  fun putting_the_made_up_name_back_neither_writes_nor_confirms_it() = runTest {
+    val sets = mutableListOf<String?>()
+    val unreadable = object : KeyValueStore {
+      override suspend fun get(key: String): String? = throw java.io.IOException("busy")
+      override suspend fun set(key: String, value: String?) { sets += value }
+    }
+    val repo = SettingsRepository(unreadable, Random(4)) { _, _ -> }
+    val loaded = repo.load()
+    val madeUp = loaded.userName
+    repo.save(loaded.copy(userName = "taro01"))
+    assertEquals(1, sets.size)
+    assertTrue(repo.nameConfirmed)
+    repo.save(repo.current().copy(userName = madeUp))
+    assertEquals(1, sets.size)
+    assertEquals(madeUp, repo.current().userName)
+    assertFalse(repo.nameConfirmed)
+    repo.update(repo.current(), repo.current().copy(showAskPins = false))
+    assertEquals(1, sets.size)
+  }
+
   // A store with nothing in it is a first launch: the made-up name is kept, and the name is the rider's.
   @Test
   fun an_empty_store_is_a_first_launch_with_a_confirmed_name() = runTest {

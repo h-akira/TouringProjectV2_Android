@@ -50,6 +50,9 @@ class SettingsRepository(
   // True when the saved settings could not be read: the name in memory is made up for this run, and nothing is written.
   private var unreadable = false
 
+  // The name made up for this run when the settings could not be read; it is never written nor confirmed (R2-01).
+  private var madeUpName: String? = null
+
   /** False while the user name is made up because the settings could not be read; true once it is the rider's. */
   val nameConfirmed: Boolean get() = !unreadable
 
@@ -68,6 +71,7 @@ class SettingsRepository(
       null
     }
     val (loaded, needsSave) = decodeSettings(raw, random)
+    madeUpName = if (unreadable) loaded.userName else null
     if (needsSave && !unreadable) guard { store.set(SETTINGS_KEY, encodeSettings(loaded)) }
     state.value = loaded
     return loaded
@@ -88,9 +92,15 @@ class SettingsRepository(
   /**
    * Writes next, and only then holds it; throws when the store cannot write it, leaving the settings as they were. For
    * the change of user name, which must not go on with a name that was not saved (Android #72). The rider's own choice
-   * of a name makes it confirmed.
+   * of a name makes it confirmed. The name made up when the settings could not be read (put back after a change that
+   * did not go through) is only held: it is not written, and it leaves the name not confirmed (R2-01).
    */
   suspend fun save(next: Settings) = writes.withLock {
+    if (madeUpName != null && next.userName == madeUpName) {
+      state.value = next
+      unreadable = true
+      return@withLock
+    }
     store.set(SETTINGS_KEY, encodeSettings(next))
     state.value = next
     unreadable = false
