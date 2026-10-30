@@ -55,11 +55,7 @@ interface AskDao {
   suspend fun deleteRow(askId: String)
 
   // Sending memos (slice 3 spec §5.1): the asks whose memo changed since it was taken, unless that version was refused.
-  @Query(
-    "SELECT askId, memo, memoUpdatedAt FROM asks WHERE memoUpdatedAt IS NOT NULL AND " +
-      "(memoSentUpdatedAt IS NULL OR memoSentUpdatedAt < memoUpdatedAt) AND " +
-      "(memoRejectedUpdatedAt IS NULL OR memoRejectedUpdatedAt != memoUpdatedAt) ORDER BY memoUpdatedAt",
-  )
+  @Query("SELECT askId, memo, memoUpdatedAt FROM asks WHERE $MEMO_UNSENT ORDER BY memoUpdatedAt")
   suspend fun unsentMemos(): List<AskMemoRow>
 
   @Query(
@@ -71,10 +67,7 @@ interface AskDao {
   suspend fun markMemoRefused(askId: String, updatedAt: Long)
 
   // Sending unreached asks (slice 4 spec §5.1): those changed since they were taken, unless that version was refused.
-  @Query(
-    "SELECT * FROM asks WHERE status = 'offline' AND (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
-      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt) ORDER BY updatedAt",
-  )
+  @Query("SELECT * FROM asks WHERE $UNREACHED_UNSENT ORDER BY updatedAt")
   suspend fun unsentUnreached(): List<AskEntity>
 
   /** As a point memo's: the marker never moves back, and an answer without an address or heading keeps what it has. */

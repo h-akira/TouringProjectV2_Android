@@ -35,15 +35,10 @@ data class RideRow(
 )
 
 // What SC-14 counts (SaveSummary): what the next pass would send, but the recording ride's, and all that is kept.
-private const val SUMMARY = "SELECT (SELECT COUNT(*) FROM asks WHERE status = 'offline' AND (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
-  "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt)) AS unreached, " +
-  "(SELECT COUNT(*) FROM rides WHERE status != 'recording' AND ((sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
-  "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt) OR " +
-  "EXISTS (SELECT 1 FROM route_points WHERE chunk IS NULL AND route_points.rideId = rides.id))) AS unsentRides, " +
-  "(SELECT COUNT(*) FROM notes WHERE (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
-  "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt)) AS notes, " +
-  "(SELECT COUNT(*) FROM asks WHERE memoUpdatedAt IS NOT NULL AND (memoSentUpdatedAt IS NULL OR memoSentUpdatedAt < memoUpdatedAt) AND " +
-  "(memoRejectedUpdatedAt IS NULL OR memoRejectedUpdatedAt != memoUpdatedAt)) AS memos, " +
+private const val SUMMARY = "SELECT (SELECT COUNT(*) FROM asks WHERE $UNREACHED_UNSENT) AS unreached, " +
+  "(SELECT COUNT(*) FROM rides WHERE status != 'recording' AND ($UNSENT OR $POINTS_UNSENT)) AS unsentRides, " +
+  "(SELECT COUNT(*) FROM notes WHERE $UNSENT) AS notes, " +
+  "(SELECT COUNT(*) FROM asks WHERE $MEMO_UNSENT) AS memos, " +
   "(SELECT COUNT(*) FROM deletions) AS deletions, (SELECT COUNT(*) FROM rides) AS rides, (SELECT COUNT(*) FROM asks) AS asks"
 
 @Dao
@@ -63,12 +58,9 @@ interface RideDao {
     "SELECT *, (SELECT COUNT(*) FROM asks WHERE asks.rideId = rides.id) AS questions, " +
       "(EXISTS (SELECT 1 FROM route_points WHERE chunk IS NULL AND route_points.rideId = rides.id) OR " +
       "EXISTS (SELECT 1 FROM route_points WHERE refused = 1 AND route_points.rideId = rides.id)) AS pointsLeft, " +
-      "EXISTS (SELECT 1 FROM asks WHERE asks.rideId = rides.id AND asks.memoUpdatedAt IS NOT NULL AND " +
-      "(asks.memoSentUpdatedAt IS NULL OR asks.memoSentUpdatedAt < asks.memoUpdatedAt)) AS memosLeft, " +
-      "EXISTS (SELECT 1 FROM notes WHERE notes.rideId = rides.id AND " +
-      "(notes.sentUpdatedAt IS NULL OR notes.sentUpdatedAt < notes.updatedAt)) AS notesLeft, " +
-      "EXISTS (SELECT 1 FROM asks WHERE asks.rideId = rides.id AND asks.status = 'offline' AND " +
-      "(asks.sentUpdatedAt IS NULL OR asks.sentUpdatedAt < asks.updatedAt)) AS unreachedLeft FROM rides",
+      "EXISTS (SELECT 1 FROM asks WHERE asks.rideId = rides.id AND $MEMO_LEFT) AS memosLeft, " +
+      "EXISTS (SELECT 1 FROM notes WHERE notes.rideId = rides.id AND $NOTE_LEFT) AS notesLeft, " +
+      "EXISTS (SELECT 1 FROM asks WHERE asks.rideId = rides.id AND $UNREACHED_LEFT) AS unreachedLeft FROM rides",
   )
   fun rows(): Flow<List<RideRow>>
 
@@ -119,8 +111,7 @@ interface RideDao {
   // Sending (slice 2 spec §5.3). Points are counted and cut into chunks in the order they were recorded (id).
 
   @Query(
-    "SELECT * FROM rides WHERE ((sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
-      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt)) " +
+    "SELECT * FROM rides WHERE ($UNSENT) " +
       "OR id IN (SELECT rideId FROM route_points WHERE chunk IS NULL) ORDER BY updatedAt",
   )
   suspend fun unsentRides(): List<RideEntity>

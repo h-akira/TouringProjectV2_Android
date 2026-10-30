@@ -41,9 +41,12 @@ fun chunksToSend(sent: Int, total: Int, partialToo: Boolean): List<ChunkRange> {
   return chunks
 }
 
+/** The Backend has taken this version of the row (or a newer one). */
+fun versionTaken(sentUpdatedAt: Long?, updatedAt: Long): Boolean = sentUpdatedAt != null && sentUpdatedAt >= updatedAt
+
 /** The ride's meta goes when it has changed since the Backend last took it, unless the Backend refused this very version. */
 fun metaToSend(updatedAt: Long, sentUpdatedAt: Long?, rejectedUpdatedAt: Long?): Boolean =
-  (sentUpdatedAt == null || sentUpdatedAt < updatedAt) && rejectedUpdatedAt != updatedAt
+  !versionTaken(sentUpdatedAt, updatedAt) && rejectedUpdatedAt != updatedAt
 
 /** ISO 8601 in UTC with its zone ("Z"), as the Backend takes times. */
 fun iso(ms: Long): String = Instant.ofEpochMilli(ms).toString()
