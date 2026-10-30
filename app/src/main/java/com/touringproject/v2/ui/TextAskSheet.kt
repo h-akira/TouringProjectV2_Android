@@ -20,7 +20,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.touringproject.v2.ask.TextAskOutcome
 import com.touringproject.v2.ask.TextSheet
 import com.touringproject.v2.ask.cutTextAsk
 import com.touringproject.v2.ask.textAskLeft
