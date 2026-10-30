@@ -18,7 +18,7 @@ import com.touringproject.v2.sync.TakeoverStore
  * Takes the cloud's records in (slice 4 spec §6.3). The device is read, merged with the cloud and written in one
  * transaction, so a write that fails, or a cloud record that cannot be read, leaves the device as it was. What comes in
  * is marked as sent, so it is not sent back. waitingToSave tells whether a ride's change waits in memory to be written
- * again (RideController); for a change of user name it counts as left to send (Android #72). The owner of the records
+ * again (RideController); a change of user name is Blocked(WAITING) by it (Android #72, #76). The owner of the records
  * is written in the same transaction as the records (adr/0015).
  */
 class RoomTakeover(private val db: RideDatabase, private val waitingToSave: () -> Boolean = { false }) : TakeoverStore {

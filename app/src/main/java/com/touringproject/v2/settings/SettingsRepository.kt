@@ -80,7 +80,7 @@ class SettingsRepository(
   fun current(): Settings = checkNotNull(state.value) { "settings not loaded" }
 
   /**
-   * Lays what to changed from from onto the newest settings and keeps it (applyChange); nothing is written while the
+   * Lays what changed from from to to onto the newest settings and keeps it (applyChange); nothing is written while the
    * settings could not be read.
    */
   suspend fun update(from: Settings, to: Settings) = writes.withLock {

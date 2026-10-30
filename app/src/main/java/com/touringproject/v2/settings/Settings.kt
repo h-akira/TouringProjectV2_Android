@@ -171,7 +171,7 @@ fun withRecentApp(recent: List<LaunchableApp>, app: LaunchableApp, max: Int = 5)
 fun maskKey(key: String): String = if (key.length <= 4) "••••" else "••••••••${key.takeLast(4)}"
 
 /**
- * The fields to changed from from, laid onto latest: a screen holds a copy that may be old, so what it did not touch
+ * The fields that changed from from to to, laid onto latest: a screen holds a copy that may be old, so what it did not touch
  * is the newest value, not the copy's. The user name is always latest's: it changes through the repository's save only
  * (slice 6 plan 5, R10-03).
  */

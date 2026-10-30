@@ -20,7 +20,8 @@ interface TakeoverStore {
   /**
    * Merges the cloud's records into the device's (slice 4 spec §6.1) in one transaction; with replace, all the device
    * keeps goes first (§6.4: another user name). Returns Done with how many records came in or went, or Blocked when
-   * nothing was done because a ride is recording or paused or, with replace, something is left to send (US-E-06.008).
+   * nothing was done: RIDE while a ride is recording or paused; with replace, UNSENT when something is left to send
+   * (US-E-06.008) and WAITING when a ride's change waits to be written; without replace, OWNER (below).
    * A failure throws and changes nothing. userName is the name the records are read under: it becomes the owner of the
    * device's records in the same transaction (adr/0015). With replace, going back to the owner's own name keeps the
    * records and what is left to send; a read again (no replace) under a name that is not the owner's is Blocked(OWNER).
