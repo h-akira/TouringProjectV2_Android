@@ -173,6 +173,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     api = { user -> backend.client(user) },
     // Read at the take, long after rides below is built.
     store = RoomTakeover(database) { rides.waitingToSave.value },
+    // A made-up name is not made the owner by a read again (adr/0015).
+    nameConfirmed = { settings.nameConfirmed },
     sync = sync,
     now = System::currentTimeMillis,
     scope = scope,

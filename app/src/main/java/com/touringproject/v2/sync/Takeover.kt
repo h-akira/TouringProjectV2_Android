@@ -91,6 +91,8 @@ class Takeover(
   private val sync: RideSync,
   private val now: () -> Long,
   private val scope: CoroutineScope,
+  /** False while the user name is made up because the settings could not be read (SettingsRepository.nameConfirmed). */
+  private val nameConfirmed: () -> Boolean = { true },
   private val log: (event: String, data: Map<String, Any?>) -> Unit,
 ) {
   private val stateNow = MutableStateFlow(TakeState())
@@ -145,8 +147,12 @@ class Takeover(
     false
   }
 
-  /** SC-14's クラウドから読み直す: the current name's records, merged with the device's. */
+  /**
+   * SC-14's クラウドから読み直す: the current name's records, merged with the device's. A made-up name (not confirmed) is
+   * Blocked(OWNER) without a take, so it never becomes the owner of the device's records (adr/0015).
+   */
   fun reread(userName: String) = start(TakeOp.REREAD) {
+    if (!nameConfirmed()) return@start TakeResult.Blocked(BlockReason.OWNER)
     store.take(CloudRecords(readAll(userName, null), now()), replace = false, userName = userName)
   }
 
