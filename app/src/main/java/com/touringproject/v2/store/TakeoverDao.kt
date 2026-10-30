@@ -27,6 +27,12 @@ interface TakeoverDao {
   @Query("SELECT askId, rideId, updatedAt, memoUpdatedAt FROM asks")
   suspend fun asks(): List<AskVersion>
 
+  @Query("SELECT userName FROM owner WHERE id = 0")
+  suspend fun owner(): String?
+
+  @Upsert
+  suspend fun setOwner(owner: OwnerEntity)
+
   @Query("DELETE FROM route_points")
   suspend fun clearPoints()
 

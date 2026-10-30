@@ -6,8 +6,7 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-// The device's record of rides (slice 2 spec §5.1). Every schema version is exported to app/schemas and is moved
-// forward by a Migration; the database is never rebuilt destructively.
+// Room tables of the device's records.
 
 @Entity(tableName = "rides")
 data class RideEntity(
@@ -146,3 +145,7 @@ data class NoteEntity(
 /** A record deleted on the device whose deletion has not reached the Backend yet (slice 3 spec §4.2). kind: ask / ride / note. */
 @Entity(tableName = "deletions", primaryKeys = ["kind", "id"])
 data class DeletionEntity(val kind: String, val id: String, val rideId: String?, val deletedAt: Long)
+
+/** The one row that says whose records the device keeps: the user name they were kept and sent under (adr/0015). */
+@Entity(tableName = "owner")
+data class OwnerEntity(@PrimaryKey val id: Int = 0, val userName: String)

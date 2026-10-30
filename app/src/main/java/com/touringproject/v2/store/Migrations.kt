@@ -97,3 +97,14 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     db.execSQL("CREATE INDEX IF NOT EXISTS `index_asks_askedAt` ON `asks` (`askedAt`)")
   }
 }
+
+/**
+ * 6 -> 7 (slice 6 plan 5, adr/0015): the owner of the records, one row. It only adds, so it stays quick inside
+ * RideController.load() (adr/0006). The row is empty; the first pass of the sync after this version takes the user
+ * name of the settings as the owner (RecordOwner).
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+  override fun migrate(db: SupportSQLiteDatabase) {
+    db.execSQL("CREATE TABLE IF NOT EXISTS `owner` (`id` INTEGER NOT NULL, `userName` TEXT NOT NULL, PRIMARY KEY(`id`))")
+  }
+}
