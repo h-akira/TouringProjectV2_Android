@@ -51,6 +51,7 @@ import com.touringproject.v2.settings.headingParams
 import com.touringproject.v2.settings.withHeadingDefaults
 import com.touringproject.v2.settings.withRecordingDefaults
 import com.touringproject.v2.sync.TakeOp
+import com.touringproject.v2.sync.nameChangeBlock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -351,12 +352,7 @@ fun AppUi(graph: AppGraph) {
                 LaunchedEffect(Unit) { graph.rides.retrySave() }
                 // The write checks again in its own transaction (US-E-06.008); a ride's change still waiting to be
                 // written counts (Android #76).
-                val block = when {
-                  ride != null -> UserBlock.RIDE
-                  (summary?.unsent ?: 0) > 0 -> UserBlock.UNSENT
-                  waitingToSave -> UserBlock.WAITING
-                  else -> null
-                }
+                val block = nameChangeBlock(ride != null, summary?.unsent ?: 0, waitingToSave)
                 UserScreen(
                   current.userName, block,
                   reading = take.running != null,

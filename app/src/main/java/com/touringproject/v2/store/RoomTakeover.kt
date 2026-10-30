@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.touringproject.v2.ride.RoutePoint
 import com.touringproject.v2.ride.stepMeters
 import com.touringproject.v2.sync.BlockReason
+import com.touringproject.v2.sync.nameChangeBlock
 import com.touringproject.v2.sync.CloudRecords
 import com.touringproject.v2.sync.DeviceRecords
 import com.touringproject.v2.sync.KeptAsk
@@ -27,7 +28,8 @@ class RoomTakeover(private val db: RideDatabase, private val waitingToSave: () -
   override suspend fun take(cloud: CloudRecords, replace: Boolean): TakeResult = db.withTransaction {
     if (takeover.activeRides() > 0) return@withTransaction TakeResult.Blocked(BlockReason.RIDE)
     if (replace) {
-      if (rides.summaryNow().unsent > 0 || waitingToSave()) return@withTransaction TakeResult.Blocked(BlockReason.UNSENT)
+      nameChangeBlock(rideActive = false, unsent = rides.summaryNow().unsent, waitingToSave = waitingToSave())
+        ?.let { return@withTransaction TakeResult.Blocked(it) }
       takeover.clearAll()
     }
     val merged = cloud.mergeInto(device())

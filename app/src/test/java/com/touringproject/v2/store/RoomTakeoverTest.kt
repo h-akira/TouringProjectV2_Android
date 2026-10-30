@@ -143,7 +143,7 @@ class RoomTakeoverTest {
   fun a_rides_change_waiting_to_be_written_keeps_the_name() = runBlocking {
     val waiting = RoomTakeover(db) { true }
     sentRide("r0")
-    assertEquals(TakeResult.Blocked(BlockReason.UNSENT), waiting.take(cloud, replace = true, now = NOW))
+    assertEquals(TakeResult.Blocked(BlockReason.WAITING), waiting.take(cloud, replace = true, now = NOW))
     assertEquals(listOf("r0"), records.list.first().map { it.ride.id })
     assertEquals(TakeResult.Done(4), waiting.take(cloud, replace = false, now = NOW))
   }

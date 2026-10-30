@@ -38,8 +38,10 @@ fun saveRowValue(summary: SaveSummary?): String = when {
 /** SC-14 after クラウドから読み直す. */
 fun rereadMessage(result: TakeResult): String = when (result) {
   is TakeResult.Done -> if (result.count == 0) "新しい記録はありませんでした" else "${result.count}件の記録を読み込みました"
-  // Reading again is held back by a ride only.
-  is TakeResult.Blocked -> "走行を終えてから読み直せます"
+  is TakeResult.Blocked -> when (result.reason) {
+    BlockReason.OWNER -> "ユーザー名と端末の記録が合っていません。ユーザー名の変更から直してください"
+    else -> "走行を終えてから読み直せます"
+  }
   // A read again changes no name, so it never comes to Mismatched.
   TakeResult.Failed, TakeResult.Mismatched -> "読み込めませんでした"
 }
@@ -50,7 +52,17 @@ fun switchMessage(result: TakeResult): String = when (result) {
   is TakeResult.Blocked -> when (result.reason) {
     BlockReason.RIDE -> "走行を終えてから変えられます"
     BlockReason.UNSENT -> "未送信の記録があるため、変えられませんでした"
+    BlockReason.WAITING -> "走行の変更を端末に書き込めていないため、変えられませんでした"
+    BlockReason.OWNER -> "変えられませんでした"
   }
   TakeResult.Failed -> "読み込めませんでした。ユーザー名は変えていません"
   TakeResult.Mismatched -> "ユーザー名は変わりましたが、記録を入れられませんでした。端末の記録は前の名前のままです"
+}
+
+/** Why the user name cannot change now (SC-18, US-E-06.008). */
+fun blockMessage(reason: BlockReason): String = when (reason) {
+  BlockReason.RIDE -> "走行を終えてから変えられます"
+  BlockReason.UNSENT -> "未送信の記録があります。先に「データの保存」で送ってください"
+  BlockReason.WAITING -> "走行の変更を端末に書き込めていません。端末の空き容量を確かめてください"
+  BlockReason.OWNER -> "ユーザー名と端末の記録が合っていません。ユーザー名の変更から直してください"
 }

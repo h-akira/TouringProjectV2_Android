@@ -31,6 +31,7 @@ import com.touringproject.v2.recordings.TrialState
 import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.Settings
+import com.touringproject.v2.sync.BlockReason
 import com.touringproject.v2.sync.Peek
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -302,7 +303,7 @@ class SettingsScreensTest {
   // US-E-06.008: not while a ride records or something is left to send, nor during a read; SC-14 is a tap away.
   @Test
   fun the_name_cannot_change_while_blocked_or_reading() {
-    var block by mutableStateOf<UserBlock?>(UserBlock.UNSENT)
+    var block by mutableStateOf<BlockReason?>(BlockReason.UNSENT)
     var reading by mutableStateOf(false)
     var toData = 0
     rule.setContent { UserScreen("rider01", block, reading, "ユーザー名を変えました", { null }, {}, { toData += 1 }) }
@@ -310,7 +311,7 @@ class SettingsScreensTest {
     rule.onNodeWithTag("userBlock").assertTextEquals("未送信の記録があります。先に「データの保存」で送ってください")
     rule.onNodeWithTag("toData").performClick()
     assertEquals(1, toData)
-    block = UserBlock.RIDE
+    block = BlockReason.RIDE
     rule.onNodeWithTag("userBlock").assertTextEquals("走行を終えてから変えられます")
     rule.onNodeWithTag("toData").assertDoesNotExist()
     block = null
@@ -323,7 +324,7 @@ class SettingsScreensTest {
   // A ride's change that cannot be written is not sent from SC-14, so SC-18 does not lead there (plan 5's final review).
   @Test
   fun a_change_that_cannot_be_written_is_told_without_the_way_to_sc14() {
-    rule.setContent { UserScreen("rider01", UserBlock.WAITING, false, null, { null }, {}, {}) }
+    rule.setContent { UserScreen("rider01", BlockReason.WAITING, false, null, { null }, {}, {}) }
     rule.onNodeWithTag("changeUser").assertIsNotEnabled()
     rule.onNodeWithTag("userBlock").assertTextEquals("走行の変更を端末に書き込めていません。端末の空き容量を確かめてください")
     rule.onNodeWithTag("toData").assertDoesNotExist()

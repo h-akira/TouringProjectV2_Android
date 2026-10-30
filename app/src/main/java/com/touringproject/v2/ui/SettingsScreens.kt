@@ -52,6 +52,7 @@ import com.touringproject.v2.settings.USER_NAME_RE
 import com.touringproject.v2.settings.VOLUME_DB_CHOICES
 import com.touringproject.v2.settings.maskKey
 import com.touringproject.v2.settings.withRecentApp
+import com.touringproject.v2.sync.BlockReason
 import com.touringproject.v2.sync.Peek
 import kotlinx.coroutines.launch
 
@@ -358,15 +359,6 @@ fun ConnectionScreen(
   }
 }
 
-/** Why the user name cannot change now (slice 4 spec §6.4, US-E-06.008). */
-enum class UserBlock(val message: String) {
-  RIDE("走行を終えてから変えられます"),
-  UNSENT("未送信の記録があります。先に「データの保存」で送ってください"),
-
-  /** A ride's change waits to be written to the device (RideController.waitingToSave); sending does not help. */
-  WAITING("走行の変更を端末に書き込めていません。端末の空き容量を確かめてください"),
-}
-
 /**
  * SC-18. peek reads the new name's first page (null when it cannot), and DL-03 tells from it whether the name has
  * records (slice 4 spec §6.4). onChange starts the change after DL-03; reading is true while a read of the cloud is under
@@ -376,7 +368,7 @@ enum class UserBlock(val message: String) {
 @Composable
 fun UserScreen(
   userName: String,
-  block: UserBlock?,
+  block: BlockReason?,
   reading: Boolean,
   message: String?,
   peek: suspend (String) -> Peek?,
@@ -417,8 +409,8 @@ fun UserScreen(
       modifier = Modifier.fillMaxWidth().testTag("changeUser"),
       colors = ButtonDefaults.buttonColors(containerColor = Blue),
     ) { Text(if (reading || checking) "読み込んでいます…" else "変更する", fontSize = 18.sp) }
-    block?.let { Text(it.message, modifier = Modifier.testTag("userBlock")) }
-    if (block == UserBlock.UNSENT) TextButton(onClick = onData, modifier = Modifier.testTag("toData")) { Text("データの保存へ") }
+    block?.let { Text(blockMessage(it), modifier = Modifier.testTag("userBlock")) }
+    if (block == BlockReason.UNSENT) TextButton(onClick = onData, modifier = Modifier.testTag("toData")) { Text("データの保存へ") }
     message?.let { Text(it, modifier = Modifier.testTag("userMessage")) }
     Text(
       "変えると、今の記録は引き継がれず、新しいユーザー名の記録が表示されます。今の記録は消えず、元のユーザー名に戻せばまた見られます。",

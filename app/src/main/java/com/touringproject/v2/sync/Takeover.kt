@@ -41,6 +41,12 @@ enum class BlockReason {
 
   /** Something is left to send (a change of user name only). */
   UNSENT,
+
+  /** A ride's change waits to be written to the device (RideController.waitingToSave); sending does not help. */
+  WAITING,
+
+  /** The records are another user name's than the one asked for (a read again only; slice 6 plan 5). */
+  OWNER,
 }
 
 /** What a read of the cloud came to. */
