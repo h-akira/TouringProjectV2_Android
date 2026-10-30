@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -31,6 +32,10 @@ import kotlin.coroutines.resume
 //
 // Screen button: there is no request from the headset, so SCO is opened as a virtual call by naming the SCO
 // *output* (sink) in setCommunicationDevice(); the return value is checked because a false is otherwise silent.
+//
+// A setup (startVoiceRecognition, acquireSco) that is cancelled is undone on the main thread before the call returns:
+// whatever it had begun or brought up is let go, and nothing it left waiting (a listener, a timeout, a headset
+// callback) acts later on the route of whoever holds it by then (Android R1-03).
 //
 // All Bluetooth and AudioManager work runs on the main thread.
 @SuppressLint("MissingPermission") // BLUETOOTH_CONNECT is requested at runtime by the app
@@ -61,7 +66,9 @@ class AudioRoute(private val context: Context) {
 
   suspend fun acquireSco(timeoutMs: Long): RouteResult = onMain { done -> acquireSco(timeoutMs, done) }
 
-  suspend fun releaseSco() = withContext(Dispatchers.Main) {
+  suspend fun releaseSco() = withContext(Dispatchers.Main) { release() }
+
+  private fun release() {
     runCatching { audioManager.clearCommunicationDevice() }
     audioManager.mode = AudioManager.MODE_NORMAL
   }
@@ -85,16 +92,29 @@ class AudioRoute(private val context: Context) {
     return InputDevice(type, device.productName.toString())
   }
 
-  private suspend fun onMain(block: (done: (Boolean, String) -> Unit) -> Unit): RouteResult = withContext(Dispatchers.Main) {
-    suspendCancellableCoroutine { cont ->
-      var resumed = false
-      block { ok, note ->
-        if (!resumed) {
-          resumed = true
-          cont.resume(RouteResult(ok, note))
+  /** block starts a setup and gives back what undoes it, however far it has come. */
+  private suspend fun onMain(block: (done: (Boolean, String) -> Unit) -> (() -> Unit)): RouteResult = withContext(Dispatchers.Main) {
+    var undo: () -> Unit = {}
+    try {
+      suspendCancellableCoroutine { cont ->
+        var resumed = false
+        undo = block { ok, note ->
+          if (!resumed) {
+            resumed = true
+            cont.resume(RouteResult(ok, note))
+          }
         }
       }
+    } catch (e: CancellationException) {
+      undo()
+      throw e
     }
+  }
+
+  /** One startVoiceRecognition: a headset callback that comes after the cancel does nothing. */
+  private class VrAttempt {
+    var cancelled = false
+    var session = 0
   }
 
   private fun mediaOnCallRoute(): Boolean {
@@ -107,13 +127,15 @@ class AudioRoute(private val context: Context) {
 
   // ---------------- intercom button: voice recognition ----------------
 
-  private fun startVoiceRecognition(timeoutMs: Long, done: (Boolean, String) -> Unit) {
+  private fun startVoiceRecognition(timeoutMs: Long, done: (Boolean, String) -> Unit): () -> Unit {
     if (vrPending != null) {
       done(false, "already starting")
-      return
+      return {}
     }
+    val attempt = VrAttempt()
     ensureReceiver()
     withHeadset { h ->
+      if (attempt.cancelled) return@withHeadset
       if (h == null) {
         done(false, "no headset proxy")
         return@withHeadset
@@ -129,12 +151,22 @@ class AudioRoute(private val context: Context) {
         return@withHeadset
       }
       if (vrDevice != null) endSession(h, "superseded")
-      waitAudioOff(h, device) { begin(h, device, timeoutMs, done) }
+      waitAudioOff(h, device, attempt) { begin(h, device, timeoutMs, done, attempt) }
+    }
+    return {
+      attempt.cancelled = true
+      // Only a setup that had begun owns the session; one still waiting for the headset has brought nothing up.
+      if (attempt.session != 0 && attempt.session == vrSession) {
+        vrPending?.invoke(false, "cancelled")
+        headset?.let { endSession(it, "cancelled") }
+        audioManager.mode = AudioManager.MODE_NORMAL
+      }
     }
   }
 
-  private fun begin(h: BluetoothHeadset, device: BluetoothDevice, timeoutMs: Long, done: (Boolean, String) -> Unit) {
+  private fun begin(h: BluetoothHeadset, device: BluetoothDevice, timeoutMs: Long, done: (Boolean, String) -> Unit, attempt: VrAttempt) {
     val session = ++vrSession
+    attempt.session = session
     vrDevice = device
     val onTimeout = Runnable { if (vrSession == session) vrPending?.invoke(false, "SCO timeout") }
     // Wait for SCO by broadcast and by polling, whichever comes first.
@@ -198,10 +230,11 @@ class AudioRoute(private val context: Context) {
     }
   }
 
-  private fun waitAudioOff(h: BluetoothHeadset, device: BluetoothDevice, then: () -> Unit) {
+  private fun waitAudioOff(h: BluetoothHeadset, device: BluetoothDevice, attempt: VrAttempt, then: () -> Unit) {
     val deadline = System.currentTimeMillis() + AUDIO_OFF_WAIT_MS
     val check = object : Runnable {
       override fun run() {
+        if (attempt.cancelled) return
         val on = runCatching { h.isAudioConnected(device) }.getOrDefault(false)
         if (!on || System.currentTimeMillis() >= deadline) then() else main.postDelayed(this, POLL_MS)
       }
@@ -284,20 +317,20 @@ class AudioRoute(private val context: Context) {
 
   // ---------------- screen button: virtual call ----------------
 
-  private fun acquireSco(timeoutMs: Long, done: (Boolean, String) -> Unit) {
+  private fun acquireSco(timeoutMs: Long, done: (Boolean, String) -> Unit): () -> Unit {
     // The communication-device API is Android 12+; before that the screen button records from the phone's microphone.
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
       done(false, "needs Android 12")
-      return
+      return {}
     }
     val am = audioManager
-    am.communicationDevice?.let { if (it.type == SCO_TYPE) { done(true, "already SCO"); return } }
+    am.communicationDevice?.let { if (it.type == SCO_TYPE) { done(true, "already SCO"); return { release() } } }
     am.mode = AudioManager.MODE_IN_COMMUNICATION
     val sink = am.availableCommunicationDevices.firstOrNull { it.type == SCO_TYPE }
     if (sink == null) {
       am.mode = AudioManager.MODE_NORMAL
       done(false, "no SCO output")
-      return
+      return {}
     }
     var settled = false
     lateinit var listener: AudioManager.OnCommunicationDeviceChangedListener
@@ -318,9 +351,12 @@ class AudioRoute(private val context: Context) {
     val accepted = runCatching { am.setCommunicationDevice(sink) }.getOrDefault(false)
     if (!accepted) {
       finish(false, "setCommunicationDevice returned false")
-      return
+      return {}
     }
     am.communicationDevice?.let { if (it.type == SCO_TYPE) finish(true, "connected (immediate)") }
+    // Called off while pending: settle as a failure (clears the route, drops the listener and the timeout). Called off
+    // after it connected: the route is up and the caller never got it, so let it go.
+    return { if (settled) release() else finish(false, "cancelled") }
   }
 
   private companion object {
