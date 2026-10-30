@@ -310,7 +310,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
 
   private suspend fun record(run: Run, settings: Settings): Recording? {
     val d = deps
-    d.location.begin()
+    val track = d.location.begin()
     val routed = try {
       d.route.start(run.source)
     } catch (e: CancellationException) {
@@ -323,7 +323,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     // Setting up the route can take seconds; a cancel or a newer ask meanwhile owns the recorder and the route.
     if (!isCurrent(run)) {
       d.route.stop()
-      d.location.end()
+      d.location.end(track)
       return null
     }
     if (!routed) dispatch(FlowEvent.PhoneMic(d.now()))
@@ -331,7 +331,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       d.recorder.start()
     } catch (e: Exception) {
       d.route.stop()
-      d.location.end()
+      d.location.end(track)
       fail(FailureReason.MIC, run)
       return null
     }
@@ -344,7 +344,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
     if (!isCurrent(run)) {
       d.recorder.cancel()
       d.route.stop()
-      d.location.end()
+      d.location.end(track)
       return null
     }
     // Read while the recorder still runs: the system only reports the input device of an active recording.
@@ -355,20 +355,20 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
       d.recorder.stop()
     } catch (e: Exception) {
       d.route.stop()
-      d.location.end()
+      d.location.end(track)
       fail(FailureReason.MIC, run)
       return null
     }
     d.route.stop()
     // A microphone held by another app can start without delivering anything; sending nothing would be heard as "no speech".
     if (stopped.pcm.isEmpty()) {
-      d.location.end()
+      d.location.end(track)
       fail(FailureReason.MIC, run)
       return null
     }
     val endedAt = d.now()
     val meta = RecordingMeta(stopped.name, startedAt, pcmDurationMs(stopped.pcm.size), phoneMic, device, null)
-    val here = d.location.end()
+    val here = d.location.end(track)
     val heading = d.heading(here)
     return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, here, heading, endedAt, meta, stopped.pcm)
   }

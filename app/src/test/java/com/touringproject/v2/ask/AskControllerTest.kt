@@ -79,6 +79,8 @@ private class Harness(
   var heading: Double? = 12.5,
   /** The device's last known fix, where a text ask is (slice 5 spec §4.1). */
   var latest: Fix? = HERE,
+  /** A real tracker, to see what the cleanup of one ask does to the next. */
+  val positions: Positions? = null,
 ) {
   /** What each text ask told the sheet. */
   val outcomes = mutableListOf<TextAskOutcome>()
@@ -152,9 +154,9 @@ private class Harness(
     online = { online },
     newId = { "u1" },
     ride = { ride },
-    location = object : Positions {
-      override fun begin() { log += "loc:begin" }
-      override fun end() = HERE
+    location = positions ?: object : Positions {
+      override fun begin(): Int { log += "loc:begin"; return 1 }
+      override fun end(token: Int) = HERE
       override suspend fun latest(): Fix? { log += "loc:latest"; return latest }
     },
     heading = { here -> headingAsked += here to now(); heading },
