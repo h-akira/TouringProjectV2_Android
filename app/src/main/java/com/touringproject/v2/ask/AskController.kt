@@ -8,6 +8,8 @@ import com.touringproject.v2.api.AskResult
 import com.touringproject.v2.api.Point
 import com.touringproject.v2.api.PollOutcome
 import com.touringproject.v2.api.pollUntilDone
+import com.touringproject.v2.audio.LeaseRequest
+import com.touringproject.v2.audio.RouteLease
 import com.touringproject.v2.audio.Source
 import com.touringproject.v2.audio.TICK_MS
 import com.touringproject.v2.audio.pcmDurationMs
@@ -53,7 +55,10 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
 
   // Per-ask state: an older ask that is still unwinding must not read or change the newer one's.
   // cancelled is told when the rider ends the ask with the big button (a text ask's sheet: Android #79).
-  private class Run(val id: Int, val source: Source, var returned: Boolean = false, val cancelled: () -> Unit = {})
+  // routeRequest is the try to take the audio route while it is coming up: the big button calls it off at once.
+  private class Run(val id: Int, val source: Source, var returned: Boolean = false, val cancelled: () -> Unit = {}) {
+    var routeRequest: LeaseRequest? = null
+  }
 
   // meta and pcm go to SC-12 as the ask is sent; an unreached ask's recording goes again (Android #68).
   // heading is worked out once, where the recording ended, for the ask sent and the unreached one alike.
@@ -99,6 +104,7 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   fun cancel() {
     if (state.phase == Phase.IDLE) return
     current?.cancelled?.invoke()
+    current?.routeRequest?.callOff()
     runId += 1
     current = null
     deps.player.stop()
@@ -311,66 +317,75 @@ class AskController(private val deps: AskDeps, private val scope: CoroutineScope
   private suspend fun record(run: Run, settings: Settings): Recording? {
     val d = deps
     val track = d.location.begin()
-    val routed = try {
-      d.route.start(run.source)
+    val request = LeaseRequest(d.route, run.source)
+    run.routeRequest = request
+    var lease: RouteLease? = null
+    var calledOff = false
+    try {
+      lease = request.take()
+      calledOff = lease == null
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
       // e.g. the Bluetooth permission was denied: record from the phone's microphone instead of failing the ask.
       d.log("route_failed", mapOf("error" to e.toString()))
-      false
     }
     // Setting up the route can take seconds; a cancel or a newer ask meanwhile owns the recorder and the route.
-    if (!isCurrent(run)) {
-      d.route.stop()
+    if (calledOff || !isCurrent(run)) {
+      lease?.release()
       d.location.end(track)
       return null
     }
-    if (!routed) dispatch(FlowEvent.PhoneMic(d.now()))
     try {
-      d.recorder.start()
-    } catch (e: Exception) {
-      d.route.stop()
-      d.location.end(track)
-      fail(FailureReason.MIC, run)
-      return null
+      if (lease?.routed != true) dispatch(FlowEvent.PhoneMic(d.now()))
+      try {
+        d.recorder.start()
+      } catch (e: Exception) {
+        lease?.release()
+        d.location.end(track)
+        fail(FailureReason.MIC, run)
+        return null
+      }
+      // After the recorder is running: the rider starts talking on this cue, so nothing said after it is lost.
+      d.cues.start(settings.startCueMs)
+      val startedAt = d.now()
+      while (state.phase == Phase.RECORDING && isCurrent(run) && d.now() - startedAt < settings.recordLimitMs) {
+        d.sleep(TICK_MS)
+      }
+      if (!isCurrent(run)) {
+        d.recorder.cancel()
+        lease?.release()
+        d.location.end(track)
+        return null
+      }
+      // Read while the recorder still runs: the system only reports the input device of an active recording.
+      val device = lease?.inputDevice()
+      val phoneMic = state.phoneMic
+      stopRecording()
+      val stopped = try {
+        d.recorder.stop()
+      } catch (e: Exception) {
+        lease?.release()
+        d.location.end(track)
+        fail(FailureReason.MIC, run)
+        return null
+      }
+      lease?.release()
+      // A microphone held by another app can start without delivering anything; sending nothing would be heard as "no speech".
+      if (stopped.pcm.isEmpty()) {
+        d.location.end(track)
+        fail(FailureReason.MIC, run)
+        return null
+      }
+      val endedAt = d.now()
+      val meta = RecordingMeta(stopped.name, startedAt, pcmDurationMs(stopped.pcm.size), phoneMic, device, null)
+      val here = d.location.end(track)
+      val heading = d.heading(here)
+      return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, here, heading, endedAt, meta, stopped.pcm)
+    } finally {
+      // Whatever ended the recording, the route is let go (a lease let go of already acts once).
+      lease?.release()
     }
-    // After the recorder is running: the rider starts talking on this cue, so nothing said after it is lost.
-    d.cues.start(settings.startCueMs)
-    val startedAt = d.now()
-    while (state.phase == Phase.RECORDING && isCurrent(run) && d.now() - startedAt < settings.recordLimitMs) {
-      d.sleep(TICK_MS)
-    }
-    if (!isCurrent(run)) {
-      d.recorder.cancel()
-      d.route.stop()
-      d.location.end(track)
-      return null
-    }
-    // Read while the recorder still runs: the system only reports the input device of an active recording.
-    val device = d.route.inputDevice()
-    val phoneMic = state.phoneMic
-    stopRecording()
-    val stopped = try {
-      d.recorder.stop()
-    } catch (e: Exception) {
-      d.route.stop()
-      d.location.end(track)
-      fail(FailureReason.MIC, run)
-      return null
-    }
-    d.route.stop()
-    // A microphone held by another app can start without delivering anything; sending nothing would be heard as "no speech".
-    if (stopped.pcm.isEmpty()) {
-      d.location.end(track)
-      fail(FailureReason.MIC, run)
-      return null
-    }
-    val endedAt = d.now()
-    val meta = RecordingMeta(stopped.name, startedAt, pcmDurationMs(stopped.pcm.size), phoneMic, device, null)
-    val here = d.location.end(track)
-    val heading = d.heading(here)
-    return Recording(Base64.getEncoder().encodeToString(stopped.pcm), stopped.name, here, heading, endedAt, meta, stopped.pcm)
   }
 
   private suspend fun send(recording: Recording, rideId: String, api: AskApi, run: Run): SentAsk? {

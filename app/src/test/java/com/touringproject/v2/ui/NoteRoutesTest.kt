@@ -21,7 +21,8 @@ import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.store.RoomRideStore
 import com.touringproject.v2.audio.Recorded
 import com.touringproject.v2.audio.Recorder
-import com.touringproject.v2.audio.RouteControl
+import com.touringproject.v2.audio.RouteDriver
+import com.touringproject.v2.audio.RouteLeases
 import com.touringproject.v2.audio.Source
 import com.touringproject.v2.voice.VOICE_IDLE
 import com.touringproject.v2.voice.VoiceDeps
@@ -93,11 +94,11 @@ class NoteRoutesTest {
     assertNull(runBlocking { db.notes().note("n1") })
   }
 
-  private val idleRoute = object : RouteControl {
+  private val idleRoute = RouteLeases(object : RouteDriver {
     override suspend fun start(source: Source) = true
     override suspend fun stop() = Unit
     override fun inputDevice() = null
-  }
+  })
   private val idleRecorder = object : Recorder {
     override suspend fun start() = Unit
     override suspend fun stop() = Recorded(ByteArray(0), "voice.pcm")
@@ -151,7 +152,7 @@ class NoteRoutesTest {
     var asks = 0
     var voicePresses = 0
     val router = PressRouter(
-      trialActive = { false }, trialBusy = { false }, stopTrial = {}, stopCheckPlayback = {},
+      trialActive = { false }, stopTrial = {}, stopCheckPlayback = {},
       askPress = { asks++ }, askStopRecording = {}, askTap = {},
       voiceAttached = { input.attached }, voicePress = { voicePresses++ },
     )

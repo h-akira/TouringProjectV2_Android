@@ -1,8 +1,10 @@
 package com.touringproject.v2.recordings
 
+import com.touringproject.v2.audio.LeaseRequest
 import com.touringproject.v2.audio.PcmPlayback
 import com.touringproject.v2.audio.Recorder
 import com.touringproject.v2.audio.RouteControl
+import com.touringproject.v2.audio.RouteLease
 import com.touringproject.v2.audio.Source
 import com.touringproject.v2.audio.TICK_MS
 import com.touringproject.v2.audio.InputDevice
@@ -48,14 +50,14 @@ class TrialController(private val deps: TrialDeps) {
 
   private var session = 0
   private var stopRequested = false
-  // From start() until its run has unwound, also after a cancel: a second run must not share the recorder and the route.
+  // From start() until its run has unwound, also after a cancel: a second run must not share the recorder.
   private var running = false
+  // The try to take the audio route; a cancel calls it off while the route is still coming up.
+  private var routeRequest: LeaseRequest? = null
 
   /** A trial is recording or playing: the intercom button ends it instead of starting a question (US-E-03.002). */
   val active: Boolean get() = state.phase != TrialPhase.IDLE
 
-  /** Also true while a left trial is still unwinding: it may set up or release SCO, so no ask may take the route yet. */
-  val busy: Boolean get() = active || running
 
   /** The screen button or the intercom button while a trial runs: end the recording, or the playback. */
   fun stop() {
@@ -70,6 +72,7 @@ class TrialController(private val deps: TrialDeps) {
   fun cancel() {
     if (!active) return
     session += 1
+    routeRequest?.callOff()
     deps.player.stop()
     set(TRIAL_IDLE)
   }
@@ -92,62 +95,78 @@ class TrialController(private val deps: TrialDeps) {
       finish(session, TrialState(error = TRIAL_MIC_MESSAGE))
       return
     }
-    val routed = try {
-      d.route.start(Source.SCREEN)
+    val request = LeaseRequest(d.route, Source.SCREEN)
+    routeRequest = request
+    var lease: RouteLease? = null
+    var calledOff = false
+    try {
+      lease = request.take()
+      calledOff = lease == null
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
-      false
+      // The route could not be taken: the phone's own microphone records.
     }
     // Setting up the route can take seconds; SC-12 may have been left meanwhile (React Native version's issue #10).
-    if (!isCurrent(session)) {
-      d.route.stop()
+    if (calledOff || !isCurrent(session)) {
+      lease?.release()
       return
     }
-    set(state.copy(phoneMic = !routed))
     try {
-      d.recorder.start()
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      d.route.stop()
-      finish(session, TrialState(phoneMic = !routed, error = TRIAL_RECORD_MESSAGE))
-      return
+      val routed = lease?.routed == true
+      set(state.copy(phoneMic = !routed))
+      try {
+        d.recorder.start()
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        lease?.release()
+        finish(session, TrialState(phoneMic = !routed, error = TRIAL_RECORD_MESSAGE))
+        return
+      }
+      if (!isCurrent(session)) {
+        d.recorder.cancel()
+        lease?.release()
+        return
+      }
+      d.cueStart(d.startCueMs())
+      val startedAt = d.now()
+      val limitMs = d.recordLimitMs()
+      while (isCurrent(session) && !stopRequested && d.now() - startedAt < limitMs) d.sleep(TICK_MS)
+      if (!isCurrent(session)) {
+        d.recorder.cancel()
+        lease?.release()
+        return
+      }
+      // Read while the recorder still runs: the system only reports the input device of an active recording.
+      val device = lease?.inputDevice()
+      val recorded = try {
+        d.recorder.stop()
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        lease?.release()
+        finish(session, TrialState(phoneMic = !routed, error = TRIAL_RECORD_MESSAGE))
+        return
+      }
+      lease?.release()
+      if (!isCurrent(session)) return
+      playBack(session, recorded.pcm, routed, device)
+    } finally {
+      // Whatever ended the run, the route is let go (a lease let go of already acts once).
+      lease?.release()
     }
-    if (!isCurrent(session)) {
-      d.recorder.cancel()
-      d.route.stop()
-      return
-    }
-    d.cueStart(d.startCueMs())
-    val startedAt = d.now()
-    val limitMs = d.recordLimitMs()
-    while (isCurrent(session) && !stopRequested && d.now() - startedAt < limitMs) d.sleep(TICK_MS)
-    if (!isCurrent(session)) {
-      d.recorder.cancel()
-      d.route.stop()
-      return
-    }
-    // Read while the recorder still runs: the system only reports the input device of an active recording.
-    val device = d.route.inputDevice()
-    val recorded = try {
-      d.recorder.stop()
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      d.route.stop()
-      finish(session, TrialState(phoneMic = !routed, error = TRIAL_RECORD_MESSAGE))
-      return
-    }
-    d.route.stop()
-    if (!isCurrent(session)) return
-    if (recorded.pcm.isEmpty()) {
+  }
+
+  private suspend fun playBack(session: Int, pcm: ByteArray, routed: Boolean, device: InputDevice?) {
+    val d = deps
+    if (pcm.isEmpty()) {
       finish(session, TrialState(phoneMic = !routed, device = device, error = TRIAL_RECORD_MESSAGE))
       return
     }
     set(state.copy(phase = TrialPhase.PLAYING, device = device))
     val error = try {
-      d.player.play(recorded.pcm)
+      d.player.play(pcm)
       null
     } catch (e: CancellationException) {
       throw e
