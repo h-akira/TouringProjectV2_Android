@@ -127,6 +127,8 @@ class RideSync(
   private val online: () -> Boolean = { true },
   /** A pass ran to its end, nothing it tried having failed: SC-14's 最後に保存した時刻 (slice 4 spec §7.1). */
   private val saved: suspend () -> Unit = {},
+  /** Whether the records may be sent under the current user name (RecordOwner.check); a pass that may not go does not start. */
+  private val mayPass: suspend () -> Boolean = { true },
   private val log: (event: String, data: Map<String, Any?>) -> Unit,
 ) {
   private val requests = Channel<Unit>(Channel.CONFLATED)
@@ -158,6 +160,10 @@ class RideSync(
   }
 
   suspend fun pass() = passing.withLock {
+    if (!mayPass()) {
+      log("pass_held", emptyMap())
+      return@withLock
+    }
     if (!online()) return@withLock
     val client = api() ?: return@withLock
     sendingNow.value = true

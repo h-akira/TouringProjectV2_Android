@@ -9,8 +9,8 @@ import androidx.room.RoomDatabase
 // forward by a Migration; the database is never rebuilt destructively.
 
 @Database(
-  entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class, NoteEntity::class, DeletionEntity::class],
-  version = 6,
+  entities = [RideEntity::class, SegmentEntity::class, RoutePointEntity::class, AskEntity::class, NoteEntity::class, DeletionEntity::class, OwnerEntity::class],
+  version = 7,
   exportSchema = true,
 )
 abstract class RideDatabase : RoomDatabase() {
@@ -21,6 +21,6 @@ abstract class RideDatabase : RoomDatabase() {
 
   companion object {
     fun open(context: Context): RideDatabase =
-      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build()
+      Room.databaseBuilder(context, RideDatabase::class.java, "rides.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build()
   }
 }

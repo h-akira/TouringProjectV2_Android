@@ -13,7 +13,6 @@ import com.touringproject.v2.api.AskApi
 import com.touringproject.v2.audio.MediaVolume
 import com.touringproject.v2.location.Fix
 import com.touringproject.v2.settings.Settings
-import kotlinx.serialization.Serializable
 
 // Everything the ask loop does to the outside world comes in through these interfaces, so the loop is testable on the JVM.
 

@@ -50,7 +50,9 @@ import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.headingParams
 import com.touringproject.v2.settings.withHeadingDefaults
 import com.touringproject.v2.settings.withRecordingDefaults
+import com.touringproject.v2.sync.OwnerState
 import com.touringproject.v2.sync.TakeOp
+import com.touringproject.v2.sync.nameChangeBlock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -204,7 +206,7 @@ fun AppUi(graph: AppGraph) {
               entry<RideKey> { key ->
                 RideDetailRoute(
                   graph.records, graph.rides, current,
-                  updateSettings = { next -> scope.launch { graph.settings.update(next) } },
+                  updateSettings = { next -> scope.launch { graph.settings.update(current, next) } },
                   rideId = key.rideId,
                   onBack = { tabs.back() },
                   onAsk = { tabs.push(AskKey(key.rideId, it)) },
@@ -265,9 +267,9 @@ fun AppUi(graph: AppGraph) {
                 HeadingCheckScreen(
                   view?.let { headingCheckUi(it, current.headingParams) },
                   current,
-                  { next -> scope.launch { graph.settings.update(next) } },
+                  { next -> scope.launch { graph.settings.update(current, next) } },
                   onReset = {
-                    scope.launch { graph.settings.update(current.withHeadingDefaults()) }
+                    scope.launch { graph.settings.update(current, current.withHeadingDefaults()) }
                     Toast.makeText(context, "既定値に戻しました", Toast.LENGTH_SHORT).show()
                   },
                   modifier = Modifier.safeDrawingPadding(),
@@ -276,9 +278,9 @@ fun AppUi(graph: AppGraph) {
               entry<RecordingSettingsKey> {
                 RecordingSettingsScreen(
                   current,
-                  { next -> scope.launch { graph.settings.update(next) } },
+                  { next -> scope.launch { graph.settings.update(current, next) } },
                   onReset = {
-                    scope.launch { graph.settings.update(current.withRecordingDefaults()) }
+                    scope.launch { graph.settings.update(current, current.withRecordingDefaults()) }
                     Toast.makeText(context, "既定値に戻しました", Toast.LENGTH_SHORT).show()
                   },
                   modifier = Modifier.safeDrawingPadding(),
@@ -290,7 +292,11 @@ fun AppUi(graph: AppGraph) {
                 val sending by graph.sync.sending.collectAsStateWithLifecycle()
                 val take by graph.takeover.state.collectAsStateWithLifecycle()
                 val recordings by graph.recordingCheck.items.collectAsStateWithLifecycle()
+                val ownerState by graph.owner.state.collectAsStateWithLifecycle()
+                val ownerName by graph.owner.ownerName.collectAsStateWithLifecycle()
                 DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
+                // A pass checks the owner first, so the notice is fresh when SC-14 opens.
+                LaunchedEffect(Unit) { graph.sync.request() }
                 DataScreen(
                   DataUi(
                     summary = summary,
@@ -302,6 +308,7 @@ fun AppUi(graph: AppGraph) {
                     userName = current.userName,
                     message = take.result?.takeIf { take.last == TakeOp.REREAD }?.let(::rereadMessage),
                     recordings = recordings.size,
+                    ownerNotice = ownerNotice(ownerState, ownerName),
                   ),
                   onSave = graph.sync::request,
                   onUser = { tabs.push(UserKey) },
@@ -311,10 +318,10 @@ fun AppUi(graph: AppGraph) {
               }
               entry<RideRecordingKey> {
                 // AppGraph moves the recording ride's deadline when the setting changes (US-C-08.005, Android #33).
-                RideRecordingScreen(current, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
+                RideRecordingScreen(current, { next -> scope.launch { graph.settings.update(current, next) } }, Modifier.safeDrawingPadding())
               }
               entry<VolumeKey> {
-                VolumeScreen(current, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
+                VolumeScreen(current, { next -> scope.launch { graph.settings.update(current, next) } }, Modifier.safeDrawingPadding())
               }
               entry<RecordingsKey> {
                 val check = graph.recordingCheck
@@ -346,17 +353,21 @@ fun AppUi(graph: AppGraph) {
                 val summary by graph.saveSummary.collectAsStateWithLifecycle()
                 val take by graph.takeover.state.collectAsStateWithLifecycle()
                 val waitingToSave by graph.rides.waitingToSave.collectAsStateWithLifecycle()
+                val ownerState by graph.owner.state.collectAsStateWithLifecycle()
+                val ownerName by graph.owner.ownerName.collectAsStateWithLifecycle()
                 DisposableEffect(Unit) { onDispose { graph.takeover.seen() } }
+                // A pass checks the owner first, so the notice is fresh when SC-18 opens.
+                LaunchedEffect(Unit) { graph.sync.request() }
                 // A ride's change waiting to be written has nothing else to write it while no ride runs.
                 LaunchedEffect(Unit) { graph.rides.retrySave() }
                 // The write checks again in its own transaction (US-E-06.008); a ride's change still waiting to be
                 // written counts (Android #76).
-                val block = when {
-                  ride != null -> UserBlock.RIDE
-                  (summary?.unsent ?: 0) > 0 -> UserBlock.UNSENT
-                  waitingToSave -> UserBlock.WAITING
-                  else -> null
-                }
+                // While the records mismatch, the unsent ones are not counted: they are the owner's and stay if the name goes back.
+                val block = nameChangeBlock(
+                  ride != null,
+                  unsent = if (ownerState == OwnerState.MISMATCH) 0 else summary?.unsent ?: 0,
+                  waitingToSave = waitingToSave,
+                )
                 UserScreen(
                   current.userName, block,
                   reading = take.running != null,
@@ -366,12 +377,13 @@ fun AppUi(graph: AppGraph) {
                   onData = { tabs.push(DataKey) },
                   modifier = Modifier.safeDrawingPadding(),
                   counted = summary != null,
+                  ownerNotice = ownerNotice(ownerState, ownerName),
                 )
               }
               entry<ReturnAppKey> {
                 var apps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }
                 LaunchedEffect(Unit) { apps = graph.launcher.launchableApps() }
-                ReturnAppScreen(current, apps, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
+                ReturnAppScreen(current, apps, { next -> scope.launch { graph.settings.update(current, next) } }, Modifier.safeDrawingPadding())
               }
             }
           // Each tab keeps the saved state of its screens (typed text, scroll) while another tab is shown (Android #34).

@@ -73,11 +73,13 @@ import com.touringproject.v2.store.RideDatabase
 import com.touringproject.v2.store.RoomAskEdits
 import com.touringproject.v2.store.RoomAskLog
 import com.touringproject.v2.store.RoomNotes
+import com.touringproject.v2.store.RoomOwner
 import com.touringproject.v2.store.RoomRecords
 import com.touringproject.v2.store.RoomRideStore
 import com.touringproject.v2.store.RoomSyncStore
 import com.touringproject.v2.store.RoomTakeover
 import com.touringproject.v2.store.toPoint
+import com.touringproject.v2.sync.RecordOwner
 import com.touringproject.v2.sync.RideSync
 import com.touringproject.v2.sync.Takeover
 import com.touringproject.v2.sync.credentialChanges
@@ -145,12 +147,21 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
   /** When a pass of the sync last ran to its end (SC-14). */
   val lastSaved = LastSaved(store)
 
+  /** Whose records the device keeps; a pass of the sync goes only when the name of the settings is the owner's (adr/0015). */
+  val owner = RecordOwner(
+    store = RoomOwner(database.takeover()),
+    name = { settings.settings.value?.userName },
+    confirmed = { settings.nameConfirmed },
+    log = { message, e -> Log.w("trv2.sync", message, e) },
+  )
+
   /** Sends rides, routes, memos, point memos, unreached asks and deletions; a pass runs on each trigger (slice 2 spec §5.3). */
   val sync = RideSync(
     RoomSyncStore(database.rides(), database.asks(), database.notes()),
     api = { backend.client() },
     online = { connectivity.online.value },
     saved = { lastSaved.mark(System.currentTimeMillis()) },
+    mayPass = owner::check,
     log = { event, data -> Log.i("trv2.sync", "$event $data") },
   )
 
@@ -162,6 +173,8 @@ class AppGraph(private val context: Context, val scope: CoroutineScope = MainSco
     api = { user -> backend.client(user) },
     // Read at the take, long after rides below is built.
     store = RoomTakeover(database) { rides.waitingToSave.value },
+    // A made-up name is not made the owner by a read again (adr/0015).
+    nameConfirmed = { settings.nameConfirmed },
     sync = sync,
     now = System::currentTimeMillis,
     scope = scope,

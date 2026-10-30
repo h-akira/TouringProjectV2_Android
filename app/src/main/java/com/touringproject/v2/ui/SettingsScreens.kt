@@ -52,6 +52,7 @@ import com.touringproject.v2.settings.USER_NAME_RE
 import com.touringproject.v2.settings.VOLUME_DB_CHOICES
 import com.touringproject.v2.settings.maskKey
 import com.touringproject.v2.settings.withRecentApp
+import com.touringproject.v2.sync.BlockReason
 import com.touringproject.v2.sync.Peek
 import kotlinx.coroutines.launch
 
@@ -128,6 +129,8 @@ data class DataUi(
   val message: String?,
   /** The recordings kept on the device for SC-12. */
   val recordings: Int,
+  /** Told when the records are not sent for the owner's sake (adr/0015); null when nothing is wrong. */
+  val ownerNotice: String? = null,
 )
 
 @Composable
@@ -144,6 +147,7 @@ fun DataScreen(ui: DataUi, onSave: () -> Unit, onUser: () -> Unit, onReread: () 
   val muted = Color(0xFF666666)
   val summary = ui.summary
   Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    ui.ownerNotice?.let { Text(it, color = Red, modifier = Modifier.testTag("ownerNotice")) }
     if (summary != null) Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(0xFFCCCCCC))) {
       Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (summary.unsent == 0) {
@@ -151,7 +155,9 @@ fun DataScreen(ui: DataUi, onSave: () -> Unit, onUser: () -> Unit, onReread: () 
           Text(ui.lastSaved, color = muted, fontSize = 14.sp)
         } else {
           Text("● 未送信の記録があります", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("saveState"))
-          Text("${unsentBreakdown(summary)}。通信できるようになると自動で送ります。", color = muted, fontSize = 14.sp, modifier = Modifier.testTag("unsentBreakdown"))
+          // While the owner holds the records back (ownerNotice), nothing goes when the network returns.
+          val breakdown = if (ui.ownerNotice == null) "${unsentBreakdown(summary)}。通信できるようになると自動で送ります。" else unsentBreakdown(summary)
+          Text(breakdown, color = muted, fontSize = 14.sp, modifier = Modifier.testTag("unsentBreakdown"))
           Button(onClick = onSave, enabled = !ui.sending, modifier = Modifier.fillMaxWidth().testTag("saveNow")) {
             Text(if (ui.sending) "送っています…" else "今すぐ保存", fontSize = 16.sp)
           }
@@ -358,15 +364,6 @@ fun ConnectionScreen(
   }
 }
 
-/** Why the user name cannot change now (slice 4 spec §6.4, US-E-06.008). */
-enum class UserBlock(val message: String) {
-  RIDE("走行を終えてから変えられます"),
-  UNSENT("未送信の記録があります。先に「データの保存」で送ってください"),
-
-  /** A ride's change waits to be written to the device (RideController.waitingToSave); sending does not help. */
-  WAITING("走行の変更を端末に書き込めていません。端末の空き容量を確かめてください"),
-}
-
 /**
  * SC-18. peek reads the new name's first page (null when it cannot), and DL-03 tells from it whether the name has
  * records (slice 4 spec §6.4). onChange starts the change after DL-03; reading is true while a read of the cloud is under
@@ -376,7 +373,7 @@ enum class UserBlock(val message: String) {
 @Composable
 fun UserScreen(
   userName: String,
-  block: UserBlock?,
+  block: BlockReason?,
   reading: Boolean,
   message: String?,
   peek: suspend (String) -> Peek?,
@@ -384,6 +381,7 @@ fun UserScreen(
   onData: () -> Unit,
   modifier: Modifier = Modifier,
   counted: Boolean = true,
+  ownerNotice: String? = null,
 ) {
   val scope = rememberCoroutineScope()
   // Saveable, so a name being typed survives a trip to another tab (Android #34).
@@ -394,6 +392,7 @@ fun UserScreen(
   Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
     Text("今のユーザー名", color = Color(0xFF666666), fontSize = 16.sp)
     Text(userName, fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+    ownerNotice?.let { Text(it, color = Red, modifier = Modifier.testTag("ownerNotice")) }
     Text("記録はユーザー名ごとに分かれます。別の端末で同じユーザー名を設定すると、記録を引き継げます。控えておいてください。", color = Color(0xFF666666), fontSize = 14.sp)
     OutlinedTextField(input, { input = it }, Modifier.fillMaxWidth().testTag("userInput"), placeholder = { Text("新しいユーザー名") }, singleLine = true)
     error?.let { Text(it, color = Red, modifier = Modifier.testTag("userError")) }
@@ -417,8 +416,8 @@ fun UserScreen(
       modifier = Modifier.fillMaxWidth().testTag("changeUser"),
       colors = ButtonDefaults.buttonColors(containerColor = Blue),
     ) { Text(if (reading || checking) "読み込んでいます…" else "変更する", fontSize = 18.sp) }
-    block?.let { Text(it.message, modifier = Modifier.testTag("userBlock")) }
-    if (block == UserBlock.UNSENT) TextButton(onClick = onData, modifier = Modifier.testTag("toData")) { Text("データの保存へ") }
+    block?.let { Text(blockMessage(it), modifier = Modifier.testTag("userBlock")) }
+    if (block == BlockReason.UNSENT) TextButton(onClick = onData, modifier = Modifier.testTag("toData")) { Text("データの保存へ") }
     message?.let { Text(it, modifier = Modifier.testTag("userMessage")) }
     Text(
       "変えると、今の記録は引き継がれず、新しいユーザー名の記録が表示されます。今の記録は消えず、元のユーザー名に戻せばまた見られます。",

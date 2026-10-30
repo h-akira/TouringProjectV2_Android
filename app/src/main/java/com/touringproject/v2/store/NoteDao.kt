@@ -67,10 +67,7 @@ interface NoteDao {
   }
 
   // Sending (slice 3 spec §5.1): the memos changed since they were taken, unless that version was refused.
-  @Query(
-    "SELECT * FROM notes WHERE (sentUpdatedAt IS NULL OR sentUpdatedAt < updatedAt) AND " +
-      "(rejectedUpdatedAt IS NULL OR rejectedUpdatedAt != updatedAt) ORDER BY updatedAt",
-  )
+  @Query("SELECT * FROM notes WHERE $UNSENT ORDER BY updatedAt")
   suspend fun unsent(): List<NoteEntity>
 
   /**

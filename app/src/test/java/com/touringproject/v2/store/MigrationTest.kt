@@ -30,7 +30,7 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 2, true, MIGRATION_1_2).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
       .allowMainThreadQueries()
       .build()
     runBlocking {
@@ -56,7 +56,7 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 3, true, MIGRATION_2_3).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
       .allowMainThreadQueries()
       .build()
     runBlocking {
@@ -78,7 +78,7 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 4, true, MIGRATION_3_4).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
       .allowMainThreadQueries()
       .build()
     runBlocking {
@@ -100,7 +100,7 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 5, true, MIGRATION_4_5).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
       .allowMainThreadQueries()
       .build()
     runBlocking {
@@ -128,7 +128,7 @@ class MigrationTest {
     }
     helper.runMigrationsAndValidate(DB, 6, true, MIGRATION_5_6).close()
     val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
-      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
       .allowMainThreadQueries()
       .build()
     runBlocking {
@@ -139,6 +139,25 @@ class MigrationTest {
       assertNull(ask.updatedAt)
       db.asks().upsert(ask.copy(askId = "a2", conversationId = null, status = "offline", updatedAt = 4000))
       assertNull(db.asks().ask("a2")!!.conversationId)
+    }
+    db.close()
+  }
+
+  // Slice 6 plan 5 (adr/0015): the owner of the records. The table is new and empty, and nothing else moves.
+  @Test
+  fun version_6_moves_to_7_adding_an_empty_owner_and_keeping_the_rides() {
+    helper.createDatabase(DB, 6).apply {
+      execSQL("INSERT INTO rides VALUES ('r1', '箱根', 'ended', 'manual', NULL, 5000, 120.0, 6000, 6000, NULL, 0, NULL)")
+      close()
+    }
+    helper.runMigrationsAndValidate(DB, 7, true, MIGRATION_6_7).close()
+    val db = Room.databaseBuilder(ApplicationProvider.getApplicationContext(), RideDatabase::class.java, DB)
+      .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+      .allowMainThreadQueries()
+      .build()
+    runBlocking {
+      assertEquals("箱根", db.rides().ride("r1")!!.name)
+      assertNull(db.takeover().owner())
     }
     db.close()
   }

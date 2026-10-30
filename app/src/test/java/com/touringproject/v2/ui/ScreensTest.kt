@@ -31,6 +31,7 @@ import com.touringproject.v2.recordings.TrialState
 import com.touringproject.v2.records.SaveSummary
 import com.touringproject.v2.settings.LaunchableApp
 import com.touringproject.v2.settings.Settings
+import com.touringproject.v2.sync.BlockReason
 import com.touringproject.v2.sync.Peek
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -290,6 +291,37 @@ class SettingsScreensTest {
     assertEquals(listOf("taro01"), changed.map { it.userName })
   }
 
+  // A mismatch is told on SC-18, and the change stays possible: it is how the rider mends it (adr/0015).
+  @Test
+  fun the_notice_of_a_mismatch_is_shown_and_the_change_is_still_possible() {
+    rule.setContent {
+      UserScreen("rider01", null, false, null, { null }, {}, {}, ownerNotice = "ユーザー名と端末の記録が合っていません。記録は送られていません")
+    }
+    rule.onNodeWithTag("ownerNotice").assertExists()
+    rule.onNodeWithTag("userInput").performTextInput("taro01")
+    rule.onNodeWithTag("changeUser").assertIsEnabled()
+  }
+
+  @Test
+  fun no_notice_is_shown_when_the_name_matches() {
+    rule.setContent { UserScreen("rider01", null, false, null, { null }, {}, {}) }
+    rule.onNodeWithTag("ownerNotice").assertDoesNotExist()
+  }
+
+  @Test
+  fun sc14_shows_the_notice_of_a_mismatch() {
+    rule.setContent { DataScreen(data.copy(ownerNotice = "ユーザー名を確かめられていません。記録は送られていません"), {}, {}, {}) }
+    rule.onNodeWithTag("ownerNotice").assertExists()
+  }
+
+  // While the records are not sent for the owner's sake, SC-14 does not promise to send them when the network returns.
+  @Test
+  fun sc14_does_not_promise_to_send_while_the_owner_holds_the_records() {
+    val unsent = SaveSummary(unsentRides = 2, unreached = 1, rides = 3, asks = 19)
+    rule.setContent { DataScreen(data.copy(summary = unsent, ownerNotice = "ユーザー名を確かめられていません。記録は送られていません"), {}, {}, {}) }
+    rule.onNodeWithTag("unsentBreakdown").assertTextEquals("質問できなかった地点 1件・走行 2本")
+  }
+
   @Test
   fun a_name_that_cannot_be_read_is_not_changed_to() {
     rule.setContent { UserScreen("rider01", null, false, null, { null }, {}, {}) }
@@ -302,7 +334,7 @@ class SettingsScreensTest {
   // US-E-06.008: not while a ride records or something is left to send, nor during a read; SC-14 is a tap away.
   @Test
   fun the_name_cannot_change_while_blocked_or_reading() {
-    var block by mutableStateOf<UserBlock?>(UserBlock.UNSENT)
+    var block by mutableStateOf<BlockReason?>(BlockReason.UNSENT)
     var reading by mutableStateOf(false)
     var toData = 0
     rule.setContent { UserScreen("rider01", block, reading, "ユーザー名を変えました", { null }, {}, { toData += 1 }) }
@@ -310,7 +342,7 @@ class SettingsScreensTest {
     rule.onNodeWithTag("userBlock").assertTextEquals("未送信の記録があります。先に「データの保存」で送ってください")
     rule.onNodeWithTag("toData").performClick()
     assertEquals(1, toData)
-    block = UserBlock.RIDE
+    block = BlockReason.RIDE
     rule.onNodeWithTag("userBlock").assertTextEquals("走行を終えてから変えられます")
     rule.onNodeWithTag("toData").assertDoesNotExist()
     block = null
@@ -323,7 +355,7 @@ class SettingsScreensTest {
   // A ride's change that cannot be written is not sent from SC-14, so SC-18 does not lead there (plan 5's final review).
   @Test
   fun a_change_that_cannot_be_written_is_told_without_the_way_to_sc14() {
-    rule.setContent { UserScreen("rider01", UserBlock.WAITING, false, null, { null }, {}, {}) }
+    rule.setContent { UserScreen("rider01", BlockReason.WAITING, false, null, { null }, {}, {}) }
     rule.onNodeWithTag("changeUser").assertIsNotEnabled()
     rule.onNodeWithTag("userBlock").assertTextEquals("走行の変更を端末に書き込めていません。端末の空き容量を確かめてください")
     rule.onNodeWithTag("toData").assertDoesNotExist()

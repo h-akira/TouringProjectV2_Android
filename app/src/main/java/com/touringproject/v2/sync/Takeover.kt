@@ -20,10 +20,13 @@ interface TakeoverStore {
   /**
    * Merges the cloud's records into the device's (slice 4 spec §6.1) in one transaction; with replace, all the device
    * keeps goes first (§6.4: another user name). Returns Done with how many records came in or went, or Blocked when
-   * nothing was done because a ride is recording or paused or, with replace, something is left to send (US-E-06.008).
-   * A failure throws and changes nothing.
+   * nothing was done: RIDE while a ride is recording or paused; with replace, UNSENT when something is left to send
+   * (US-E-06.008) and WAITING when a ride's change waits to be written; without replace, OWNER (below).
+   * A failure throws and changes nothing. userName is the name the records are read under: it becomes the owner of the
+   * device's records in the same transaction (adr/0015). With replace, going back to the owner's own name keeps the
+   * records and what is left to send; a read again (no replace) under a name that is not the owner's is Blocked(OWNER).
    */
-  suspend fun take(cloud: CloudRecords, replace: Boolean): TakeResult
+  suspend fun take(cloud: CloudRecords, replace: Boolean, userName: String): TakeResult
 }
 
 /**
@@ -41,6 +44,12 @@ enum class BlockReason {
 
   /** Something is left to send (a change of user name only). */
   UNSENT,
+
+  /** A ride's change waits to be written to the device (RideController.waitingToSave); sending does not help. */
+  WAITING,
+
+  /** The records are another user name's than the one asked for (a read again only; slice 6 plan 5). */
+  OWNER,
 }
 
 /** What a read of the cloud came to. */
@@ -83,6 +92,8 @@ class Takeover(
   private val sync: RideSync,
   private val now: () -> Long,
   private val scope: CoroutineScope,
+  /** False while the user name is made up because the settings could not be read (SettingsRepository.nameConfirmed). */
+  private val nameConfirmed: () -> Boolean = { true },
   private val log: (event: String, data: Map<String, Any?>) -> Unit,
 ) {
   private val stateNow = MutableStateFlow(TakeState())
@@ -117,7 +128,7 @@ class Takeover(
       withContext(NonCancellable) {
         save(peek.userName)
         val result = try {
-          store.take(CloudRecords(records, now()), replace = true)
+          store.take(CloudRecords(records, now()), replace = true, userName = peek.userName)
         } catch (e: Exception) {
           if (!putBack(from, save)) return@withContext TakeResult.Mismatched
           throw e
@@ -137,9 +148,13 @@ class Takeover(
     false
   }
 
-  /** SC-14's クラウドから読み直す: the current name's records, merged with the device's. */
+  /**
+   * SC-14's クラウドから読み直す: the current name's records, merged with the device's. A made-up name (not confirmed) is
+   * Blocked(OWNER) without a take, so it never becomes the owner of the device's records (adr/0015).
+   */
   fun reread(userName: String) = start(TakeOp.REREAD) {
-    store.take(CloudRecords(readAll(userName, null), now()), replace = false)
+    if (!nameConfirmed()) return@start TakeResult.Blocked(BlockReason.OWNER)
+    store.take(CloudRecords(readAll(userName, null), now()), replace = false, userName = userName)
   }
 
   private fun start(op: TakeOp, block: suspend () -> TakeResult) {

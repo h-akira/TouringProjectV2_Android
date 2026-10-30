@@ -3,6 +3,7 @@ package com.touringproject.v2.records
 import com.touringproject.v2.ride.Ride
 import com.touringproject.v2.ride.RideStatus
 import com.touringproject.v2.ride.startedAt
+import com.touringproject.v2.sync.versionTaken
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -20,7 +21,7 @@ enum class SaveState { RECORDING, UNSENT, SAVED }
  */
 fun saveState(status: RideStatus, updatedAt: Long, sentUpdatedAt: Long?, pointsLeft: Boolean): SaveState = when {
   status != RideStatus.ENDED -> SaveState.RECORDING
-  pointsLeft || sentUpdatedAt == null || sentUpdatedAt < updatedAt -> SaveState.UNSENT
+  pointsLeft || !versionTaken(sentUpdatedAt, updatedAt) -> SaveState.UNSENT
   else -> SaveState.SAVED
 }
 

@@ -65,11 +65,15 @@ private class Cloud(val scope: TestScope, val runIn: CoroutineScope = scope) {
   var switched = 0
   var passes = 0
 
+  /** The user name each take was asked for, in order. */
+  val takenUnder = mutableListOf<String>()
+
   val store = object : TakeoverStore {
-    override suspend fun take(cloud: CloudRecords, replace: Boolean): TakeResult {
+    override suspend fun take(cloud: CloudRecords, replace: Boolean, userName: String): TakeResult {
       takeGate?.await()
       if (failTake) throw IOException("disk full")
       taken += cloud.records to replace
+      takenUnder += userName
       return takes
     }
   }
@@ -95,11 +99,26 @@ private class Cloud(val scope: TestScope, val runIn: CoroutineScope = scope) {
   }
 
   var hasKey = true
+  var nameConfirmed = true
   val sync = RideSync(nothingToSend, { passes += 1; null }) { _, _ -> }
-  val takeover = Takeover({ if (hasKey) api(it) else null }, store, sync, { 1_000L }, runIn) { _, _ -> }
+  val takeover = Takeover({ if (hasKey) api(it) else null }, store, sync, { 1_000L }, runIn, { nameConfirmed }) { _, _ -> }
 }
 
 class TakeoverTest {
+  // The records come in under the name that was read: the new name for a switch, the current one for a read again.
+  @Test
+  fun a_switch_takes_under_the_new_name_and_a_read_again_under_the_current_one() = runTest {
+    val c = Cloud(this)
+    c.pages["taro01"] = mapOf(null to CloudPage(emptyList(), null))
+    c.pages["rider01"] = mapOf(null to CloudPage(emptyList(), null))
+    c.switch(c.takeover.peek("taro01")!!)
+    runCurrent()
+    c.takeover.reread("rider01")
+    runCurrent()
+    assertEquals(listOf("taro01", "rider01"), c.takenUnder)
+    assertEquals(listOf(true, false), c.taken.map { it.second })
+  }
+
   @Test
   fun a_peek_tells_whether_the_name_has_records() = runTest {
     val c = Cloud(this)
@@ -225,6 +244,30 @@ class TakeoverTest {
     runCurrent()
     assertEquals(listOf(listOf(mark("n1")) to false), c.taken)
     assertEquals(TakeState(null, TakeOp.REREAD, TakeResult.Done(2)), c.takeover.state.value)
+  }
+
+  // adr/0015: a made-up name (the settings could not be read) does not become the owner through a read again.
+  @Test
+  fun a_reread_under_a_name_not_confirmed_is_blocked_without_a_take() = runTest {
+    val c = Cloud(this)
+    c.pages["rider01"] = mapOf(null to CloudPage(listOf(mark("n1")), null))
+    c.nameConfirmed = false
+    c.takeover.reread("rider01")
+    runCurrent()
+    assertEquals(emptyList<String>(), c.takenUnder)
+    assertEquals(TakeState(null, TakeOp.REREAD, TakeResult.Blocked(BlockReason.OWNER)), c.takeover.state.value)
+  }
+
+  // The rider chooses the name in SC-18, so a switch is not held back by a name not confirmed.
+  @Test
+  fun a_switch_goes_on_under_a_name_not_confirmed() = runTest {
+    val c = Cloud(this)
+    c.pages["taro01"] = mapOf(null to CloudPage(emptyList(), null))
+    c.nameConfirmed = false
+    c.switch(c.takeover.peek("taro01")!!)
+    runCurrent()
+    assertEquals(listOf("taro01"), c.takenUnder)
+    assertEquals(1, c.switched)
   }
 
   // Slice 4 spec §6.3: no pass runs while the records are read in; one runs after, for what came in to be sent.

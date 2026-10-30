@@ -41,7 +41,7 @@ class SettingsTest {
     val store = FakeStore()
     val repo = SettingsRepository(store)
     val s = Settings("rider01", returnEnabled = false, returnApp = maps, returnTiming = ReturnTiming.SPOKEN, recentApps = listOf(maps), answerVolumeDb = 3, maxRecordingHours = 6, showAskPins = false, showNotePins = false)
-    repo.update(s)
+    repo.save(s)
     assertEquals(s, SettingsRepository(store).load())
   }
 
@@ -91,7 +91,7 @@ class SettingsTest {
   fun recording_and_heading_values_round_trip_and_odd_ones_fall_back() = runTest {
     val store = FakeStore()
     val s = Settings("rider01", recordLimitSeconds = 45, startCueMs = 0, headingReferenceMeters = 30, headingAccuracyMeters = 50, headingHoldMinutes = 2)
-    SettingsRepository(store).update(s)
+    SettingsRepository(store).save(s)
     assertEquals(s, SettingsRepository(store).load())
     val odd = """{"userName":"rider01","recordLimitSeconds":12,"startCueMs":"long","headingReferenceMeters":5,"headingAccuracyMeters":100,"headingHoldMinutes":60}"""
     assertEquals(Settings("rider01"), decodeSettings(odd).first)
@@ -129,9 +129,101 @@ class SettingsTest {
     val repo = SettingsRepository(broken, Random(4)) { message, _ -> errors += message }
     val loaded = repo.load()
     assertEquals(Settings(userName = loaded.userName), loaded)
-    repo.update(loaded.copy(returnEnabled = false))
+    val stale = repo.current()
+    repo.update(stale, stale.copy(returnEnabled = false))
     assertFalse(repo.current().returnEnabled)
-    assertEquals(3, errors.size)
+    assertEquals(1, errors.size)
+  }
+
+  // R2-01: a store that cannot be read is not written over with a made-up name.
+  @Test
+  fun an_unreadable_store_is_not_written_over() = runTest {
+    val sets = mutableListOf<String?>()
+    val unreadable = object : KeyValueStore {
+      override suspend fun get(key: String): String? = throw java.io.IOException("busy")
+      override suspend fun set(key: String, value: String?) { sets += value }
+    }
+    val repo = SettingsRepository(unreadable, Random(4)) { _, _ -> }
+    val loaded = repo.load()
+    repo.update(loaded, loaded.copy(showAskPins = false))
+    assertEquals(emptyList<String?>(), sets)
+    assertFalse(repo.nameConfirmed)
+  }
+
+  // The rider choosing a name is the one write that goes through, and it confirms the name.
+  @Test
+  fun saving_a_name_writes_an_unreadable_store_and_confirms_it() = runTest {
+    val sets = mutableListOf<String?>()
+    val unreadable = object : KeyValueStore {
+      override suspend fun get(key: String): String? = throw java.io.IOException("busy")
+      override suspend fun set(key: String, value: String?) { sets += value }
+    }
+    val repo = SettingsRepository(unreadable, Random(4)) { _, _ -> }
+    repo.save(repo.load().copy(userName = "taro01"))
+    assertEquals(1, sets.size)
+    assertTrue(repo.nameConfirmed)
+  }
+
+  // R2-01: putting the made-up name back after a failed change of name neither writes it nor confirms it.
+  @Test
+  fun putting_the_made_up_name_back_neither_writes_nor_confirms_it() = runTest {
+    val sets = mutableListOf<String?>()
+    val unreadable = object : KeyValueStore {
+      override suspend fun get(key: String): String? = throw java.io.IOException("busy")
+      override suspend fun set(key: String, value: String?) { sets += value }
+    }
+    val repo = SettingsRepository(unreadable, Random(4)) { _, _ -> }
+    val loaded = repo.load()
+    val madeUp = loaded.userName
+    repo.save(loaded.copy(userName = "taro01"))
+    assertEquals(1, sets.size)
+    assertTrue(repo.nameConfirmed)
+    repo.save(repo.current().copy(userName = madeUp))
+    assertEquals(1, sets.size)
+    assertEquals(madeUp, repo.current().userName)
+    assertFalse(repo.nameConfirmed)
+    repo.update(repo.current(), repo.current().copy(showAskPins = false))
+    assertEquals(1, sets.size)
+  }
+
+  // A store with nothing in it is a first launch: the made-up name is kept, and the name is the rider's.
+  @Test
+  fun an_empty_store_is_a_first_launch_with_a_confirmed_name() = runTest {
+    val store = FakeStore()
+    val repo = SettingsRepository(store, Random(4))
+    val loaded = repo.load()
+    assertTrue(repo.nameConfirmed)
+    assertEquals(loaded.userName, SettingsRepository(store).load().userName)
+  }
+
+  // R10-03 (3): a change made from an old copy must not undo a newer one, and the name is not changed by it.
+  @Test
+  fun two_changes_from_the_same_stale_copy_both_stay() = runTest {
+    val repo = SettingsRepository(FakeStore(), Random(5))
+    val stale = repo.load()
+    repo.update(stale, stale.copy(answerVolumeDb = 3))
+    repo.update(stale, stale.copy(recordLimitSeconds = 45))
+    assertEquals(3, repo.current().answerVolumeDb)
+    assertEquals(45, repo.current().recordLimitSeconds)
+  }
+
+  @Test
+  fun a_change_from_an_old_copy_does_not_put_the_old_name_back() = runTest {
+    val repo = SettingsRepository(FakeStore(), Random(5))
+    val stale = repo.load()
+    repo.save(stale.copy(userName = "taro01"))
+    repo.update(stale, stale.copy(showAskPins = false))
+    assertEquals("taro01", repo.current().userName)
+    assertFalse(repo.current().showAskPins)
+  }
+
+  @Test
+  fun a_change_cannot_carry_a_new_name() = runTest {
+    val repo = SettingsRepository(FakeStore(), Random(5))
+    val stale = repo.load()
+    repo.update(stale, stale.copy(userName = "other99", showNotePins = false))
+    assertEquals(stale.userName, repo.current().userName)
+    assertFalse(repo.current().showNotePins)
   }
 
   // Android #72: the change of user name must know its save failed; the settings stay as they were.

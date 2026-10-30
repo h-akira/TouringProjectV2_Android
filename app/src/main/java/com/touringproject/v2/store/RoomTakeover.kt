@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.touringproject.v2.ride.RoutePoint
 import com.touringproject.v2.ride.stepMeters
 import com.touringproject.v2.sync.BlockReason
+import com.touringproject.v2.sync.nameChangeBlock
 import com.touringproject.v2.sync.CloudRecords
 import com.touringproject.v2.sync.DeviceRecords
 import com.touringproject.v2.sync.KeptAsk
@@ -17,21 +18,30 @@ import com.touringproject.v2.sync.TakeoverStore
  * Takes the cloud's records in (slice 4 spec §6.3). The device is read, merged with the cloud and written in one
  * transaction, so a write that fails, or a cloud record that cannot be read, leaves the device as it was. What comes in
  * is marked as sent, so it is not sent back. waitingToSave tells whether a ride's change waits in memory to be written
- * again (RideController); for a change of user name it counts as left to send (Android #72).
+ * again (RideController); a change of user name is Blocked(WAITING) by it (Android #72, #76). The owner of the records
+ * is written in the same transaction as the records (adr/0015).
  */
 class RoomTakeover(private val db: RideDatabase, private val waitingToSave: () -> Boolean = { false }) : TakeoverStore {
   private val takeover = db.takeover()
   private val rides = db.rides()
   private val asks = db.asks()
 
-  override suspend fun take(cloud: CloudRecords, replace: Boolean): TakeResult = db.withTransaction {
+  override suspend fun take(cloud: CloudRecords, replace: Boolean, userName: String): TakeResult = db.withTransaction {
     if (takeover.activeRides() > 0) return@withTransaction TakeResult.Blocked(BlockReason.RIDE)
+    val owner = takeover.owner()
     if (replace) {
-      if (rides.summaryNow().unsent > 0 || waitingToSave()) return@withTransaction TakeResult.Blocked(BlockReason.UNSENT)
-      takeover.clearAll()
+      // Going back to the owner's own name keeps the records, so what is left to send is theirs to send (adr/0015).
+      if (owner != userName) {
+        nameChangeBlock(rideActive = false, unsent = rides.summaryNow().unsent, waitingToSave = waitingToSave())
+          ?.let { return@withTransaction TakeResult.Blocked(it) }
+        takeover.clearAll()
+      }
+    } else if (owner != null && owner != userName) {
+      return@withTransaction TakeResult.Blocked(BlockReason.OWNER)
     }
     val merged = cloud.mergeInto(device())
     write(merged)
+    takeover.setOwner(OwnerEntity(userName = userName))
     TakeResult.Done(merged.count)
   }
 
