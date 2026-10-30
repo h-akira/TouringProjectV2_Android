@@ -21,9 +21,11 @@ interface TakeoverStore {
    * Merges the cloud's records into the device's (slice 4 spec §6.1) in one transaction; with replace, all the device
    * keeps goes first (§6.4: another user name). Returns Done with how many records came in or went, or Blocked when
    * nothing was done because a ride is recording or paused or, with replace, something is left to send (US-E-06.008).
-   * A failure throws and changes nothing.
+   * A failure throws and changes nothing. userName is the name the records are read under: it becomes the owner of the
+   * device's records in the same transaction (adr/0015). With replace, going back to the owner's own name keeps the
+   * records and what is left to send; a read again (no replace) under a name that is not the owner's is Blocked(OWNER).
    */
-  suspend fun take(cloud: CloudRecords, replace: Boolean): TakeResult
+  suspend fun take(cloud: CloudRecords, replace: Boolean, userName: String): TakeResult
 }
 
 /**
@@ -123,7 +125,7 @@ class Takeover(
       withContext(NonCancellable) {
         save(peek.userName)
         val result = try {
-          store.take(CloudRecords(records, now()), replace = true)
+          store.take(CloudRecords(records, now()), replace = true, userName = peek.userName)
         } catch (e: Exception) {
           if (!putBack(from, save)) return@withContext TakeResult.Mismatched
           throw e
@@ -145,7 +147,7 @@ class Takeover(
 
   /** SC-14's クラウドから読み直す: the current name's records, merged with the device's. */
   fun reread(userName: String) = start(TakeOp.REREAD) {
-    store.take(CloudRecords(readAll(userName, null), now()), replace = false)
+    store.take(CloudRecords(readAll(userName, null), now()), replace = false, userName = userName)
   }
 
   private fun start(op: TakeOp, block: suspend () -> TakeResult) {

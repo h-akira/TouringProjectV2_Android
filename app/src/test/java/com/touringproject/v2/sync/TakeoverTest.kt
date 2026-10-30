@@ -65,11 +65,15 @@ private class Cloud(val scope: TestScope, val runIn: CoroutineScope = scope) {
   var switched = 0
   var passes = 0
 
+  /** The user name each take was asked for, in order. */
+  val takenUnder = mutableListOf<String>()
+
   val store = object : TakeoverStore {
-    override suspend fun take(cloud: CloudRecords, replace: Boolean): TakeResult {
+    override suspend fun take(cloud: CloudRecords, replace: Boolean, userName: String): TakeResult {
       takeGate?.await()
       if (failTake) throw IOException("disk full")
       taken += cloud.records to replace
+      takenUnder += userName
       return takes
     }
   }
@@ -100,6 +104,20 @@ private class Cloud(val scope: TestScope, val runIn: CoroutineScope = scope) {
 }
 
 class TakeoverTest {
+  // The records come in under the name that was read: the new name for a switch, the current one for a read again.
+  @Test
+  fun a_switch_takes_under_the_new_name_and_a_read_again_under_the_current_one() = runTest {
+    val c = Cloud(this)
+    c.pages["taro01"] = mapOf(null to CloudPage(emptyList(), null))
+    c.pages["rider01"] = mapOf(null to CloudPage(emptyList(), null))
+    c.switch(c.takeover.peek("taro01")!!)
+    runCurrent()
+    c.takeover.reread("rider01")
+    runCurrent()
+    assertEquals(listOf("taro01", "rider01"), c.takenUnder)
+    assertEquals(listOf(true, false), c.taken.map { it.second })
+  }
+
   @Test
   fun a_peek_tells_whether_the_name_has_records() = runTest {
     val c = Cloud(this)

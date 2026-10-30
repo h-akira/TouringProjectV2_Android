@@ -39,7 +39,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 // The calls below give the cloud's records and the time apart, as the store was once called.
-private suspend fun RoomTakeover.take(cloud: List<CloudRecord>, replace: Boolean, now: Long) = take(CloudRecords(cloud, now), replace)
+private suspend fun RoomTakeover.take(cloud: List<CloudRecord>, replace: Boolean, now: Long, userName: String = "rider01"): TakeResult =
+  take(CloudRecords(cloud, now), replace, userName)
 
 private const val T0 = "2026-10-22T01:00:00Z"
 private val T0_MS = epochMs(T0)
@@ -194,5 +195,54 @@ class RoomTakeoverTest {
     val ask = records.asks("r1").first().single()
     assertEquals("クラウドのメモ", ask.memo)
     assertEquals(0, records.summary.first().memos)
+  }
+
+  // The owner is written with the records, in one transaction (adr/0015).
+  @Test
+  fun a_change_of_name_writes_the_owner_with_the_records() = runBlocking {
+    takeover.take(cloud, replace = true, now = NOW, userName = "taro01")
+    assertEquals("taro01", db.takeover().owner())
+  }
+
+  @Test
+  fun a_blocked_change_leaves_the_owner_as_it_was() = runBlocking {
+    db.takeover().setOwner(OwnerEntity(userName = "rider01"))
+    rides.save(newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS).end(5_000, EndReason.MANUAL, 5_000))
+    assertEquals(TakeResult.Blocked(BlockReason.UNSENT), takeover.take(cloud, replace = true, now = NOW, userName = "taro01"))
+    assertEquals("rider01", db.takeover().owner())
+  }
+
+  // Review Focus 3: going back to the owner's name keeps the records and what is left to send.
+  @Test
+  fun going_back_to_the_owner_keeps_the_records_and_the_unsent() = runBlocking {
+    db.takeover().setOwner(OwnerEntity(userName = "rider01"))
+    // r0 is not in the cloud, so the merge leaves it as the device keeps it (r1 there is newer and would win).
+    rides.save(newRide("r0", "御殿場", 1_000, 7, 24 * HOUR_MS).end(5_000, EndReason.MANUAL, 5_000))
+    assertTrue(takeover.take(cloud, replace = true, now = NOW, userName = "rider01") is TakeResult.Done)
+    assertEquals("rider01", db.takeover().owner())
+    assertEquals(setOf("r0", "r1"), records.list.first().map { it.ride.id }.toSet())
+    assertEquals(1, sync.unsent().count { it.ride.id == "r0" })
+  }
+
+  // Review Focus 4: another name than the owner's replaces the records, so unsent ones still stop it.
+  @Test
+  fun another_name_still_stops_on_unsent_records() = runBlocking {
+    db.takeover().setOwner(OwnerEntity(userName = "rider01"))
+    rides.save(newRide("r1", "箱根", 1_000, 7, 24 * HOUR_MS).end(5_000, EndReason.MANUAL, 5_000))
+    assertEquals(TakeResult.Blocked(BlockReason.UNSENT), takeover.take(cloud, replace = true, now = NOW, userName = "hanako02"))
+    assertEquals(1, sync.unsent().size)
+  }
+
+  // A read again under a name that the records are not of would put another name's records among them.
+  @Test
+  fun a_read_again_under_another_name_is_blocked() = runBlocking {
+    db.takeover().setOwner(OwnerEntity(userName = "rider01"))
+    assertEquals(TakeResult.Blocked(BlockReason.OWNER), takeover.take(cloud, replace = false, now = NOW, userName = "taro01"))
+  }
+
+  @Test
+  fun a_read_again_on_a_device_without_an_owner_takes_the_name_as_the_owner() = runBlocking {
+    assertTrue(takeover.take(cloud, replace = false, now = NOW, userName = "rider01") is TakeResult.Done)
+    assertEquals("rider01", db.takeover().owner())
   }
 }

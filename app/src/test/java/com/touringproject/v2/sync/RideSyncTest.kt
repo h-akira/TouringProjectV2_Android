@@ -543,4 +543,21 @@ class RideSyncTest {
     assertEquals(1, w.retries)
     job.cancel()
   }
+
+  // R2-02: a pass that may not go makes no request, and does not ask for the client.
+  @Test
+  fun a_pass_that_may_not_go_asks_for_nothing() = runTest {
+    var asked = 0
+    val sync = RideSync(World().store, { asked += 1; null }, mayPass = { false }) { _, _ -> }
+    sync.pass()
+    assertEquals(0, asked)
+  }
+
+  @Test
+  fun a_pass_that_may_go_asks_for_the_client() = runTest {
+    var asked = 0
+    val sync = RideSync(World().store, { asked += 1; null }, mayPass = { true }) { _, _ -> }
+    sync.pass()
+    assertEquals(1, asked)
+  }
 }
