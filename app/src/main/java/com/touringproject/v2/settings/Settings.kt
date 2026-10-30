@@ -12,12 +12,14 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import kotlin.random.Random
 
 // Settings kept on the device. The connection key is stored separately (ApiKeyStore).
@@ -167,3 +169,20 @@ fun withRecentApp(recent: List<LaunchableApp>, app: LaunchableApp, max: Int = 5)
   (listOf(app) + recent.filter { it.packageName != app.packageName }).take(max)
 
 fun maskKey(key: String): String = if (key.length <= 4) "••••" else "••••••••${key.takeLast(4)}"
+
+/**
+ * The fields to changed from from, laid onto latest: a screen holds a copy that may be old, so what it did not touch
+ * is the newest value, not the copy's. The user name is always latest's: it changes through the repository's save only
+ * (slice 6 plan 5, R10-03).
+ */
+fun applyChange(from: Settings, to: Settings, latest: Settings): Settings {
+  fun fields(s: Settings): JsonObject = json.parseToJsonElement(encodeSettings(s)).jsonObject
+  val before = fields(from)
+  val after = fields(to)
+  val merged = buildJsonObject {
+    for ((key, value) in fields(latest)) {
+      put(key, if (key != "userName" && after[key] != before[key]) after.getValue(key) else value)
+    }
+  }
+  return decodeSettings(merged.toString()).first
+}

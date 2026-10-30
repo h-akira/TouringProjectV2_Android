@@ -205,7 +205,7 @@ fun AppUi(graph: AppGraph) {
               entry<RideKey> { key ->
                 RideDetailRoute(
                   graph.records, graph.rides, current,
-                  updateSettings = { next -> scope.launch { graph.settings.update(next) } },
+                  updateSettings = { next -> scope.launch { graph.settings.update(current, next) } },
                   rideId = key.rideId,
                   onBack = { tabs.back() },
                   onAsk = { tabs.push(AskKey(key.rideId, it)) },
@@ -266,9 +266,9 @@ fun AppUi(graph: AppGraph) {
                 HeadingCheckScreen(
                   view?.let { headingCheckUi(it, current.headingParams) },
                   current,
-                  { next -> scope.launch { graph.settings.update(next) } },
+                  { next -> scope.launch { graph.settings.update(current, next) } },
                   onReset = {
-                    scope.launch { graph.settings.update(current.withHeadingDefaults()) }
+                    scope.launch { graph.settings.update(current, current.withHeadingDefaults()) }
                     Toast.makeText(context, "既定値に戻しました", Toast.LENGTH_SHORT).show()
                   },
                   modifier = Modifier.safeDrawingPadding(),
@@ -277,9 +277,9 @@ fun AppUi(graph: AppGraph) {
               entry<RecordingSettingsKey> {
                 RecordingSettingsScreen(
                   current,
-                  { next -> scope.launch { graph.settings.update(next) } },
+                  { next -> scope.launch { graph.settings.update(current, next) } },
                   onReset = {
-                    scope.launch { graph.settings.update(current.withRecordingDefaults()) }
+                    scope.launch { graph.settings.update(current, current.withRecordingDefaults()) }
                     Toast.makeText(context, "既定値に戻しました", Toast.LENGTH_SHORT).show()
                   },
                   modifier = Modifier.safeDrawingPadding(),
@@ -312,10 +312,10 @@ fun AppUi(graph: AppGraph) {
               }
               entry<RideRecordingKey> {
                 // AppGraph moves the recording ride's deadline when the setting changes (US-C-08.005, Android #33).
-                RideRecordingScreen(current, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
+                RideRecordingScreen(current, { next -> scope.launch { graph.settings.update(current, next) } }, Modifier.safeDrawingPadding())
               }
               entry<VolumeKey> {
-                VolumeScreen(current, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
+                VolumeScreen(current, { next -> scope.launch { graph.settings.update(current, next) } }, Modifier.safeDrawingPadding())
               }
               entry<RecordingsKey> {
                 val check = graph.recordingCheck
@@ -367,7 +367,7 @@ fun AppUi(graph: AppGraph) {
               entry<ReturnAppKey> {
                 var apps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }
                 LaunchedEffect(Unit) { apps = graph.launcher.launchableApps() }
-                ReturnAppScreen(current, apps, { next -> scope.launch { graph.settings.update(next) } }, Modifier.safeDrawingPadding())
+                ReturnAppScreen(current, apps, { next -> scope.launch { graph.settings.update(current, next) } }, Modifier.safeDrawingPadding())
               }
             }
           // Each tab keeps the saved state of its screens (typed text, scroll) while another tab is shown (Android #34).
